@@ -77,7 +77,8 @@ head unit, and the Store's publishing guide asks for a prefix of one's own. Each
 `<id>.png` icon at the repository root, which the release carries for the Store.
 
 A push to `main` that changes `packages/` publishes a release straight away (no draft), so the Store
-offers it at once. To withdraw a release, run the **Retire Releases** workflow: it marks the release
-a pre-release, which the Store doesn't offer.
+offers it at once, and every older release becomes a pre-release (`tools/retire_older_releases.sh`):
+the Store reads every published release, so an app renamed or moved would otherwise show twice. To
+withdraw a release by hand, run the **Retire Releases** workflow.
 
 **Kit**: `kit/` is the [iDrive 7 custom apps](https://github.com/cauliflowermossgrape/idrive7-apps) kit (MIT), with the packaging changes from bmw-apps.

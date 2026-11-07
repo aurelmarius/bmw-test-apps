@@ -69,3 +69,12 @@ jobs:
           fi
           
           echo "Release $TAG published: the Store offers it now."
+
+      # the Store reads every published release: the older ones become pre-releases, so an app renamed
+      # or moved never shows twice (a release published with this workflow's token starts no other workflow)
+      - name: Retire the older releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.prep.outputs.tag }}
+        run: tools/retire_older_releases.sh "$TAG"
