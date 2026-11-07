@@ -1,0 +1,4 @@
+release_notes.md
+__pycache__/
+*.pyc
+dist/

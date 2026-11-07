@@ -1,0 +1,23 @@
+{
+  "schema": 2,
+  "name": "Aurel Marius BMW Test Apps",
+  "components": [
+    {
+      "id": "aurelm_wheel_heat",
+      "kind": "app",
+      "version": "1.0.1",
+      "title": "Wheel Heating",
+      "description": "Steering wheel heating on/off from a favourite button: for a heated iDrive 8 (LCI) steering wheel without its own button, fitted to an iDrive 7 car",
+      "mguHmi": [
+        "ID7"
+      ],
+      "artifact": {
+        "name": "aurelm_wheel_heat@1.0.1.tgz",
+        "size": 559965,
+        "sha256": "4321e687b1644c6bf5508493db5497af7f6547d3ad3c417722f43288c2bc9cbf",
+        "url": "packages/aurelm_wheel_heat@1.0.1.tgz"
+      },
+      "uninstallable": true
+    }
+  ]
+}
