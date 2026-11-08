@@ -24,6 +24,28 @@
       "uninstallable": true
     },
     {
+      "id": "aurelm-emby",
+      "kind": "tool",
+      "version": "0.1.0",
+      "title": "Emby cast service",
+      "description": "For the app Emby: the head unit as a cast target in the Emby phone app (Emby's remote control, as Kodi's Emby add-on). Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code); keeps only the access token. Its internet goes through mgu-uplink, as uid 13101 only.",
+      "author": "aurelmarius",
+      "mguHmi": [
+        "ID7"
+      ],
+      "artifact": {
+        "name": "aurelm-emby@0.1.0.tgz",
+        "size": 152193,
+        "sha256": "78941cefb9431decbe9861ac9018c559f5237a2708144d84685a88f98a41e47f",
+        "url": "packages/aurelm-emby@0.1.0.tgz"
+      },
+      "requires": {
+        "mgu-deploy": "0.7.0",
+        "mgu-uplink": "0.7.0"
+      },
+      "uninstallable": true
+    },
+    {
       "id": "aurelm_airplay_probe",
       "kind": "app",
       "version": "0.8.2",
@@ -43,6 +65,28 @@
       "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0",
       "requires": {
         "aurelm-airplay-probe": "0.8.2"
+      }
+    },
+    {
+      "id": "aurelm_emby",
+      "kind": "app",
+      "version": "0.1.0",
+      "title": "Emby",
+      "description": "The head unit as a cast target for the Emby phone app: sign in once from the phone (QR code), then choose \"BMW iDrive\" in Emby's cast menu. Step 1: the connection and the commands; playback comes next. Needs the Emby cast service.",
+      "mguHmi": [
+        "ID7"
+      ],
+      "artifact": {
+        "name": "aurelm_emby@0.1.0.tgz",
+        "size": 568830,
+        "sha256": "c755baca6f93544ad06c8caae647a23d1569164be51b5f7c380f21ef14679eb9",
+        "url": "packages/aurelm_emby@0.1.0.tgz"
+      },
+      "uninstallable": true,
+      "icon": "aurelm_emby.png",
+      "iconSha256": "9682cbd70243b5b0193c54d589a11a38ee4b81eaec07326a666eed140ce39918",
+      "requires": {
+        "aurelm-emby": "0.1.0"
       }
     }
   ]
