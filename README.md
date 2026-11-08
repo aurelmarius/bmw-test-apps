@@ -51,6 +51,8 @@ The app and its root service announce a test receiver, **BMW iDrive test**, on t
    - **B. iPhone on the car's network:** wireless CarPlay connected.
 3. In the app press **Start test**. On the iPhone: Control Center -> **Screen Mirroring**; if **BMW iDrive test** shows up, tap it.
 4. **PASS** when the iPhone connected (it then says it could not connect: expected). Otherwise the first step that is not green says where it stopped. **Take a photo of the screen when you report a test.**
+
+**Stage 1 of the receiver ("Start receiver"):** UxPlay's AirPlay protocol on the head unit, presenting itself as an Apple TV (iOS 27 sends the mirrored picture during CarPlay only to one), takes the iPhone's screen mirroring and **counts the picture it gets: nothing is shown yet**. With wireless CarPlay connected: **Start receiver**, then on the iPhone Control Center → Screen Mirroring → **BMW iDrive**. **PASS** when the picture reaches the head unit (size, frames per second); "sound only" means iOS kept the picture back. The iPhone shows its screen as mirrored while nothing appears in the car: expected at this stage.
 5. Removing **AirPlay Test** in the Store takes the service with it; nothing stays on the head unit ([what goes, and how](native/aurelm-airplay-probe/README.md#removal-leaves-nothing)). The service never runs at boot: only while the app is open, and 10 minutes after.
 
 ![AirPlay Test - waiting for the iPhone](docs/screenshots/aurelm_airplay_probe-waiting.png)

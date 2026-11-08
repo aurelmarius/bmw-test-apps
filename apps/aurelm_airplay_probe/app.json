@@ -1,8 +1,8 @@
 {
   "id": "aurelm_airplay_probe",
   "title": "AirPlay Test",
-  "description": "Network test for a future AirPlay receiver: can an iPhone find and reach the head unit? Announces a test receiver and shows what the iPhone does. Needs the AirPlay network test service.",
-  "version": "0.5.0",
+  "description": "AirPlay receiver for the head unit, in stages: the network test (can an iPhone find and reach the head unit?) and stage 1, UxPlay's protocol counting the mirrored picture during CarPlay. Needs the AirPlay test service.",
+  "version": "0.6.0",
   "vendor": "custom",
   "loggingId": "OA9X",
   "iconGlyph": "AP",
@@ -17,8 +17,12 @@
           "Start test"
         ],
         [
+          "BTN_RX",
+          "Start receiver"
+        ],
+        [
           "BTN_STOP",
-          "Stop test"
+          "Stop"
         ],
         [
           "BTN_SETTINGS",
@@ -86,6 +90,6 @@
     }
   ],
   "requires": {
-    "aurelm-airplay-probe": "0.5.0"
+    "aurelm-airplay-probe": "0.6.0"
   }
 }

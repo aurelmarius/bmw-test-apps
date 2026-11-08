@@ -2,10 +2,12 @@
 /**
  * AirPlay Test - can an iPhone find and reach this head unit as an AirPlay receiver?
  *
- * The screen of the AirPlay network test service (native/aurelm-airplay-probe, a root tool): "Start test"
- * has the service announce a test receiver ("BMW iDrive test") on the Wi-Fi-side networks for 15
- * minutes; the page shows, step by step, what got through: the network, the firewall, mDNS, the
- * iPhone's AirPlay query and its connection. On the iPhone: Control Center > Screen Mirroring.
+ * The screen of the AirPlay network test service (native/aurelm-airplay-probe, a root tool), for 15 minutes:
+ *   "Start test"      the network test: a test receiver ("BMW iDrive test") is announced; the page shows the
+ *                     network, the firewall, mDNS, the iPhone's AirPlay query and its connection;
+ *   "Start receiver"  stage 1 of the receiver: UxPlay's protocol ("BMW iDrive") takes the iPhone's screen
+ *                     mirroring and counts the picture it gets (nothing is shown yet).
+ * On the iPhone: Control Center > Screen Mirroring.
  *
  * Talks to the service over /run/aurelm-airplay-probe.sock (a JSON object per line).
  */
@@ -19,7 +21,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.5.0';
+const SERVICE_VERSION = '0.6.0';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -66,8 +68,32 @@ const ago = (t, now) => { const s = Math.max(0, Math.round((now - t) / 1000)); r
  * The steps, each { label, state: 'ok'|'wait'|'bad'|'off', detail }, from a status (null: no service).
  * Exported for the tests and the screenshots.
  */
+/** the receiver test's steps (stage 1: does the mirrored picture reach the head unit?) */
+function rxSteps(s) {
+    const r = s.rx || {}, fw = s.fw || {}, st = r.stream || {};
+    const used = (s.ifaces || []).filter((i) => i.used);
+    const off = !s.active;
+    const gotVideo = !!(r.video && st.frames > 0);
+    return [
+        { label: 'Service', state: 'ok', detail: 'version ' + s.version + (s.active ? ', receiver test running' : ', idle') },
+        { label: 'Wi-Fi network', state: used.length ? 'ok' : off ? 'off' : 'bad',
+            detail: used.length ? used.map((i) => i.name + ' ' + i.ip + ' (' + i.kind + ')').join(', ') : 'none: connect the iPhone with wireless CarPlay' },
+        { label: 'Firewall', state: fw.state === 'open' ? 'ok' : fw.state === 'failed' ? 'bad' : off ? 'off' : 'wait',
+            detail: fw.state === 'open' ? (fw.chains || []).length + ' chains open for tcp/udp ' + (r.ports || []).join(', ') + ', udp 5353' : fw.state === 'failed' ? fw.error : fw.state || '' },
+        { label: 'Receiver', state: r.running ? 'ok' : r.error ? 'bad' : off ? 'off' : 'wait',
+            detail: r.running ? '"' + r.name + '" on ' + r.iface + ' ' + r.ip + (r.starts > 1 ? ', started ' + r.starts + ' times' : '') : r.error || (r.exit ? 'ended' : '') },
+        { label: 'iPhone connected', state: r.client ? 'ok' : off ? 'off' : 'wait',
+            detail: r.client ? (r.client.name || '?') + ' (' + (r.client.model || '?') + ')' : 'Screen Mirroring > ' + (r.name || 'BMW iDrive') },
+        { label: 'Picture', state: gotVideo ? 'ok' : r.client && r.audio ? 'bad' : off ? 'off' : 'wait',
+            detail: r.video ? r.video.codec + ' ' + r.video.w + 'x' + r.video.h + (st.frames ? ', ' + st.frames + ' frames, ' + st.idr + ' keyframes' : '') : r.client && r.audio ? 'none: the iPhone sends sound only' : 'not yet' },
+        { label: 'Stream', state: st.fps > 0 ? 'ok' : gotVideo ? 'off' : off ? 'off' : 'wait',
+            detail: st.fps > 0 ? st.fps + ' fps, ' + Math.round(st.kbps) + ' kbit/s' + (r.audio ? ', sound ' + st.audio + ' packets' : '') : gotVideo ? 'stopped' : r.audio ? 'sound only, ' + st.audio + ' packets' : 'not yet' },
+    ];
+}
+
 function steps(s) {
     if (!s) return [{ label: 'Service', state: 'bad', detail: 'not answering: install "AirPlay network test service" from the Store' }];
+    if (s.mode === 'receiver') return rxSteps(s);
     const used = (s.ifaces || []).filter((i) => i.used);
     const off = !s.active && !(s.tcp && s.tcp.connections);
     const m = s.mdns || {}, tcp = s.tcp || {}, fw = s.fw || {};
@@ -89,7 +115,8 @@ function steps(s) {
     ];
 }
 
-const VERDICT_COLOR = { connected: GREEN, asked: AMBER, 'heard-phone': AMBER, waiting: AMBER, idle: null };
+const VERDICT_COLOR = { connected: GREEN, asked: AMBER, 'heard-phone': AMBER, waiting: AMBER, idle: null,
+    'rx-video': GREEN, 'rx-connected': AMBER, 'rx-waiting': AMBER };
 
 mgu.run({
     async start(ctx) {
@@ -111,15 +138,16 @@ mgu.run({
                 }
             } finally { polling = false; }
         }
-        async function command(cmd, label) {
+        async function command(cmd, label, extra) {
             busy = label;
-            const r = await ask(cmd, cmd === 'start' ? { minutes: MINUTES } : null);
+            const r = await ask(cmd, cmd === 'start' ? Object.assign({ minutes: MINUTES }, extra || {}) : null);
             busy = null;
             if (r) st = r;
             log.info('airplay test: ' + cmd + ' -> ' + (r ? r.verdict.code : 'no service'));
             return render();
         }
         ui.onClick('BTN_START', () => command('start', 'Starting...'));
+        ui.onClick('BTN_RX', () => command('start', 'Starting the receiver...', { mode: 'receiver' }));
         ui.onClick('BTN_STOP', () => command('stop', 'Stopping...'));
 
         function render() {

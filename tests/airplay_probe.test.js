@@ -278,6 +278,106 @@ test('sockgroup: the socket gets the app\'s own group, root only without the app
     assert.strictEqual(fs.statSync(sock).mode & 0o777, 0o660);
 });
 
+/* ---- the receiver test (stage 1) ---- */
+function fakeReceiver(dir) {
+    // prints what uxplay-mgu's renderer prints for an iPhone that mirrors, and its arguments and env
+    const f = path.join(dir, 'fake-uxplay');
+    fs.writeFileSync(f, '#!' + process.execPath + '\n' + [
+        "const out = (j) => process.stdout.write('MGU ' + JSON.stringify(j) + '\\n');",
+        "console.log('args ' + process.argv.slice(2).join(' ') + ' ip ' + process.env.UXPLAY_MDNS_IPV4 + ' v6off ' + process.env.UXPLAY_MDNS_NO_IPV6);",
+        "console.log('*** ERROR:   3 seconds since last client feedback request (expected every two seconds); client may be offline');",
+        "setTimeout(() => out({ ev: 'client', model: 'iPhone18,2', name: 'Test \"iPhone' }), 100);",
+        "setTimeout(() => out({ ev: 'video', codec: 'h264', w: 498, h: 1080, sw: 498, sh: 1080 }), 200);",
+        "setTimeout(() => out({ ev: 'start' }), 250);",
+        "setTimeout(() => out({ ev: 'stats', frames: 60, fps: 30, kbps: 4200, idr: 1, sps: 1, audio: 10 }), 400);",
+        "process.on('SIGTERM', () => { out({ ev: 'stop', frames: 60 }); process.exit(0); });",
+        "setInterval(() => {}, 1000);",
+    ].join('\n'));
+    fs.chmodSync(f, 0o755);
+    return f;
+}
+
+test('receiver: started with its address and ports, its reports read, stopped', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rx-'));
+    fs.chmodSync(tmp, 0o755);   // run as root, the receiver runs as nobody: it must reach its binary
+    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: fakeReceiver(tmp), rxName: 'BMW iDrive', rxUid: null });
+    try {
+        const s0 = await probe.start(1, 'receiver');
+        assert.strictEqual(s0.mode, 'receiver');
+        assert.strictEqual(s0.rx.running, true);
+        assert.strictEqual(s0.rx.iface, 'lo');
+        await new Promise((r) => setTimeout(r, 900));
+        const s = probe.status();
+        assert.strictEqual(s.rx.client.model, 'iPhone18,2');
+        assert.strictEqual(s.rx.video.w, 498);
+        assert.strictEqual(s.rx.stream.fps, 30);
+        assert.strictEqual(s.verdict.code, 'rx-video');
+        assert.ok(/PASS: Test .iPhone mirrors 498x1080 at 30 fps/.test(s.verdict.text), s.verdict.text);
+        const args = s.rx.lines.find((l) => / args /.test(l));
+        assert.ok(/-n BMW iDrive -nh -p 7300 -m [0-9a-f:]{17} ip 127\.0\.0\.1 v6off 1/.test(args), args);
+        // UxPlay's per-second complaint is not kept
+        assert.ok(!s.rx.lines.some((l) => /client feedback/.test(l)));
+        const s2 = await probe.stop('test');
+        assert.strictEqual(s2.active, false);
+        // what the receiver got stays on the page after the test
+        assert.strictEqual(s2.rx.running, false);
+        assert.strictEqual(s2.verdict.code, 'rx-video');
+    } finally { await probe.stop('finally'); }
+});
+
+test('receiver: one that cannot start is reported, and the test still stops', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rxbad-'));
+    const bad = path.join(tmp, 'not-executable');
+    fs.writeFileSync(bad, 'nothing');
+    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: bad });
+    await probe.start(1, 'receiver');
+    await new Promise((r) => setTimeout(r, 300));
+    const s = probe.status();
+    assert.strictEqual(s.rx.running, false);
+    assert.ok(/start: /.test(s.rx.error), s.rx.error);
+    assert.strictEqual(s.verdict.code, 'rx-failed');
+    const t0 = Date.now();
+    await probe.stop('test');
+    assert.ok(Date.now() - t0 < 2000);
+});
+
+test('receiver: the verdict while waiting, with sound only, and when it failed', () => {
+    const base = (rx) => ({ active: true, mode: 'receiver', ifaces: [{ name: 'wlan_bridge', used: true }], fw: { state: 'open' }, mdns: {}, tcp: {}, rx });
+    assert.strictEqual(P.verdict(base({ running: true, name: 'BMW iDrive', iface: 'wlan_bridge', stream: {} })).code, 'rx-waiting');
+    assert.strictEqual(P.verdict(base({ running: true, client: { name: 'X' }, stream: {} })).code, 'rx-connected');
+    assert.strictEqual(P.verdict(base({ running: true, client: { name: 'X' }, audio: { ct: 8 }, stream: { frames: 0 } })).code, 'rx-audio-only');
+    assert.strictEqual(P.verdict(base({ running: false, error: 'the receiver exited (code 1)', stream: {} })).code, 'rx-failed');
+});
+
+test('nft: the receiver test opens tcp and udp 7300-7302, out only for its uid', () => {
+    const r = nft.rulesFor('output', 'wlan_bridge', [7300, 7301, 7302], { udpPorts: [7300, 7301, 7302], uid: 65534 });
+    assert.deepStrictEqual(r, [
+        'oifname "wlan_bridge" tcp sport { 7300, 7301, 7302 } accept',
+        'oifname "wlan_bridge" meta skuid 65534 udp sport { 7300, 7301, 7302 } accept',
+        'oifname "wlan_bridge" meta skuid 65534 udp dport 5353 accept',
+        'oifname "wlan_bridge" meta skuid 65534 udp sport 5353 accept',
+    ]);
+    assert.strictEqual(nft.rulesFor('input', 'wlan_bridge', [7300], { udpPorts: [7300] }).length, 3);
+});
+
+const REAL = path.join(__dirname, '..', 'native', 'uxplay-mgu', 'build', 'uxplay-mgu');
+test('receiver: the real uxplay-mgu runs, listens on 7301 and ends with the test (skipped when not built)', async () => {
+    if (!fs.existsSync(REAL)) { console.log('     (uxplay-mgu not built: skipped)'); return; }
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rxreal-'));
+    fs.chmodSync(tmp, 0o755);
+    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: REAL, rxName: 'BMW iDrive test rx', rxUid: null });
+    try {
+        await probe.start(1, 'receiver');
+        await new Promise((r) => setTimeout(r, 1500));
+        const s = probe.status();
+        assert.strictEqual(s.rx.running, true, JSON.stringify(s.rx));
+        await new Promise((res, rej) => { const c = net.connect(7301, '127.0.0.1', () => { c.destroy(); res(); }); c.on('error', rej); });
+        const pid = s.rx.pid;
+        await probe.stop('test');
+        assert.throws(() => process.kill(pid, 0));   // gone
+    } finally { await probe.stop('finally'); }
+});
+
 (async () => {
     let failed = 0;
     for (const t of tests) {

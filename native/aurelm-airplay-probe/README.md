@@ -39,6 +39,22 @@ test on) asks it once to end (`{"cmd":"exit"}`): it answers, exits 0, and the so
 at the next request. Found in the car (2026-11-08): 0.4.0's files were installed while 0.3.0 kept running,
 because the app polled it every second from the background.
 
+## The receiver test (stage 1)
+
+"Start receiver" in the app (`{"cmd":"start","mode":"receiver"}`) runs `uxplay-mgu` (`native/uxplay-mgu`:
+UxPlay's protocol, as `AppleTV5,4` / `366.0`, with a renderer that only counts) for 15 minutes:
+
+- as **nobody**, a child of this service (its limits: no core dump, nice 10, 50% CPU, 160 MiB; `uxplay-mgu`
+  is on the crash handler's list too), started again at most 3 times when it exits;
+- announced as **BMW iDrive** on one address: the car's Wi-Fi (`wlan_bridge`, wireless CarPlay) first, else
+  the iPhone's hotspot; started again when that address changes;
+- the firewall opens tcp and udp 7300-7302 and mDNS on the Wi-Fi interfaces, out only for nobody.
+
+The page shows the receiver, the iPhone that connected, the picture (codec, size, frames, keyframes) and the
+stream (frames per second, bit rate, sound packets). **PASS** (`rx-video`) is the picture reaching the head
+unit; `rx-audio-only` is an iPhone that sends sound and no picture (what iOS does during CarPlay for a
+receiver it does not take for an Apple TV).
+
 ## Removal leaves nothing
 
 | What | Gone by |
@@ -85,6 +101,8 @@ What the Store's tools learned the hard way (mgu-store, waze-on-cluster), and ho
 | `dns.js`, `airplay.js` | DNS codec, the AirPlay records |
 | `nft.js` | the firewall rules |
 | `check.js` | the deploy tool's check: the service answers on its socket |
+| `receiver.js` | the receiver test: runs `uxplay-mgu`, reads its reports |
+| `uxplay-mgu`, `UXPLAY-LICENSE` | the receiver (built by `native/uxplay-mgu/build.sh`) and UxPlay's license |
 | `cleanup.js` | `ExecStopPost` and `deactivate`: removes every rule of the test, never fails |
 | `sockgroup.js` | the control socket's group: the app's own, never `tm_oap_app` |
 

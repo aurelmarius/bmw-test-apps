@@ -31,9 +31,10 @@ const dgram = require('dgram');
 const dns = require('./dns');
 const ap = require('./airplay');
 const nft = require('./nft');
+const rxm = require('./receiver');
 const sockgroup = require('./sockgroup');
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const MDNS_GROUP = '224.0.0.251';
 const QUERY_NAMES = ['_airplay._tcp.local', '_raop._tcp.local', '_companion-link._tcp.local', '_apple-mobdev2._tcp.local'];
 
@@ -104,7 +105,24 @@ function portHolders(port, proto) {
  * { code, text } from a status. Codes, best last:
  *   idle, no-iface, mdns-failed, firewall-failed, listening, waiting, heard-phone, asked, connected
  */
+/** the receiver test's verdict: rx-video (PASS), rx-audio-only, rx-connected, rx-waiting, rx-failed */
+function rxVerdict(s) {
+    const r = s.rx || {};
+    const v = r.video, c = r.client, fresh = r.stream && r.stream.fps > 0;
+    if (v && r.stream && r.stream.frames > 0) {
+        return { code: 'rx-video', text: 'PASS: ' + ((c && c.name) || 'the iPhone') + ' mirrors ' + v.w + 'x' + v.h + (fresh ? ' at ' + r.stream.fps + ' fps' : '') + ': the picture reaches the head unit' };
+    }
+    if (!s.active) return { code: 'idle', text: 'Not running. Press "Start receiver" (or "Start test" for the network test).' };
+    if (!s.ifaces.filter((i) => i.used).length) return { code: 'no-iface', text: 'No Wi-Fi network: connect the iPhone with wireless CarPlay, or the head unit to the iPhone hotspot' };
+    if (r.error && !r.running) return { code: 'rx-failed', text: 'The receiver stopped: ' + r.error };
+    if (s.fw.state === 'failed') return { code: 'firewall-failed', text: 'Firewall rules failed: ' + (s.fw.error || '') };
+    if (c && r.audio) return { code: 'rx-audio-only', text: ((c && c.name) || 'The iPhone') + ' connected but sends sound only, no picture (the CarPlay restriction?)' };
+    if (c) return { code: 'rx-connected', text: ((c && c.name) || 'The iPhone') + ' connected, waiting for the picture' };
+    return { code: 'rx-waiting', text: 'Receiver "' + (r.name || 'BMW iDrive') + '" on ' + (r.iface || '?') + '. On the iPhone: Control Center > Screen Mirroring > ' + (r.name || 'BMW iDrive') };
+}
+
 function verdict(s) {
+    if (s.mode === 'receiver') return rxVerdict(s);
     if (s.tcp.connections > 0) {
         const c = s.tcp.last || {};
         return { code: 'connected', text: 'PASS: ' + (c.ip || 'a device') + ' found the receiver and connected to it (' + (c.request || 'no request') + ')' };
@@ -130,7 +148,8 @@ function verdict(s) {
  *         only ([iface names] or null), ignoreSelf (true), loopback (false: our multicast not back to this host), name, log, onChange, onStop, now }
  */
 function createProbe(opts) {
-    const o = Object.assign({ ports: [7300, 7350, 7400, 47000], mdnsPort: 5353, nft: 'nft', only: null, ignoreSelf: true, name: 'BMW iDrive test' }, opts || {});
+    const o = Object.assign({ ports: [7300, 7350, 7400, 47000], mdnsPort: 5353, nft: 'nft', only: null, ignoreSelf: true, name: 'BMW iDrive test',
+        rxBin: path.join(__dirname, 'uxplay-mgu'), rxName: 'BMW iDrive', rxUid: 65534 }, opts || {});
     const now = o.now || Date.now;
     const lines = [];
     const log = (s) => {
@@ -142,6 +161,7 @@ function createProbe(opts) {
 
     const id = loadIdentity();
     const st = freshState();
+    const rx = rxm.createReceiver({ bin: o.rxBin, uid: o.rxUid, gid: o.rxUid, home: o.stateDir ? path.join(o.stateDir, 'rx') : null, log, now, onChange: () => { if (o.onChange) o.onChange(); } });
     let sock = null, servers = [], timers = [], endT = null, sendQ = Promise.resolve();
 
     function loadIdentity() {
@@ -156,7 +176,7 @@ function createProbe(opts) {
 
     function freshState() {
         return {
-            active: false, startedAt: null, endsAt: null, ifaces: [],
+            active: false, mode: 'probe', startedAt: null, endsAt: null, ifaces: [],
             mdns: { mode: 'off', error: null, holders: [], packets: 0, queries: 0, airplayQueries: 0, answered: 0, announced: 0, lastAirplayQuery: null, peers: [] },
             tcp: { port: null, listening: [], busy: [], error: null, connections: 0, last: null, requests: [] },
             fw: { state: 'off', error: null, chains: [], removed: 0 },
@@ -167,8 +187,13 @@ function createProbe(opts) {
         const s = {
             v: 1, version: VERSION, now: now(), name: id.name, deviceid: id.deviceid,
             active: st.active, startedAt: st.startedAt, endsAt: st.endsAt, ifaces: st.ifaces.length ? st.ifaces : interfaces(o.only),
-            mdns: st.mdns, tcp: st.tcp, fw: st.fw, log: lines.slice(-30),
+            mdns: st.mdns, tcp: st.tcp, fw: st.fw, log: lines.slice(-30), mode: st.mode,
         };
+        if (st.mode === 'receiver') {
+            const r = rx.state();
+            s.rx = { name: o.rxName, running: r.running, pid: r.pid, starts: r.starts, error: r.error, exit: r.exit, ip: r.ip, iface: r.iface,
+                client: r.client, video: r.video, videoRunning: r.videoRunning, audio: r.audio, stream: r.stream, ports: rxm.PORTS, lines: r.lines.slice(-15) };
+        }
         s.verdict = verdict(s);
         return s;
     }
@@ -183,6 +208,13 @@ function createProbe(opts) {
         const before = usedIfaces().map((i) => i.name + '=' + i.ip).join(',');
         st.ifaces = interfaces(o.only);
         const after = usedIfaces().map((i) => i.name + '=' + i.ip).join(',');
+        if (after !== before && st.mode === 'receiver') {
+            log('interfaces: ' + (after || 'none'));
+            firewall();
+            const t = rxTarget(), r = rx.state();
+            if (t && (!r.ip || r.ip !== t.ip)) { rx.stop().then(() => { if (st.active) rx.start(t); }); }
+            return;
+        }
         if (after !== before) {
             log('interfaces: ' + (after || 'none') + (st.ifaces.filter((i) => !i.used).length ? '; not used: ' + st.ifaces.filter((i) => !i.used).map((i) => i.name + '=' + i.ip).join(',') : ''));
             joinGroups();
@@ -194,7 +226,9 @@ function createProbe(opts) {
         if (!o.nft) { st.fw.state = 'skipped'; return; }
         const names = usedIfaces().map((i) => i.name).filter((n, i, a) => a.indexOf(n) === i);
         try {
-            const res = nft.apply(names, { nft: o.nft, tcpPorts: st.tcp.listening });
+            const res = st.mode === 'receiver'
+                ? nft.apply(names, { nft: o.nft, tcpPorts: rxm.PORTS, udpPorts: rxm.PORTS, uid: o.rxUid != null ? o.rxUid : 0 })
+                : nft.apply(names, { nft: o.nft, tcpPorts: st.tcp.listening });
             st.fw.chains = res.map((r) => ({ chain: r.chain, ok: r.ok, rules: r.rules, error: r.error }));
             const bad = res.filter((r) => !r.ok);
             st.fw.state = bad.length ? 'failed' : res.length ? 'open' : 'no-chains';
@@ -355,14 +389,47 @@ function createProbe(opts) {
         }
     }
 
+    /* ----- the receiver test ----- */
+    /** where the receiver announces itself: the car's Wi-Fi first, then the iPhone's hotspot */
+    function rxTarget() {
+        const u = usedIfaces();
+        const order = ['car-wifi', 'iphone-hotspot', 'uplink', 'wifi'];
+        for (let k = 0; k < order.length; k++) {
+            const i = u.find((x) => x.kind === order[k]);
+            if (i) return { name: o.rxName, deviceid: id.deviceid, ip: i.ip, iface: i.name };
+        }
+        // an interface given by name (PROBE_IFACES, the tests): whatever its kind
+        return u.length ? { name: o.rxName, deviceid: id.deviceid, ip: u[0].ip, iface: u[0].name } : null;
+    }
+    async function startReceiver() {
+        firewall();
+        const t = rxTarget();
+        if (t) rx.start(t); else log('receiver: no Wi-Fi interface to announce on');
+        every(3000, rescan);
+        if (o.nft) every(5000, firewall);
+        if (o.onChange) every(1000, o.onChange);
+    }
+
     /* ----- the test ----- */
     function every(ms, f) { const t = setInterval(() => { try { f(); } catch (e) { log(e.message); } }, ms); if (t.unref) t.unref(); timers.push(t); }
 
-    async function start(minutes) {
+    async function start(minutes, mode) {
         const m = Math.max(1, Math.min(60, Number(minutes) || 15));
+        const md = mode === 'receiver' ? 'receiver' : 'probe';
+        if (st.active && st.mode !== md) await stop('switching to the ' + (md === 'receiver' ? 'receiver' : 'network') + ' test');
         if (st.active) { st.endsAt = now() + m * 60000; resetEnd(); log('test extended to ' + m + ' min'); return status(); }
         Object.assign(st, freshState());
+        st.mode = md;
         st.active = true; st.startedAt = now(); st.endsAt = now() + m * 60000;
+        if (md === 'receiver') {
+            log('receiver test started (' + m + ' min), "' + o.rxName + '" ' + id.deviceid);
+            if (o.nft) { const n = nft.remove({ nft: o.nft }); if (n) log('firewall: removed ' + n + ' old rules'); }
+            st.ifaces = interfaces(o.only);
+            log('interfaces: ' + (usedIfaces().map((i) => i.name + '=' + i.ip + ' (' + i.kind + ')').join(', ') || 'none'));
+            await startReceiver();
+            resetEnd();
+            return status();
+        }
         log('test started (' + m + ' min), receiver "' + id.name + '" ' + id.deviceid);
         if (o.nft) { const n = nft.remove({ nft: o.nft }); if (n) log('firewall: removed ' + n + ' old rules'); }
         st.ifaces = interfaces(o.only);
@@ -395,6 +462,7 @@ function createProbe(opts) {
         if (endT) { clearTimeout(endT); endT = null; }
         timers.forEach((t) => { clearInterval(t); clearTimeout(t); });
         timers = [];
+        if (st.mode === 'receiver') await rx.stop();
         try { await announce(true); } catch (e) { /* goodbye is best effort */ }
         await sendQ;
         if (sock) { try { sock.close(); } catch (e) { /* closed */ } sock = null; }
@@ -409,7 +477,7 @@ function createProbe(opts) {
         return status();
     }
     /** for exit: the firewall as the unit had it, synchronously */
-    function cleanupSync() { if (o.nft) { try { nft.remove({ nft: o.nft }); } catch (e) { /* best effort */ } } }
+    function cleanupSync() { rx.killSync(); if (o.nft) { try { nft.remove({ nft: o.nft }); } catch (e) { /* best effort */ } } }
 
     return { start, stop, status, cleanupSync, identity: id };
 }
@@ -440,7 +508,7 @@ function serveControl(probe, sockPath, log, onRequest, onExit) {
                     onExit();
                     return;
                 }
-                const p = m.cmd === 'start' ? probe.start(m.minutes) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
+                const p = m.cmd === 'start' ? probe.start(m.minutes, m.mode) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
                 Promise.resolve(p).then((s) => { try { c.write(JSON.stringify(s) + '\n'); } catch (e) { /* gone */ } }, (e) => { try { c.write(JSON.stringify({ error: String(e.message || e) }) + '\n'); } catch (x) { /* gone */ } });
             }
         });

@@ -15,6 +15,7 @@ StartLimitBurst=10
 Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PROBE_STATE=/var/opt/aurelm-airplay-probe/state
 ExecStartPre=-/bin/mkdir -p /var/opt/aurelm-airplay-probe/state
+# the receiver test runs uxplay-mgu as nobody, a child of this service: these limits and LimitCORE are its too
 ExecStart=/usr/bin/node /var/opt/aurelm-airplay-probe/current/probe.js
 # however the service ended (stop, crash, kill, the out-of-memory killer): the firewall as it was
 ExecStopPost=-/usr/bin/node /var/opt/aurelm-airplay-probe/current/cleanup.js
@@ -23,9 +24,9 @@ RestartSec=10
 TimeoutStopSec=8
 Nice=10
 IOSchedulingClass=idle
-CPUQuota=20%
-MemoryLimit=64M
-TasksMax=16
+CPUQuota=50%
+MemoryLimit=160M
+TasksMax=48
 # No core dump goes to the crash handler (which restarts the head unit for a program it does not list),
 # so a crash restarts this service and never the head unit.
 LimitCORE=1
