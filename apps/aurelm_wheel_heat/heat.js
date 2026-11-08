@@ -176,6 +176,8 @@ class WheelHeat extends EventEmitter {
     async _viaClimate(on) {
         const sub = this.climate.sub;
         if (!sub || !sub.proxy) return { ok: false, via: 'climate', answer: 'NO_SERVICE', msg: 'climate service not reachable' + (sub && sub.error ? ': ' + sub.error : '') };
+        // not offered on this car (no provider: every call answers "Service unavailable"): not asked
+        if (!sub.available) return { ok: false, via: 'climate', answer: 'NO_SERVICE', msg: 'climate service not available on this car' };
         const { min, max } = this.range();
         const level = on ? max : min;
         const first = Number(this.o.clientGroupId ? this.o.clientGroupId() : 0) || 0;

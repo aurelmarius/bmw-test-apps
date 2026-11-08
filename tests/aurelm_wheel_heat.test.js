@@ -29,10 +29,10 @@ function fakeCar(cfg) {
                     throw new Error('no field ' + field);
                 },
             };
-            const sub = { iface, available: true, proxy, error: null, handlers };
+            const sub = { iface, available: !(isClimate && climate.unavailable), proxy, error: null, handlers };
             car.subs[isClimate ? 'climate' : 'body'] = sub;
-            // the initial getValue the kit does
-            for (const f of Object.keys(handlers)) handlers[f](await proxy.getValue(f));
+            // the initial getValue the kit does (only while the provider is there)
+            if (sub.available) for (const f of Object.keys(handlers)) handlers[f](await proxy.getValue(f));
             return sub;
         },
         async call(proxy, method, args) {
@@ -190,6 +190,15 @@ const tests = {
         const r = await h.toggle();
         assert.ok(r.ok && r.via === 'body', JSON.stringify(r));
         assert.ok(h.history.some((x) => x.answer === 'SET_NO_EFFECT'));
+    },
+    async 'climate service without a provider (a G20 with iDrive 7): not asked, the steering wheel service switches'() {
+        const car = fakeCar({ climate: { takes: [0], level: 0, setter: true, unavailable: true }, body: { heating: true } });
+        const { h } = make(car);
+        await h.init();
+        assert.strictEqual(h.isOn(), true, 'state from the steering wheel service');
+        const r = await h.toggle();
+        assert.ok(r.ok && r.via === 'body' && r.on === false && r.confirmed, JSON.stringify(r));
+        assert.deepStrictEqual(car.calls.map((c) => c.method), ['requestHeating'], 'no climate calls');
     },
     async 'accepted enum as number, name or struct'() {
         assert.strictEqual(acceptedName({ accepted: 1 }), 'IS_ACCEPTED');

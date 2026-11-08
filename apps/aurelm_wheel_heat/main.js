@@ -3,8 +3,8 @@
  * Wheel Heating - steering wheel heating on / off for an iDrive 7 car with a heated iDrive 8 (LCI)
  * steering wheel, which has no heating button of its own.
  *
- * Opened from the apps menu or a favourite button (bookmark), the app switches the heating
- * (setting "onOpen") and shows the result; the status screen also has an on / off button and a
+ * Opened from a favourite button (bookmark), the app switches the heating (setting "onOpen") and
+ * shows the result; opened from the apps menu it only shows the status (setting "onMenu"); the status screen also has an on / off button and a
  * details page with what the car answered. The switching is in heat.js.
  */
 const mgu = require('./kit/mgu');
@@ -20,6 +20,9 @@ const RED = '#ef2b2d';
 const ENTRY_DEBOUNCE_MS = 3000;     // MainApp can report one press twice (event + start reason)
 
 let onEntry = () => true;
+let lastOpen = null;                // { reason, fav, mode, t }: shown on the details page
+/** A favourite button saves the app as a bookmark: MainApp reports BOOKMARK (event reason or start reason). */
+const isFavourite = (reason) => /BOOKMARK/i.test(String(reason));
 
 mgu.run({
     onEntry(reason, uuid) { return onEntry(reason, uuid); },
@@ -40,17 +43,21 @@ mgu.run({
 
         const run = (want) => ready.then(() => heat.toggle(want)).then((r) => { say(r.msg || (r.ok ? 'Done' : 'Not switched')); kick(); return r; });
 
-        // menu tile / favourite button
+        // favourite button (BOOKMARK) / apps menu (ENTRY_POINT, ...): each has its own setting, so opening
+        // the app from the menu to look doesn't switch off a heating the car switched on by itself
         let lastEntry = 0;
         onEntry = (reason) => {
             const now = Date.now();
-            const mode = settings.get('onOpen') || 'toggle';
+            const fav = isFavourite(reason);
+            const mode = (fav ? settings.get('onOpen') : settings.get('onMenu')) || (fav ? 'toggle' : 'show');
+            lastOpen = { reason: String(reason), fav, mode, t: now };
+            log.info('opened (' + reason + (fav ? ', favourite button' : ', apps menu') + '): ' + mode);
             if (mode !== 'show' && now - lastEntry > ENTRY_DEBOUNCE_MS) {
                 lastEntry = now;
-                log.info('opened (' + reason + '): ' + mode);
                 run(mode === 'on' ? true : undefined);
             }
-            return !(reason === 'BOOKMARK' && settings.get('showOnShortcut') === 'stay');
+            kick();
+            return !(fav && settings.get('showOnShortcut') === 'stay');
         };
 
         ui.onClick('BTN_TOGGLE', () => run());
@@ -99,7 +106,7 @@ mgu.run({
             } else {
                 cv.text(fitText(cv, 'Put this app on a favourite button: highlight it in the apps menu and hold the button', 19, 692), 848, 445, 19, t.dim);
             }
-            cv.text(fitText(cv, 'Opened from a favourite button: ' + settings.display('onOpen').toLowerCase(), 19, 692), 848, 482, 19, t.dim);
+            cv.text(fitText(cv, 'Favourite button: ' + settings.display('onOpen').toLowerCase() + '  ·  apps menu: ' + settings.display('onMenu').toLowerCase(), 19, 692), 848, 482, 19, t.dim);
         }
 
         function drawDetails(cv, t) {
@@ -125,6 +132,7 @@ mgu.run({
                 y += 34;
             });
             G.panel(cv, t, 816, 44, 760, 468, 'Requests sent');
+            if (lastOpen) cv.text(fitText(cv, 'Last opened: ' + (lastOpen.fav ? 'favourite button' : 'apps menu') + ' (' + lastOpen.reason + ') -> ' + lastOpen.mode + '  ·  ' + ago(lastOpen.t), 19, 692), 848, 482, 19, t.dim);
             cv.text(fitText(cv, 'Client group ' + settings.get('clientGroupId') + '  ·  path ' + settings.display('path') + (settings.get('probe') !== false ? '  ·  tries other groups' : ''), 19, 692), 848, 124, 19, t.dim);
             y = 170;
             if (!heat.history.length) cv.text('Nothing sent yet', 848, y, 21, t.dim);
