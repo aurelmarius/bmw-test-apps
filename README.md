@@ -44,7 +44,7 @@ For an iDrive 7 car fitted with a heated iDrive 8 (LCI) steering wheel. That whe
 
 **Status:** first in-car test. Not a receiver: nothing is streamed.
 
-The app and its root service announce a test receiver, **BMW iDrive test**, on the Wi-Fi networks for 15 minutes and show step by step what gets through: the network, the firewall, mDNS, the iPhone's AirPlay query and its connection. While the test runs, the service opens the firewall for tcp 7000/7100 and udp 5353 on the Wi-Fi interfaces only, and closes it again when the test ends.
+The app and its root service announce a test receiver, **BMW iDrive test**, on the Wi-Fi networks for 15 minutes and show step by step what gets through: the network, the firewall, mDNS, the iPhone's AirPlay query and its connection. While the test runs, the service opens the firewall for its AirPlay port (tcp 7300; 7000 is the car's own CarPlay receiver's) and udp 5353 on the Wi-Fi interfaces only, and closes it again when the test ends.
 
 1. Install **AirPlay Test**: the Store installs the **AirPlay network test service** first. **Restart the head unit once** after installing (the service listens for the app from the next start).
 2. Put the iPhone and the head unit on one network, one setup per run:
