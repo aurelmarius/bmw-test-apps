@@ -18,23 +18,7 @@ mgu-store** and **IterioDev's App Manager**. Built with the same kit as
 
 ## 🧪 Apps being tested
 
-### 🔥 Wheel Heating (`aurelm_wheel_heat`)
-*Steering wheel heating on/off from a favourite button.*
-
-**Status:** works in the car (G20, iDrive 7) through the steering wheel's own service; the climate service is not offered on that car. 1.0.6: two tiles, **Wheel Heat On/Off** (for a favourite button: switches without opening the app) and **Wheel Heating** (the status screen). A favourite button saved on Wheel Heating before 1.0.6 now opens the status screen: save it again on Wheel Heat On/Off.
-
-For an iDrive 7 car fitted with a heated iDrive 8 (LCI) steering wheel. That wheel has no heating button, and on iDrive 7 only the voice command could switch it. The app tries to switch it the way the voice command does, through the head unit's climate service (`ClimateMaster.requestSteeringWheelHeating`). If the climate service turns the request down, the app writes the level to the climate service's status field (`statusSteeringWheelHeating`, which has a setter), and then tries the steering wheel's own service (`SteeringWheelClimate.requestHeating`).
-
-* **Two tiles in the apps menu** (1.0.6):
-  * **Wheel Heat On/Off** switches the heating without opening anything: you stay on the screen you were on. Put this one on a favourite button: highlight it in the apps menu and hold a favourite button (1-8). The first press after the head unit starts shows "Loading app" while the app starts. Setting: switch on / off, or always switch on.
-  * **Wheel Heating** opens the status screen and switches nothing, so a heating the car switched on by itself stays on (setting: also switch, or always switch on).
-  * Why two: an entry the HMI opens a screen for (mapped) always opens it, even from a favourite button, and once an app's screen is open the app can't take the HMI back to the screen you were on (it can only close its own screen, which leaves the apps menu). An unmapped entry opens nothing, but then the app can't open its screen from it either. So one tile does each.
-
-![Wheel Heating - status](docs/screenshots/aurelm_wheel_heat-status.png)
-![Wheel Heating - details](docs/screenshots/aurelm_wheel_heat-details.png)
-<sub>Screenshots drawn by the app on a PC with a simulated car.</sub>
-
----
+> **Graduated:** Wheel Heating (`aurelm_wheel_heat`) works in the car and moved to [aurelmarius/bmw-apps](https://github.com/aurelmarius/bmw-apps) (1.0.6); install it from there.
 
 ### 📡 AirPlay Test (`aurelm_airplay_probe`) + AirPlay network test service (`aurelm-airplay-probe`)
 *A network test for a future AirPlay receiver: can an iPhone find the head unit and connect to it?*
@@ -75,13 +59,13 @@ The app and its root service announce a test receiver, **BMW iDrive test**, on t
 1. Download `<id>@<version>.tgz` from [Releases](https://github.com/aurelmarius/bmw-test-apps/releases).
 2. Build a USB repository:
    ```powershell
-   node mgu-install.js usb-repo E:\ aurelm_wheel_heat@1.0.6.tgz
+   node mgu-install.js usb-repo E:\ aurelm-airplay-probe@<version>.tgz aurelm_airplay_probe@<version>.tgz
    ```
 3. Insert the USB drive into your car and install from the **USB** page of the Store.
 
 ### Via SSH
 ```bash
-/var/opt/mgu-deploy/mgu-deploy.sh install --artifact aurelm_wheel_heat@1.0.6.tgz --yes
+/var/opt/mgu-deploy/mgu-deploy.sh install --artifact aurelm_airplay_probe@<version>.tgz --yes
 ```
 A service (`aurelm-airplay-probe@<version>.tgz`) installs the same way, before the app that needs it.
 
@@ -90,9 +74,8 @@ A service (`aurelm-airplay-probe@<version>.tgz`) installs the same way, before t
 ## 🛠️ Development
 
 ```bash
-python3 kit/tools/build.py aurelm_wheel_heat          # -> dist/aurelm_wheel_heat@<version>.tgz
-node tests/aurelm_wheel_heat.test.js                  # Wheel Heating's switching against a simulated car
-cp dist/aurelm_wheel_heat@<version>.tgz packages/     # a push to main with a new package publishes a release
+python3 kit/tools/build.py <id>                       # -> dist/<id>@<version>.tgz
+cp dist/<id>@<version>.tgz packages/                  # a push to main with a new package publishes a release
 python3 tools/pack_tools.py                           # native/<id>/ services -> packages/<id>@<version>.tgz
 node tests/airplay_probe.test.js                      # the AirPlay network test service
 ```

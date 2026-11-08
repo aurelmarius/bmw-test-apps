@@ -6,13 +6,6 @@
       "author": "custom",
       "icon": "aurelm_airplay_probe.png",
       "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0"
-    },
-    "aurelm_wheel_heat": {
-      "title": "Wheel Heating",
-      "description": "Steering wheel heating on/off from a favourite button: for a heated iDrive 8 (LCI) steering wheel without its own button, fitted to an iDrive 7 car",
-      "author": "custom",
-      "icon": "aurelm_wheel_heat.png",
-      "iconSha256": "6438eafb37a036fc896dc49765c821760fd37a7fd5be52ca2cfbb11c1cc64920"
     }
   }
 }
