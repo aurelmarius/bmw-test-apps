@@ -44,7 +44,7 @@ because the app polled it every second from the background.
 "Start receiver" in the app (`{"cmd":"start","mode":"receiver"}`) runs `uxplay-mgu` (`native/uxplay-mgu`:
 UxPlay's protocol, as `AppleTV5,4` / `366.0`, with a renderer that only counts) for 15 minutes:
 
-- as **nobody**, a child of this service (its limits: no core dump, nice 10, 50% CPU, 256 MiB; `uxplay-mgu`
+- as **nobody**, a child of this service (its limits: no core dump, nice 10, 200% CPU (2 of 4 cores; 50% made the picture and sound stutter), 256 MiB; `uxplay-mgu`
   is on the crash handler's list too), started again at most 3 times when it exits;
 - announced as **BMW iDrive** on one address: the car's Wi-Fi (`wlan_bridge`, wireless CarPlay) first, else
   the iPhone's hotspot; started again when that address changes;
@@ -108,7 +108,7 @@ What the Store's tools learned the hard way (mgu-store, waze-on-cluster), and ho
   `/var/opt/public/oap`, mode 0660; root only (0600) while the app is not installed. The group is read
   when the socket starts: after a fresh install, restart the head unit once.
 - **No boot ordering:** nothing waits for it, it waits for nothing of the car's; it does not run at boot.
-- **Bounded:** nice 10, idle I/O, 20% CPU, 64 MiB, 16 tasks.
+- **Bounded:** nice 10, idle I/O, 200% CPU (2 of the 4 cores), 256 MiB, 48 tasks.
 - **CarPlay:** during a test the service shares udp 5353 with the car's own mDNS responder
   (`SO_REUSEADDR`). Multicast reaches both; a unicast mDNS packet may reach only one of them. Run the
   test with CarPlay already connected, and stop it when done.

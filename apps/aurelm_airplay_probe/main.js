@@ -28,7 +28,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.8.0';
+const SERVICE_VERSION = '0.8.1';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -94,7 +94,7 @@ function rxSteps(s) {
         { label: 'Picture', state: gotVideo ? 'ok' : r.client && r.audio ? 'bad' : off ? 'off' : 'wait',
             detail: r.video ? r.video.codec + ' ' + r.video.w + 'x' + r.video.h + (st.frames ? ', ' + st.frames + ' frames, ' + st.idr + ' keyframes' : '') : r.client && r.audio ? 'none: the iPhone sends sound only' : 'not yet' },
         { label: 'Stream', state: st.fps > 0 ? 'ok' : gotVideo ? 'off' : off ? 'off' : 'wait',
-            detail: st.fps > 0 ? st.fps + ' fps, ' + Math.round(st.kbps) + ' kbit/s' + (r.audio ? ', sound ' + st.audio + ' packets' : '') : gotVideo ? 'stopped' : r.audio ? 'sound only, ' + st.audio + ' packets' : 'not yet' },
+            detail: st.fps > 0 ? st.fps + ' fps, ' + Math.round(st.kbps) + ' kbit/s' + (r.cpu ? ', CPU ' + r.cpu.pct + '%' + (r.cpu.throttled ? ', held back ' + r.cpu.throttled + 'x' : '') : '') : gotVideo ? 'stopped' : r.audio ? 'sound only, ' + st.audio + ' packets' : 'not yet' },
         { label: 'GPU decoder', state: r.decoder ? (r.decoder.ok ? (st.shown > 0 ? 'ok' : 'wait') : 'bad') : off ? 'off' : 'wait',
             detail: r.decoder ? (r.decoder.ok ? st.shown + ' pictures' + (st.decerr ? ', ' + st.decerr + ' failed' : '') + ' into ' + r.decoder.w + 'x' + r.decoder.h : r.decoder.error) : 'opens with the first picture' },
         { label: 'On screen', state: s.mirror && s.mirror.shown ? 'ok' : off ? 'off' : 'wait', detail: (s.mirror && s.mirror.why) || '' },
@@ -107,7 +107,8 @@ function soundStep(r, st, ca, off) {
     const snd = r.sound;
     if (!snd) return { label: 'Sound', state: off ? 'off' : 'wait', detail: r.audio ? 'starting' : 'none yet' };
     if (!snd.ok) return { label: 'Sound', state: 'bad', detail: snd.error };
-    const n = st.adec ? st.adec + ' played' + (st.alate || st.afull ? ', ' + (st.alate + st.afull) + ' dropped' : '') : 'nothing played yet';
+    // dropped: late (the device fell behind: CPU, Wi-Fi) or full (nothing read it yet: the speakers still connecting)
+    const n = st.adec ? st.adec + ' played' + (st.alate ? ', ' + st.alate + ' late' : '') + (st.afull ? ', ' + st.afull + ' unread' : '') : 'nothing played yet';
     if (ca && ca.error) return { label: 'Sound', state: 'bad', detail: n + '; route: ' + ca.error };
     return { label: 'Sound', state: ca && ca.connected ? 'ok' : 'wait', detail: n + (ca && ca.connected ? ', on the speakers' : ', connecting the speakers') + (st.adev >= 0 ? ' (' + Math.round(st.adev) + ' ms)' : '') };
 }

@@ -24,7 +24,9 @@ RestartSec=10
 TimeoutStopSec=8
 Nice=10
 IOSchedulingClass=idle
-CPUQuota=50%
+# 2 of the unit's 4 cores at most: 50% throttled the receiver (picture and sound stuttered together, in the car);
+# nice 10 keeps CarPlay and the HMI first
+CPUQuota=200%
 MemoryLimit=256M
 TasksMax=48
 # No core dump goes to the crash handler (which restarts the head unit for a program it does not list),

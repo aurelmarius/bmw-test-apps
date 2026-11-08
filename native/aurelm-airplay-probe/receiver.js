@@ -23,6 +23,31 @@ const VIDEO_SIZE = '1920x720';
 const AUDIO_DEVICE = 'plug:smartx:CarLifeMedia_CF_48_STEREO';
 const RX_GROUPS = ['video', 'mgu_alsa'];
 
+/** CPU seconds a process has used (utime + stime, /proc/<pid>/stat), or null */
+function cpuSeconds(pid) {
+    try {
+        const s = fs.readFileSync('/proc/' + pid + '/stat', 'utf8');
+        const f = s.slice(s.lastIndexOf(')') + 2).split(' ');
+        return (Number(f[11]) + Number(f[12])) / 100;   // clock ticks (USER_HZ 100)
+    } catch (e) { return null; }
+}
+/** how often this service's cgroup was held back by its CPU quota (cgroup v1 cpu.stat nr_throttled), or null */
+function throttled() {
+    try {
+        const line = fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n').find((l) => /:cpu[,:]|:cpuacct,cpu:|:cpu,cpuacct:/.test(l));
+        if (!line) return null;
+        const rel = line.split(':')[2];
+        const dirs = ['/sys/fs/cgroup/cpu,cpuacct', '/sys/fs/cgroup/cpu', '/sys/fs/cgroup/cpuacct,cpu'];
+        for (let i = 0; i < dirs.length; i++) {
+            try {
+                const t = fs.readFileSync(dirs[i] + rel + '/cpu.stat', 'utf8').match(/nr_throttled (\d+)/);
+                if (t) return Number(t[1]);
+            } catch (e) { /* next */ }
+        }
+    } catch (e) { /* none */ }
+    return null;
+}
+
 /** the gid of `group` (/etc/group), or null */
 function groupGid(group) {
     try {
@@ -38,7 +63,7 @@ const NOISE = /seconds since last client feedback|^\s*$|httpd didn't get respons
 function freshState() {
     return {
         running: false, pid: null, starts: 0, exit: null, error: null, ip: null, iface: null,
-        client: null, video: null, videoRunning: false, audio: null, decoder: null, sound: null,
+        client: null, video: null, videoRunning: false, audio: null, decoder: null, sound: null, cpu: null,
         stream: { frames: 0, fps: 0, kbps: 0, idr: 0, sps: 0, audio: 0, shown: 0, decerr: 0, adec: 0, alate: 0, afull: 0, aerr: 0, axrun: 0, adev: -1, at: 0 },
         lines: [],
     };
@@ -81,6 +106,7 @@ function createReceiver(opts) {
             if (o.log) o.log('receiver: audio stream (type ' + j.ct + ')');
             break;
         case 'stats':
+            sampleCpu();
             st.stream = { frames: j.frames, fps: j.fps, kbps: j.kbps, idr: j.idr, sps: j.sps, audio: j.audio, shown: j.shown || 0, decerr: j.decerr || 0,
                 adec: j.adec || 0, alate: j.alate || 0, afull: j.afull || 0, aerr: j.aerr || 0, axrun: j.axrun || 0, adev: j.adev != null ? j.adev : -1, at: now() };
             break;
@@ -95,6 +121,17 @@ function createReceiver(opts) {
         default: break;
         }
         if (o.onChange) o.onChange();
+    }
+
+    // the receiver's CPU use (% of one core) and the quota's throttling since it started, sampled with its stats
+    let cpuPrev = null;
+    function sampleCpu() {
+        if (!st.pid) return;
+        const c = cpuSeconds(st.pid), t = now();
+        if (c !== null && cpuPrev) {
+            const dt = (t - cpuPrev.t) / 1000;
+            if (dt >= 0.5) { st.cpu = { pct: Math.round((c - cpuPrev.c) / dt * 100), throttled: throttled(), at: t }; cpuPrev = { c, t }; }
+        } else if (c !== null) cpuPrev = { c, t };
     }
 
     function lines(stream, fn) {
