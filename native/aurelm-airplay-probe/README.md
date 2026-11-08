@@ -66,6 +66,14 @@ front (`{"cmd":"end-session"}`: the receiver is started again, the iPhone stops 
 The receiver asks the iPhone for 1920x720 (`-s 1920x720@60`). The frame file is removed when the
 receiver ends (by itself, by the service after a crash, by `cleanup.js` at a stop or an uninstall).
 
+## The sound (stage 3)
+
+`uxplay-mgu` decodes the iPhone's sound (AAC-ELD while mirroring) and plays it into SmartXbar's input for CarLife
+(`plug:smartx:CarLifeMedia_CF_48_STEREO`, source 287, unused in Europe), as Moonride does; it runs as nobody in the
+groups video and mgu_alsa (it drops root itself: Node cannot give a child supplementary groups). The app routes source
+287 to the speakers (`MediaSink_Front`, 1024) through the audio manager while the receiver has an iPhone with sound and
+the app is up (`car_audio.js`), and back when it is not; a leftover connection is cleared at start.
+
 ## Removal leaves nothing
 
 | What | Gone by |

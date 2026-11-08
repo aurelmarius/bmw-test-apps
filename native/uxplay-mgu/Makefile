@@ -27,6 +27,11 @@ VIDEO_OBJS = $(patsubst %.cpp,$(OUT)/obj/v_%.o,$(notdir $(VIDEO_SRCS)))
 VIDEO_CXXFLAGS = -std=c++14 -O2 -g0 -Wall -Wno-missing-field-initializers -DNDEBUG -Ivideo/src -Ivideo/abi/include
 STUBS   = $(OUT)/stub/libmfxhw64.so $(OUT)/stub/libva.so.1 $(OUT)/stub/libva-drm.so.1
 
+# stage 3: the sound (audio/mgu_audio.cpp) with libavcodec's aac and alac decoders, FFmpeg built minimal and static
+# by build.sh (FFMPEG); libasound is opened at run time
+FFMPEG  ?= /w/build/ffmpeg
+AUDIO_OBJS = $(OUT)/obj/a_mgu_audio.o
+
 STATIC  = -Wl,-Bstatic -L$(PLIST)/lib -lplist-2.0 -lglib-2.0 -lpcre -lcrypto -Wl,-Bdynamic
 # the head unit's loader is /lib/ld-linux-x86-64.so.2 (no /lib64: a binary asking for /lib64/... fails to start, ENOENT)
 LIBS    = $(STATIC) -lpthread -ldl -lm -static-libstdc++ -static-libgcc -Wl,--dynamic-linker=/lib/ld-linux-x86-64.so.2
@@ -39,9 +44,13 @@ $(OUT)/obj/%.o: %.c
 	@mkdir -p $(OUT)/obj
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OUT)/obj/mgu_renderer.o: renderer/mgu_renderer.c video/src/mgu_video.h
+$(OUT)/obj/mgu_renderer.o: renderer/mgu_renderer.c video/src/mgu_video.h audio/mgu_audio.h
 	@mkdir -p $(OUT)/obj
-	$(CC) $(CFLAGS) -I$(SRC)/renderers -Ivideo/src -c $< -o $@
+	$(CC) $(CFLAGS) -I$(SRC)/renderers -Ivideo/src -Iaudio -c $< -o $@
+
+$(OUT)/obj/a_mgu_audio.o: audio/mgu_audio.cpp audio/mgu_audio.h
+	@mkdir -p $(OUT)/obj
+	$(CXX) -std=c++14 -O2 -g0 -Wall -DNDEBUG -Iaudio -I$(FFMPEG)/include -c $< -o $@
 
 $(OUT)/obj/v_%.o: video/src/%.cpp
 	@mkdir -p $(OUT)/obj
@@ -64,7 +73,7 @@ $(OUT)/obj/uxplay.o: $(SRC)/uxplay.cpp
 	@mkdir -p $(OUT)/obj
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(OUT)/uxplay-mgu: $(C_OBJS) $(VIDEO_OBJS) $(OUT)/obj/uxplay.o $(STUBS)
-	$(CXX) -o $@ $(OUT)/obj/uxplay.o $(C_OBJS) $(VIDEO_OBJS) $(STUBS) $(LIBS)
+$(OUT)/uxplay-mgu: $(C_OBJS) $(VIDEO_OBJS) $(AUDIO_OBJS) $(OUT)/obj/uxplay.o $(STUBS)
+	$(CXX) -o $@ $(OUT)/obj/uxplay.o $(C_OBJS) $(VIDEO_OBJS) $(AUDIO_OBJS) $(STUBS) $(FFMPEG)/lib/libavcodec.a $(FFMPEG)/lib/libavutil.a $(LIBS)
 	python3 video/tools/woc_abi.py check-imports $@ --prefix MFX va -- video/abi/libmfx.symbols video/abi/libva.symbols video/abi/libva-drm.symbols
 	strip $@

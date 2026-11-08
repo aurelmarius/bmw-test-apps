@@ -13,6 +13,8 @@
  *
  *   {"ev":"decoder","ok":true,"path":"/dev/shm/...","w":1920,"h":720}  the GPU decoder and frame file opened
  *   {"ev":"decoder","ok":false,"error":"..."}                          they could not (stage 1 counting goes on)
+ *   {"ev":"sound","ok":true,"device":"plug:smartx:...","ct":8} / {"ev":"sound","ok":false,"error":"..."}
+ *                                                                      stage 3: the sound's decoder and ALSA device
  *
  * Stage 2: every access unit also goes to the GPU decoder (video/src/mgu_video.cpp), which writes the pictures
  * to mgu-render's frame file; stats then carry "shown" (pictures written) and "decerr" (failed access units).
@@ -30,6 +32,34 @@
 #include "../renderers/audio_renderer.h"
 #include "../renderers/mux_renderer.h"
 #include "mgu_video.h"
+#include "mgu_audio.h"
+#include <unistd.h>
+#include <grp.h>
+#include <pwd.h>
+#include <sys/types.h>
+
+/* Started as root by the service (it cannot give a child supplementary groups), the receiver becomes MGU_RUN_AS
+ * (nobody) with the groups in MGU_GROUPS (video: the GPU's render node; mgu_alsa: the sound devices) before
+ * anything else runs; one that cannot drop root does not run at all. */
+__attribute__((constructor)) static void mgu_drop_root(void) {
+    const char *who = getenv("MGU_RUN_AS");
+    if (!who || getuid() != 0) return;
+    struct passwd *pw = getpwnam(who);
+    uid_t uid = pw ? pw->pw_uid : 65534;
+    gid_t gid = pw ? pw->pw_gid : 65534, gs[16];
+    int n = 0;
+    char list[256];
+    snprintf(list, sizeof list, "%s", getenv("MGU_GROUPS") ? getenv("MGU_GROUPS") : "");
+    for (char *save = NULL, *t = strtok_r(list, ",", &save); t && n < 16; t = strtok_r(NULL, ",", &save)) {
+        struct group *g = getgrnam(t);
+        if (g) gs[n++] = g->gr_gid;
+    }
+    if (setgroups((size_t) n, gs) != 0 || setgid(gid) != 0 || setuid(uid) != 0 || getuid() == 0 || geteuid() == 0) {
+        fprintf(stderr, "mgu: cannot run as %s: refusing to run as root\n", who);
+        _exit(126);
+    }
+    fprintf(stderr, "mgu: running as %s (uid %u) with %d groups\n", who, (unsigned) uid, n);
+}
 
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 static struct {
@@ -72,9 +102,13 @@ static void clean(char *out, size_t n, const char *in) {
 static void stats_locked(double t) {
     double dt = t - st.win_start;
     if (dt < 1.0) return;
-    emit("{\"ev\":\"stats\",\"frames\":%llu,\"fps\":%.1f,\"kbps\":%.0f,\"idr\":%llu,\"sps\":%llu,\"audio\":%llu,\"shown\":%llu,\"decerr\":%llu}",
+    mgu_audio_stats_t a;
+    mgu_audio_stats(&a);
+    emit("{\"ev\":\"stats\",\"frames\":%llu,\"fps\":%.1f,\"kbps\":%.0f,\"idr\":%llu,\"sps\":%llu,\"audio\":%llu,\"shown\":%llu,\"decerr\":%llu,"
+         "\"adec\":%llu,\"alate\":%llu,\"afull\":%llu,\"aerr\":%llu,\"axrun\":%llu,\"adev\":%.0f}",
          (unsigned long long) st.frames, st.win_frames / dt, st.win_bytes * 8.0 / 1000.0 / dt,
-         (unsigned long long) st.idr, (unsigned long long) st.sps, (unsigned long long) st.audio_packets, st.shown, st.decerr);
+         (unsigned long long) st.idr, (unsigned long long) st.sps, (unsigned long long) st.audio_packets, st.shown, st.decerr,
+         a.decoded, a.dropped_late, a.dropped_full, a.errors, a.xruns, a.device_ms);
     st.win_frames = st.win_bytes = 0;
     st.win_start = t;
 }
@@ -201,20 +235,30 @@ void audio_renderer_init(logger_t *logger, const char *audiosink, const bool *au
     (void) logger; (void) audiosink; (void) audio_sync; (void) video_sync; (void) artp_pipeline;
 }
 void audio_renderer_start(unsigned char *compression_type) {
-    emit("{\"ev\":\"audio\",\"ct\":%d}", compression_type ? (int) *compression_type : -1);
+    const int ct = compression_type ? (int) *compression_type : -1;
+    emit("{\"ev\":\"audio\",\"ct\":%d}", ct);
+    char e[200], d[120];
+    if (mgu_audio_start(ct) == 0) {
+        clean(d, sizeof d, mgu_audio_device());
+        emit("{\"ev\":\"sound\",\"ok\":true,\"device\":\"%s\",\"ct\":%d}", d, ct);
+    } else {
+        clean(e, sizeof e, mgu_audio_error());
+        emit("{\"ev\":\"sound\",\"ok\":false,\"error\":\"%s\",\"ct\":%d}", e, ct);
+    }
 }
-void audio_renderer_stop() {}
+void audio_renderer_stop() { mgu_audio_stop(); }
 void audio_renderer_render_buffer(unsigned char *data, int *data_len, unsigned short *seqnum, uint64_t *ntp_time) {
-    (void) data; (void) seqnum; (void) ntp_time;
+    (void) seqnum; (void) ntp_time;
+    if (data && data_len) mgu_audio_packet(data, *data_len);   /* stage 3: decoded and played (outside the stats lock) */
     pthread_mutex_lock(&mu);
     st.audio_packets++;
     st.audio_bytes += data_len ? *data_len : 0;
     if (!st.running) stats_locked(now_s());   /* audio alone (no mirror video): still report */
     pthread_mutex_unlock(&mu);
 }
-void audio_renderer_set_volume(double volume) { (void) volume; }
-void audio_renderer_flush() {}
-void audio_renderer_destroy() {}
+void audio_renderer_set_volume(double volume) { mgu_audio_volume(volume); }
+void audio_renderer_flush() { mgu_audio_flush(); }
+void audio_renderer_destroy() { mgu_audio_stop(); }
 unsigned int audio_renderer_listen(void *loop, int id) { (void) loop; (void) id; return 0; }
 
 /* ---------------- recording (-mp4): not on the head unit ---------------- */

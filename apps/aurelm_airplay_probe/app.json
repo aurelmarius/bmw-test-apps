@@ -1,18 +1,32 @@
 {
   "id": "aurelm_airplay_probe",
   "title": "AirPlay Test",
-  "description": "AirPlay receiver for the head unit, in stages: the network test, and the receiver: the iPhone's screen mirroring on the centre screen while parked (picture only, no sound yet). Needs the AirPlay test service.",
-  "version": "0.7.2",
+  "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers. Also the network test. Needs the AirPlay test service.",
+  "version": "0.8.0",
   "vendor": "custom",
   "loggingId": "OA9X",
   "iconGlyph": "AP",
   "signals": {
     "de.bmw.infotainment.vehicle.Vehicle2": {
       "statusCarSpeed2": "rs"
+    },
+    "org.genivi.am.commandinterface.CommandControl": {
+      "_instances": "1",
+      "_methods": [
+        "connect",
+        "disconnect",
+        "getListMainConnections"
+      ]
+    },
+    "org.genivi.am.routinginterface.RoutingControlObserver": {
+      "_instances": "1",
+      "_methods": [
+        "hookSourceAvailablityStatusChange"
+      ]
     }
   },
   "requires": {
-    "aurelm-airplay-probe": "0.7.1"
+    "aurelm-airplay-probe": "0.8.0"
   },
   "screens": [
     {

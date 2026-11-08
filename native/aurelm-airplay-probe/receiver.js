@@ -19,6 +19,9 @@ const BASE_PORT = 7300;
 // stage 2: the frame file the receiver's GPU decoder writes and the app shows (mgu-render takes it: owned by nobody)
 const VIDEO_PATH = '/dev/shm/mgu-video-aurelm-airplay';
 const VIDEO_SIZE = '1920x720';
+// stage 3: SmartXbar's input for CarLife (unused in Europe), which Moonride plays into; plug converts 44.1 to 48 kHz
+const AUDIO_DEVICE = 'plug:smartx:CarLifeMedia_CF_48_STEREO';
+const RX_GROUPS = ['video', 'mgu_alsa'];
 
 /** the gid of `group` (/etc/group), or null */
 function groupGid(group) {
@@ -35,8 +38,8 @@ const NOISE = /seconds since last client feedback|^\s*$|httpd didn't get respons
 function freshState() {
     return {
         running: false, pid: null, starts: 0, exit: null, error: null, ip: null, iface: null,
-        client: null, video: null, videoRunning: false, audio: null, decoder: null,
-        stream: { frames: 0, fps: 0, kbps: 0, idr: 0, sps: 0, audio: 0, shown: 0, decerr: 0, at: 0 },
+        client: null, video: null, videoRunning: false, audio: null, decoder: null, sound: null,
+        stream: { frames: 0, fps: 0, kbps: 0, idr: 0, sps: 0, audio: 0, shown: 0, decerr: 0, adec: 0, alate: 0, afull: 0, aerr: 0, axrun: 0, adev: -1, at: 0 },
         lines: [],
     };
 }
@@ -78,7 +81,12 @@ function createReceiver(opts) {
             if (o.log) o.log('receiver: audio stream (type ' + j.ct + ')');
             break;
         case 'stats':
-            st.stream = { frames: j.frames, fps: j.fps, kbps: j.kbps, idr: j.idr, sps: j.sps, audio: j.audio, shown: j.shown || 0, decerr: j.decerr || 0, at: now() };
+            st.stream = { frames: j.frames, fps: j.fps, kbps: j.kbps, idr: j.idr, sps: j.sps, audio: j.audio, shown: j.shown || 0, decerr: j.decerr || 0,
+                adec: j.adec || 0, alate: j.alate || 0, afull: j.afull || 0, aerr: j.aerr || 0, axrun: j.axrun || 0, adev: j.adev != null ? j.adev : -1, at: now() };
+            break;
+        case 'sound':
+            st.sound = j.ok ? { ok: true, device: j.device, ct: j.ct, at: now() } : { ok: false, error: j.error, ct: j.ct, at: now() };
+            if (o.log) o.log('receiver: sound ' + (j.ok ? 'into ' + j.device + ' (type ' + j.ct + ')' : 'failed: ' + j.error));
             break;
         case 'decoder':
             st.decoder = j.ok ? { ok: true, path: j.path, w: j.w, h: j.h, at: now() } : { ok: false, error: j.error, at: now() };
@@ -116,17 +124,21 @@ function createReceiver(opts) {
         try { fs.mkdirSync(home); } catch (e) { /* there */ }
         try { fs.chownSync(home, o.uid, o.gid); } catch (e) { /* not root (tests) */ }
         const env = Object.assign({ HOME: home, PATH: '/usr/bin:/bin', UXPLAY_MDNS_IPV4: w.ip, UXPLAY_MDNS_NO_IPV6: '1',
-            MGU_VIDEO_PATH: o.videoPath || VIDEO_PATH, MGU_VIDEO_SIZE: VIDEO_SIZE }, o.env || {});
+            MGU_VIDEO_PATH: o.videoPath || VIDEO_PATH, MGU_VIDEO_SIZE: VIDEO_SIZE,
+            // stage 3: the sound into SmartXbar's CarLife input (Moonride's), the app routes it to the speakers
+            MGU_AUDIO: 'alsa:' + AUDIO_DEVICE, MGU_ALSA_US: '64000' }, o.env || {});
         // -s: the size the iPhone mirrors for, the centre screen's (landscape fills it; portrait has bars either side)
         const args = ['-n', w.name, '-nh', '-p', String(BASE_PORT), '-m', w.deviceid.toLowerCase(), '-s', '1920x720@60'];
         const spawnOpts = { env, cwd: home, stdio: ['ignore', 'pipe', 'pipe'] };
-        // as nobody when the service is root (the car), its group video (the GPU's render node /dev/dri/renderD128 is
-        // root:video; a spawned process gets no supplementary groups); uid null: as this process (the tests)
+        // As nobody when the service is root (the car), in the groups video (the GPU's render node) and mgu_alsa (the
+        // sound devices, as Moonride). Node gives a spawned process no supplementary groups, so the receiver is started
+        // as root and drops to nobody with those groups itself before anything else runs (renderer/mgu_renderer.c,
+        // MGU_RUN_AS); it refuses to run if it cannot. uid null: as this process (the tests).
         if (o.uid != null && process.getuid && process.getuid() === 0) {
-            const video = groupGid('video');
-            spawnOpts.uid = o.uid;
-            spawnOpts.gid = video != null ? video : o.gid;
-            if (video == null && o.log) o.log('receiver: no group video: the GPU decoder will not open');
+            env.MGU_RUN_AS = 'nobody';
+            env.MGU_GROUPS = RX_GROUPS.join(',');
+            const missing = RX_GROUPS.filter((g) => groupGid(g) == null);
+            if (missing.length && o.log) o.log('receiver: no group ' + missing.join(', ') + ' on this unit');
         }
         st.starts++;
         st.running = true; st.exit = null; st.error = null; st.ip = w.ip; st.iface = w.iface;
@@ -194,4 +206,4 @@ function createReceiver(opts) {
     return { start, stop, killSync, state: () => st };
 }
 
-module.exports = { createReceiver, PORTS, BASE_PORT, VIDEO_PATH };
+module.exports = { createReceiver, PORTS, BASE_PORT, VIDEO_PATH, AUDIO_DEVICE };

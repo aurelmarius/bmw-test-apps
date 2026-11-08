@@ -4,7 +4,12 @@ UxPlay's AirPlay mirroring protocol for the iDrive 7 head unit (MGU), run by the
 `aurelm-airplay-probe` in its receiver test. The renderer (`renderer/mgu_renderer.c`) replaces UxPlay's GStreamer renderers: it reports what the iPhone sends
 (client, codec and size, frames, frame rate, bit rate, keyframes, sound packets, pictures decoded) on stdout as
 `MGU {json}` lines and, **stage 2**, hands every access unit to the GPU decoder (`video/`, see its README), which writes
-the pictures to mgu-render's frame file. No sound yet (stage 3).
+the pictures to mgu-render's frame file. **Stage 3**: every audio packet goes to `audio/mgu_audio.cpp`: AAC-ELD (mirroring), ALAC or AAC-LC decoded with
+libavcodec (FFmpeg n6.1.2, built by `build.sh` with only the aac and alac decoders, LGPL-2.1-or-later, its licence ships
+as `FFMPEG-LICENSE`), at the iPhone's volume, into ALSA `plug:smartx:CarLifeMedia_CF_48_STEREO` (libasound opened at
+run time, the device non-blocking, late packets dropped: Moonride's way). Started as root by the service, the binary
+drops to nobody with the groups video and mgu_alsa itself (`MGU_RUN_AS`, `MGU_GROUPS`) before anything runs, and refuses
+to run if it cannot.
 
 | | |
 |---|---|

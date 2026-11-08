@@ -21,6 +21,13 @@ plist_sha=67be9ee3169366589c92dc7c22809b90f51911dd9de22520c39c9a64fb047c9c
 mkdir -p "$work/dl"
 [ -f "$work/dl/$plist.tar.bz2" ] || curl -sSfL -o "$work/dl/$plist.tar.bz2" "https://github.com/libimobiledevice/libplist/releases/download/2.6.0/$plist.tar.bz2"
 echo "$plist_sha  $work/dl/$plist.tar.bz2" | sha256sum -c -
+# FFmpeg (stage 3: libavcodec's aac and alac decoders only), its release tag n6.1.2 at a pinned commit
+ff_rev=b1a4534186ca51b0457579fc05a5739eb2cc45cd
+if [ "$(git -C "$work/ffmpeg-src" rev-parse HEAD 2>/dev/null)" != "$ff_rev" ]; then
+    rm -rf "$work/ffmpeg-src"
+    git clone -q --depth 1 --branch n6.1.2 https://github.com/FFmpeg/FFmpeg "$work/ffmpeg-src"
+    [ "$(git -C "$work/ffmpeg-src" rev-parse HEAD)" = "$ff_rev" ] || { echo "build.sh: FFmpeg n6.1.2 is not $ff_rev" >&2; exit 1; }
+fi
 docker run --rm -v "$here:/w" -w /w ubuntu:18.04 sh -c '
     set -e
     export DEBIAN_FRONTEND=noninteractive
@@ -30,7 +37,14 @@ docker run --rm -v "$here:/w" -w /w ubuntu:18.04 sh -c '
         rm -rf build/plist-src && mkdir -p build/plist-src && tar -xjf build/dl/libplist-2.6.0.tar.bz2 -C build/plist-src --strip-components 1
         (cd build/plist-src && ./configure -q --prefix=/w/build/plist --enable-static --disable-shared --without-cython --without-tests >/dev/null && make -s -j"$(nproc)" >/dev/null && make -s install >/dev/null)
     fi
-    make -s SRC=build/src OUT=build/out PLIST=/w/build/plist -j"$(nproc)"
+    if [ ! -f build/ffmpeg/lib/libavcodec.a ]; then
+        rm -rf build/ffmpeg-bld && cp -r build/ffmpeg-src build/ffmpeg-bld
+        (cd build/ffmpeg-bld && ./configure --prefix=/w/build/ffmpeg --disable-everything --disable-programs --disable-doc \
+            --disable-avformat --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample --disable-postproc \
+            --disable-network --disable-x86asm --disable-autodetect --disable-iconv --enable-decoder=aac --enable-decoder=alac \
+            --enable-static --disable-shared --enable-pic >/dev/null && make -s -j"$(nproc)" >/dev/null 2>&1 && make -s install >/dev/null)
+    fi
+    make -s SRC=build/src OUT=build/out PLIST=/w/build/plist FFMPEG=/w/build/ffmpeg -j"$(nproc)"
     chown -R '"$(id -u):$(id -g)"' build
 '
 # the unit has only /lib/ld-linux-x86-64.so.2 (no /lib64): refuse a binary that asks for another loader
@@ -41,6 +55,7 @@ docker run --rm -v "$here:/w" ubuntu:18.04 sh -c 'ln -sf /lib/x86_64-linux-gnu/l
     || { echo "build.sh: uxplay-mgu does not start in ubuntu:18.04 with /lib/ld-linux-x86-64.so.2" >&2; exit 1; }
 cp "$work/out/uxplay-mgu" "$work/uxplay-mgu"
 cp "$work/src/LICENSE" "$work/UXPLAY-LICENSE"
+cp "$work/ffmpeg-src/COPYING.LGPLv2.1" "$work/FFMPEG-LICENSE"
 # link-only stubs of the unit's video libraries: lets the binary start on a PC (tests); never shipped
 rm -rf "$work/stub" && cp -r "$work/out/stub" "$work/stub"
 file "$work/uxplay-mgu" 2>/dev/null || true

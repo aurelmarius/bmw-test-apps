@@ -21,13 +21,14 @@ const record = require('./kit/record');
 const Parked = require('./kit/parked');
 const { RenderClient } = require('./mgu_render_client');
 const { createMirrorView } = require('./mirror_view');
+const { createCarAudio } = require('./car_audio');
 
 const W = 1600, H = 520;
 const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.7.1';   // (the service did not change in 0.7.2)
+const SERVICE_VERSION = '0.8.0';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -81,7 +82,7 @@ function rxSteps(s) {
     const off = !s.active;
     const gotVideo = !!(r.video && st.frames > 0);
     return [
-        { label: 'Service', state: 'ok', detail: 'version ' + s.version + (s.active ? ', receiver test running' : ', idle') },
+        { label: 'Service', state: 'ok', detail: 'version ' + s.version + (s.active ? ', receiver running' : ', idle') },
         { label: 'Wi-Fi network', state: used.length ? 'ok' : off ? 'off' : 'bad',
             detail: used.length ? used.map((i) => i.name + ' ' + i.ip + ' (' + i.kind + ')').join(', ') : 'none: connect the iPhone with wireless CarPlay' },
         { label: 'Firewall', state: fw.state === 'open' ? 'ok' : fw.state === 'failed' ? 'bad' : off ? 'off' : 'wait',
@@ -97,7 +98,18 @@ function rxSteps(s) {
         { label: 'GPU decoder', state: r.decoder ? (r.decoder.ok ? (st.shown > 0 ? 'ok' : 'wait') : 'bad') : off ? 'off' : 'wait',
             detail: r.decoder ? (r.decoder.ok ? st.shown + ' pictures' + (st.decerr ? ', ' + st.decerr + ' failed' : '') + ' into ' + r.decoder.w + 'x' + r.decoder.h : r.decoder.error) : 'opens with the first picture' },
         { label: 'On screen', state: s.mirror && s.mirror.shown ? 'ok' : off ? 'off' : 'wait', detail: (s.mirror && s.mirror.why) || '' },
+        soundStep(r, st, s.carAudio, off),
     ];
+}
+
+/** the sound: the receiver's decoder and device, then the route to the speakers */
+function soundStep(r, st, ca, off) {
+    const snd = r.sound;
+    if (!snd) return { label: 'Sound', state: off ? 'off' : 'wait', detail: r.audio ? 'starting' : 'none yet' };
+    if (!snd.ok) return { label: 'Sound', state: 'bad', detail: snd.error };
+    const n = st.adec ? st.adec + ' played' + (st.alate || st.afull ? ', ' + (st.alate + st.afull) + ' dropped' : '') : 'nothing played yet';
+    if (ca && ca.error) return { label: 'Sound', state: 'bad', detail: n + '; route: ' + ca.error };
+    return { label: 'Sound', state: ca && ca.connected ? 'ok' : 'wait', detail: n + (ca && ca.connected ? ', on the speakers' : ', connecting the speakers') + (st.adev >= 0 ? ' (' + Math.round(st.adev) + ' ms)' : '') };
 }
 
 function steps(s) {
@@ -165,9 +177,12 @@ mgu.run({
         // leaving the app (HOME, another app, CarPlay's tile) ends the iPhone's mirroring, so CarPlay is free at once
         // (setting endOnLeave, on): 1.5 s after the page went, once per session
         let goneAt = 0, ended = false;
+        // stage 3: the speakers while the receiver has an iPhone with sound and the app is up (leaving it ends the session)
+        const carAudio = createCarAudio(ctx.signals, log);
         function syncMirror() {
             const rxOn = st && st.mode === 'receiver' && st.active ? st.rx : null;
             mirror.update({ rx: rxOn, pageVisible: shown(), driving: parked.moving() });
+            carAudio.want(!!(rxOn && rxOn.running && rxOn.client && rxOn.sound && rxOn.sound.ok && shown()));
             if (shown()) { goneAt = 0; ended = false; return; }
             if (!rxOn || !rxOn.client || ended || ctx.settings.get('endOnLeave') === false) return;
             if (!goneAt) goneAt = Date.now();
@@ -177,7 +192,7 @@ mgu.run({
                 ask('end-session', { why: 'the app left the front' }).then((r) => { if (r) st = r; });
             }
         }
-        if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => mirror.close());
+        if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => { mirror.close(); carAudio.want(false); });
         ui.onClick('BTN_STOP', () => command('stop', 'Stopping...'));
 
         function render() {
@@ -198,10 +213,10 @@ mgu.run({
             const vl = wrap(cv, v.text, 26, 1500, 'bold').slice(0, 2);
             vl.forEach((l, i) => cv.text(l, 52, 98 + i * 36 - (vl.length === 1 ? -14 : 0), 26, t.text, { font: 'bold', literal: true }));
             // steps
-            if (st && st.mode === 'receiver') st.mirror = mirror.state();
+            if (st && st.mode === 'receiver') { st.mirror = mirror.state(); st.carAudio = carAudio.state(); }
             const rows = steps(st);
             const COL = { ok: GREEN, wait: AMBER, bad: RED, off: withAlpha('#ffffff', 0.3) };
-            const rowH = rows.length > 7 ? 36 : 44;   // the receiver's 9 steps fit the page
+            const rowH = rows.length > 9 ? 32 : rows.length > 7 ? 36 : 44;   // the receiver's 10 steps fit the page
             rows.forEach((r, i) => {
                 const y = 190 + i * rowH;
                 cv.circle(44, y - 8, 9, COL[r.state]);

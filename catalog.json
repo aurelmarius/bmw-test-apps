@@ -5,18 +5,18 @@
     {
       "id": "aurelm-airplay-probe",
       "kind": "tool",
-      "version": "0.7.1",
+      "version": "0.8.0",
       "title": "AirPlay network test service",
-      "description": "For the app AirPlay Test: the network test, and the AirPlay receiver (UxPlay's protocol on the head unit): the iPhone's screen mirroring decoded on the GPU into mgu-render's frame file, shown by the app while parked. Picture only, no sound yet. Opens the firewall for its ports only while a test runs.",
+      "description": "For the app AirPlay Test: the network test, and the AirPlay receiver (UxPlay's protocol on the head unit): the iPhone's screen mirroring decoded on the GPU into mgu-render's frame file, shown by the app while parked, and its sound into SmartXbar's CarLife input. Opens the firewall for its ports only while a test runs.",
       "author": "aurelmarius",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm-airplay-probe@0.7.1.tgz",
-        "size": 2070157,
-        "sha256": "166ff877787497cb4d0e1e3c3bbba2cf47cfd458411477429b12dcfb98966141",
-        "url": "packages/aurelm-airplay-probe@0.7.1.tgz"
+        "name": "aurelm-airplay-probe@0.8.0.tgz",
+        "size": 2505838,
+        "sha256": "d750e5602d01a01cbcdb27bd1cf24107da1e0a1be8d05112d690110c8cce0bb4",
+        "url": "packages/aurelm-airplay-probe@0.8.0.tgz"
       },
       "requires": {
         "mgu-deploy": "0.7.0"
@@ -26,23 +26,23 @@
     {
       "id": "aurelm_airplay_probe",
       "kind": "app",
-      "version": "0.7.2",
+      "version": "0.8.0",
       "title": "AirPlay Test",
-      "description": "AirPlay receiver for the head unit, in stages: the network test, and the receiver: the iPhone's screen mirroring on the centre screen while parked (picture only, no sound yet). Needs the AirPlay test service.",
+      "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers. Also the network test. Needs the AirPlay test service.",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_airplay_probe@0.7.2.tgz",
-        "size": 566864,
-        "sha256": "7004e6866400aeec4edfb286c1736487d0d82633d7f1122de66b060745a0fd7e",
-        "url": "packages/aurelm_airplay_probe@0.7.2.tgz"
+        "name": "aurelm_airplay_probe@0.8.0.tgz",
+        "size": 568723,
+        "sha256": "394d89e87ddc3099d59000851228acdbff8cfded8506c207eaad4c2f7b5062e0",
+        "url": "packages/aurelm_airplay_probe@0.8.0.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_airplay_probe.png",
       "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0",
       "requires": {
-        "aurelm-airplay-probe": "0.7.1"
+        "aurelm-airplay-probe": "0.8.0"
       }
     }
   ]
