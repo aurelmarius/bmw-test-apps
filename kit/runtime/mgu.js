@@ -610,6 +610,7 @@ async function runInner(impl) {
         if (st && st.on) st.on('focus', (ev) => ui._setFocus(s.name, !(ev && ev.focus === false)));
     });
     ui.rhmi.on('applicationStackChanged', (stack) => {
+        ui.stack = stack;               // the HMI's last report (apps can show it for diagnostics)
         const shown = stack && Object.keys(stack).length > 0 && ('ROOT_APP' in stack);
         Promise.resolve().then(() => (shown ? app.registerHmiVisible() : app.unregisterHmiVisible()))
             .catch((e) => log.warn('hmi visible: ' + e));
@@ -633,16 +634,20 @@ async function runInner(impl) {
     } catch (e) { log.warn('no rhmiData/application.json: ' + e); }
     const mainState = ui.comp(mainName);
     const mapped = {};
-    await Promise.all(entryUuids.map((uuid) => ui.rhmi.mapEntryState(uuid, mainState)
+    // impl.lazyEntry: no mapping up front, so a tap / favourite button reaches the app (entryPointExecute)
+    // before the HMI opens anything, and onEntry returning false leaves the current screen as it is
+    if (!(impl && impl.lazyEntry)) await Promise.all(entryUuids.map((uuid) => ui.rhmi.mapEntryState(uuid, mainState)
         .then(() => { mapped[uuid] = true; log.info('mapped entry ' + uuid + ' -> ' + mainName); })
         .catch((e) => log.error('map entry state', e))));
     let opening = null;
     const openEntry = (uuid) => {
         if (opening) return opening;   // MainApp can send the same tap twice
-        const map = mapped[uuid] ? Promise.resolve() : ui.rhmi.mapEntryState(uuid, mainState).then(() => { mapped[uuid] = true; });
+        // lazyEntry: the entry stays unmapped (else the HMI would open it by itself from then on): open the state
+        const lazy = !!(impl && impl.lazyEntry);
+        const map = lazy || mapped[uuid] ? Promise.resolve() : ui.rhmi.mapEntryState(uuid, mainState).then(() => { mapped[uuid] = true; });
         opening = map
             .then(() => (mainState && mainState.updateResources ? mainState.updateResources().catch(() => {}) : null))
-            .then(() => ui.rhmi.openEntryState(uuid))
+            .then(() => (lazy ? ui.rhmi.openState(mainName) : ui.rhmi.openEntryState(uuid)))
             .then(() => ui._setVisible(mainName, true))
             .catch((e) => log.error('open entry state', e))
             .then(() => { opening = null; });

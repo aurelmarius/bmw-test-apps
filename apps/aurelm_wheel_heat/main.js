@@ -27,6 +27,11 @@ const isFavourite = (reason) => /BOOKMARK/i.test(String(reason));
 
 mgu.run({
     onEntry(reason, uuid) { return onEntry(reason, uuid); },
+    // "Stay on the current screen": the entry is not mapped to the screen, so the HMI asks the app before
+    // opening anything (read at the app's start: the mapping is made then)
+    get lazyEntry() {
+        try { return new mgu.Settings(mgu.SPEC.settings).get('showOnShortcut') === 'stay'; } catch (e) { return false; }
+    },
 
     async start(ctx) {
         const { ui, settings, log } = ctx;
@@ -46,6 +51,15 @@ mgu.run({
 
         // after a favourite button (showOnShortcut "brief"): the screen closes on its own a few seconds after
         // the switch, unless it is used meanwhile (a button, a tab, a tap) or the settings sheet is open
+        // what this head unit's HMI offers an app (shown on the details page, for the next tests)
+        let hmiNote = '';
+        const hmiApi = (() => {
+            const names = new Set();
+            for (let o = ui.rhmi; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) Object.getOwnPropertyNames(o).forEach((n) => { try { if (typeof ui.rhmi[n] === 'function') names.add(n); } catch (e) { /* getter */ } });
+            const want = ['closeTask', 'removeStateFromHistory', 'removeTaskFromHistory', 'closeState', 'openState', 'openEntryState'];
+            log.info('rhmi methods: ' + Array.from(names).sort().join(', '));
+            return want.filter((n) => names.has(n)).join(' ') || 'none of ' + want.join(' ');
+        })();
         let autoClose = null;
         const cancelAutoClose = () => { if (autoClose) { clearTimeout(autoClose); autoClose = null; log.info('auto close cancelled'); } };
         const closeSoon = (after) => {
@@ -55,6 +69,8 @@ mgu.run({
                     autoClose = null;
                     if (!ui.isVisible('MAIN') || (ctx.display && ctx.display.sheet)) return;
                     log.info('closing after the favourite button');
+                    hmiNote = 'closed ' + new Date().toTimeString().slice(0, 8) + ', stack before: ' + JSON.stringify(ui.stack || null);
+                    log.info('auto close: ' + hmiNote);
                     Promise.resolve(ui.close('MAIN')).catch((e) => log.warn('auto close: ' + e));
                 }, AUTO_CLOSE_MS);
             });
@@ -152,11 +168,13 @@ mgu.run({
                 y += 34;
             });
             G.panel(cv, t, 816, 44, 760, 468, 'Requests sent');
+            cv.text(fitText(cv, 'HMI offers: ' + hmiApi, 17, 692), 848, 392, 17, t.dim);
+            cv.text(fitText(cv, hmiNote ? 'Auto close: ' + hmiNote : 'HMI stack: ' + JSON.stringify(ui.stack || null), 17, 692), 848, 420, 17, t.dim);
             if (lastOpen) cv.text(fitText(cv, 'Last opened: ' + (lastOpen.fav ? 'favourite button' : 'apps menu') + ' (' + lastOpen.reason + ') -> ' + lastOpen.mode + '  ·  ' + ago(lastOpen.t), 19, 692), 848, 482, 19, t.dim);
             cv.text(fitText(cv, 'Client group ' + settings.get('clientGroupId') + '  ·  path ' + settings.display('path') + (settings.get('probe') !== false ? '  ·  tries other groups' : ''), 19, 692), 848, 124, 19, t.dim);
             y = 170;
             if (!heat.history.length) cv.text('Nothing sent yet', 848, y, 21, t.dim);
-            heat.history.slice(0, 8).forEach((h) => {
+            heat.history.slice(0, 5).forEach((h) => {
                 const a = h.via === 'climate' ? 'group ' + h.args.clientGroupId + ', level ' + h.args.steeringWheelHeating
                     : h.via === 'climate-set' ? 'write level ' + h.args.configuredIntensityLevel : 'heating ' + h.args.heating;
                 const ok = ['IS_ACCEPTED', 'NO_CHANGES', 'SENT', 'SET'].indexOf(h.answer) >= 0;
