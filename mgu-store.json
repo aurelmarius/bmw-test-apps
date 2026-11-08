@@ -1,5 +1,12 @@
 {
   "apps": {
+    "aurelm_airplay_probe": {
+      "title": "AirPlay Test",
+      "description": "Network test for a future AirPlay receiver: can an iPhone find and reach the head unit? Announces a test receiver and shows what the iPhone does. Needs the AirPlay network test service.",
+      "author": "custom",
+      "icon": "aurelm_airplay_probe.png",
+      "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0"
+    },
     "aurelm_wheel_heat": {
       "title": "Wheel Heating",
       "description": "Steering wheel heating on/off from a favourite button: for a heated iDrive 8 (LCI) steering wheel without its own button, fitted to an iDrive 7 car",

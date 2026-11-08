@@ -47,6 +47,26 @@ jobs:
             git push origin main
           fi
 
+      # The Store reads a Releases source through its `catalog` release when there is one: the only way a
+      # tool (a native service, which a release asset cannot be) reaches the car. Every package, icon and
+      # the catalog (absolute URLs into this release) go there; assets no longer listed are removed.
+      # Updated before the numbered release, so the Store never sees a tool kit as an app package.
+      - name: Update the catalog release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view catalog >/dev/null 2>&1; then
+            gh release create catalog --title "Store catalog" --latest=false \
+              --notes "The Store's catalog for this repository (catalog.json): every app and service of the latest release. Updated by the Publish Test Release workflow; never retired."
+          fi
+          gh release upload catalog dist/catalog-release/catalog.json packages/*.tgz *.png --clobber
+          keep=$(ls packages/*.tgz *.png | xargs -n1 basename; echo catalog.json)
+          gh release view catalog --json assets --jq '.assets[].name' | while read -r a; do
+            echo "$keep" | grep -qxF "$a" || { echo "removing old asset $a"; gh release delete-asset catalog "$a" --yes; }
+          done
+          gh release view catalog --json assets --jq '.assets[].name'
+
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

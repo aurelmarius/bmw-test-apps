@@ -37,6 +37,27 @@ For an iDrive 7 car fitted with a heated iDrive 8 (LCI) steering wheel. That whe
 
 ---
 
+### 📡 AirPlay Test (`aurelm_airplay_probe`) + AirPlay network test service (`aurelm-airplay-probe`)
+*A network test for a future AirPlay receiver: can an iPhone find the head unit and connect to it?*
+
+**Status:** first in-car test. Not a receiver: nothing is streamed.
+
+The app and its root service announce a test receiver, **BMW iDrive test**, on the Wi-Fi networks for 15 minutes and show step by step what gets through: the network, the firewall, mDNS, the iPhone's AirPlay query and its connection. While the test runs, the service opens the firewall for tcp 7000/7100 and udp 5353 on the Wi-Fi interfaces only, and closes it again when the test ends.
+
+1. Install **AirPlay Test**: the Store installs the **AirPlay network test service** first. **Restart the head unit once** after installing (the service listens for the app from the next start).
+2. Put the iPhone and the head unit on one network, one setup per run:
+   - **A. Head unit on the iPhone's hotspot:** Personal Hotspot on (Maximise Compatibility on); the head unit joins it through **mgu-uplink**.
+   - **B. iPhone on the car's network:** wireless CarPlay connected.
+3. In the app press **Start test**. On the iPhone: Control Center -> **Screen Mirroring**; if **BMW iDrive test** shows up, tap it.
+4. **PASS** when the iPhone connected (it then says it could not connect: expected). Otherwise the first step that is not green says where it stopped. **Take a photo of the screen when you report a test.**
+5. Removing **AirPlay Test** in the Store takes the service with it; nothing stays on the head unit ([what goes, and how](native/aurelm-airplay-probe/README.md#removal-leaves-nothing)). The service never runs at boot: only while the app is open, and 10 minutes after.
+
+![AirPlay Test - waiting for the iPhone](docs/screenshots/aurelm_airplay_probe-waiting.png)
+![AirPlay Test - PASS](docs/screenshots/aurelm_airplay_probe-pass.png)
+<sub>Screenshots drawn by the app on a PC, against the real service on the loopback interface.</sub>
+
+---
+
 ## 🚀 Installation
 
 ### Via mgu-store
@@ -61,6 +82,7 @@ For an iDrive 7 car fitted with a heated iDrive 8 (LCI) steering wheel. That whe
 ```bash
 /var/opt/mgu-deploy/mgu-deploy.sh install --artifact aurelm_wheel_heat@1.0.1.tgz --yes
 ```
+A service (`aurelm-airplay-probe@<version>.tgz`) installs the same way, before the app that needs it.
 
 ---
 
@@ -70,7 +92,16 @@ For an iDrive 7 car fitted with a heated iDrive 8 (LCI) steering wheel. That whe
 python3 kit/tools/build.py aurelm_wheel_heat          # -> dist/aurelm_wheel_heat@<version>.tgz
 node tests/aurelm_wheel_heat.test.js                  # Wheel Heating's switching against a simulated car
 cp dist/aurelm_wheel_heat@<version>.tgz packages/     # a push to main with a new package publishes a release
+python3 tools/pack_tools.py                           # native/<id>/ services -> packages/<id>@<version>.tgz
+node tests/airplay_probe.test.js                      # the AirPlay network test service
 ```
+
+**Services (tools).** A native service lives in `native/<id>/` with its `component.json` (the Store's tool
+format); an app that needs one names it in its `app.json` (`"requires": {"<id>": "<version>"}`). Release
+assets can carry apps only, so the release also updates the **`catalog` release**: `catalog.json` with every
+app and service (absolute URLs into that release), every package and icon. The Store reads the source
+through it (the source stays `aurelmarius/bmw-test-apps` on **Releases**), installs a service before the
+app that requires it, and offers its removal with the app. The `catalog` release is never retired.
 
 App ids start with `aurelm_`, as in [bmw-games](https://github.com/aurelmarius/bmw-games): ids are global on the
 head unit, and the Store's publishing guide asks for a prefix of one's own. Each app has its own
