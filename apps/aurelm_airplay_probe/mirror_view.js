@@ -8,9 +8,9 @@
  * picture fitted in (aspect kept). The kit's page (the status) stays underneath.
  *
  * Shown while: the receiver test runs, the decoder writes pictures, the app's page is up, the car is PARKED
- * (parked.js strict: no speed, or a speed older than 5 s, counts as moving) and nobody hid it. A tap on it, or a
- * press or a push of the iDrive controller (grabbed while shown), hides it: the status page is back; "Start
- * receiver" shows it again.
+ * (parked.js strict: no speed, or a speed older than 5 s, counts as moving) and nobody hid it. A press or a push
+ * of the iDrive controller (grabbed while shown), or HOME, hides it: the status page is back; "Start receiver"
+ * shows it again. A tap on the picture does nothing (it is kept from the page's buttons underneath).
  *
  *   const view = createMirrorView({ RenderClient, Recorder, appId, log, statIno });
  *   view.update({ rx, pageVisible, driving });   // each second and on every change
@@ -44,7 +44,9 @@ function createMirrorView(o) {
         log.info('mirror: hidden by ' + by);
         apply(false);
     };
-    gpu.on('touch', (phase) => { if (phase === 'down') hide('a tap'); return true; });
+    // touch on the picture is kept (claimed) and ignored: it must not reach the page's buttons underneath, and a tap
+    // must not take the picture away (the owner's choice in the car); the controller's buttons hide it
+    gpu.on('touch', () => true);
     gpu.on('ccu', (c) => {
         if (c.press && c.press !== lastPress) hide('the controller');
         else if (c.tilt && c.tilt !== lastTilt) hide('the controller');
@@ -62,7 +64,7 @@ function createMirrorView(o) {
             rec = new o.Recorder(pl.w, pl.h).clear(0x000000ff).video(VID, 0, 0, pl.w, pl.h, 0);
             if (hint) {
                 rec.roundRect(pl.w / 2 - 330, pl.h - 96, 660, 60, 30, 0x000000b0);
-                rec.text(o.hintText || 'Tap the screen or press a button to return', pl.w / 2, pl.h - 56, 26, 0xffffffff, { align: 'center', font: 'bold', literal: true });
+                rec.text(o.hintText || 'Press a button on the iDrive controller to return', pl.w / 2, pl.h - 56, 26, 0xffffffff, { align: 'center', font: 'bold', literal: true });
             }
             hinted = hint;
         }

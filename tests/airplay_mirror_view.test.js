@@ -71,10 +71,12 @@ test('hidden while driving, and when the app is not in front', () => {
     assert.strictEqual(v.state().why, 'the app is not in front');
 });
 
-test('a tap or the controller hides it; "Start receiver" (wantAgain) shows it again', () => {
+test('a tap does nothing; the controller hides it; "Start receiver" (wantAgain) shows it again', () => {
     const { v, gpu } = setup();
     v.update({ rx: rx(), pageVisible: true, driving: false });
     gpu.emit('touch', 'down', 100, 100);
+    assert.strictEqual(v.state().shown, true);
+    gpu.emit('ccu', { press: 1, tilt: 0 });
     assert.strictEqual(v.state().shown, false);
     v.update({ rx: rx(), pageVisible: true, driving: false });
     assert.strictEqual(v.state().shown, false);
@@ -82,7 +84,7 @@ test('a tap or the controller hides it; "Start receiver" (wantAgain) shows it ag
     v.wantAgain();
     v.update({ rx: rx(), pageVisible: true, driving: false });
     assert.strictEqual(v.state().shown, true);
-    gpu.emit('ccu', { press: 1, tilt: 0 });
+    gpu.emit('ccu', { press: 0, tilt: 3 });
     assert.strictEqual(v.state().shown, false);
 });
 

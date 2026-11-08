@@ -7,7 +7,7 @@
  *                     network, the firewall, mDNS, the iPhone's AirPlay query and its connection;
  *   "Start receiver"  the receiver: UxPlay's protocol ("BMW iDrive") takes the iPhone's screen mirroring; its GPU
  *                     decoder writes the pictures, shown over the whole screen while the car is parked
- *                     (mirror_view.js). A tap or the iDrive controller hides it; "Start receiver" shows it again.
+ *                     (mirror_view.js). The iDrive controller's buttons hide it; "Start receiver" shows it again.
  * On the iPhone: Control Center > Screen Mirroring.
  *
  * Talks to the service over /run/aurelm-airplay-probe.sock (a JSON object per line).
@@ -27,7 +27,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.7.1';
+const SERVICE_VERSION = '0.7.1';   // (the service did not change in 0.7.2)
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 

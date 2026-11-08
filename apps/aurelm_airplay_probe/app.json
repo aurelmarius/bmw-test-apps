@@ -2,7 +2,7 @@
   "id": "aurelm_airplay_probe",
   "title": "AirPlay Test",
   "description": "AirPlay receiver for the head unit, in stages: the network test, and the receiver: the iPhone's screen mirroring on the centre screen while parked (picture only, no sound yet). Needs the AirPlay test service.",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "vendor": "custom",
   "loggingId": "OA9X",
   "iconGlyph": "AP",
