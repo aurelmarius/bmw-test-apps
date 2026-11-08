@@ -32,23 +32,46 @@ function fakeSignals(opts) {
 const log = { info() {}, warn() {} };
 const fs = require('fs'), os = require('os');
 const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ca-')), 'car-audio.json');
+// this start of the head unit
+const BOOT = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'boot-')), 'boot_id');
+fs.writeFileSync(BOOT, 'boot-now\n');
+const opt = (file) => ({ file, bootIdPath: BOOT });
 const settle = () => new Promise((r) => setTimeout(r, 50));
 const tests = [];
 const test = (n, f) => tests.push({ n, f });
 
 test('at start: our own leftover (the saved id) disconnected, the source unavailable; another app\'s left alone', async () => {
     const file = tmpFile();
-    fs.writeFileSync(file, JSON.stringify({ mainConnectionID: 7 }));
-    const s = fakeSignals({ list: [{ mainConnectionID: 7, sourceID: 287 }, { mainConnectionID: 9, sourceID: 287 }, { mainConnectionID: 8, sourceID: 1 }] });
-    createCarAudio(s, log, { file });
+    fs.writeFileSync(file, JSON.stringify({ mainConnectionID: 7, bootId: 'boot-now' }));
+    const s = fakeSignals({ list: [{ mainConnectionID: 7, sourceID: 287 }, { mainConnectionID: 8, sourceID: 1 }] });
+    createCarAudio(s, log, opt(file));
     await settle();
-    assert.deepStrictEqual(s.calls, ['getListMainConnections', 'disconnect #7', 'hookSourceAvailablityStatusChange 287 A_UNAVAILABLE']);
+    assert.deepStrictEqual(s.calls, ['getListMainConnections', 'disconnect #7', 'getListMainConnections', 'hookSourceAvailablityStatusChange 287 A_UNAVAILABLE']);
+    assert.ok(!fs.existsSync(file));
+});
+
+test('our leftover gone while another app is on 287: the source stays available', async () => {
+    const file = tmpFile();
+    fs.writeFileSync(file, JSON.stringify({ mainConnectionID: 7, bootId: 'boot-now' }));
+    const s = fakeSignals({ list: [{ mainConnectionID: 7, sourceID: 287 }, { mainConnectionID: 9, sourceID: 287 }] });
+    createCarAudio(s, log, opt(file));
+    await settle();
+    assert.deepStrictEqual(s.calls, ['getListMainConnections', 'disconnect #7', 'getListMainConnections']);
+});
+
+test('an id saved before the head unit restarted: dropped, nothing disconnected', async () => {
+    const file = tmpFile();
+    fs.writeFileSync(file, JSON.stringify({ mainConnectionID: 9, bootId: 'boot-before' }));
+    const s = fakeSignals({ list: [{ mainConnectionID: 9, sourceID: 287 }] });
+    createCarAudio(s, log, opt(file));
+    await settle();
+    assert.deepStrictEqual(s.calls, []);
     assert.ok(!fs.existsSync(file));
 });
 
 test('at start without a saved id: nothing touched (a 287 connection is Emby\'s)', async () => {
     const s = fakeSignals({ list: [{ mainConnectionID: 9, sourceID: 287 }] });
-    createCarAudio(s, log, { file: tmpFile() });
+    createCarAudio(s, log, opt(tmpFile()));
     await settle();
     assert.deepStrictEqual(s.calls, []);
 });
@@ -56,7 +79,7 @@ test('at start without a saved id: nothing touched (a 287 connection is Emby\'s)
 test('287 in use by another app: not connected, reported, connected once it is free', async () => {
     const o = { list: [{ mainConnectionID: 9, sourceID: 287 }] };
     const s = fakeSignals(o);
-    const a = createCarAudio(s, log, { file: tmpFile() });
+    const a = createCarAudio(s, log, opt(tmpFile()));
     a.want(true);
     await settle();
     assert.deepStrictEqual(s.calls, ['getListMainConnections']);
@@ -76,24 +99,24 @@ test('287 in use by another app: not connected, reported, connected once it is f
 test('on: available, then connect 287 -> 1024; off: disconnect it, unavailable again', async () => {
     const file = tmpFile();
     const s = fakeSignals();
-    const a = createCarAudio(s, log, { file });
+    const a = createCarAudio(s, log, opt(file));
     await settle(); s.calls.length = 0;
     a.want(true); a.want(true);
     await settle();
     assert.deepStrictEqual(s.calls, ['getListMainConnections', 'hookSourceAvailablityStatusChange 287 A_AVAILABLE', 'connect 287->1024']);
     assert.deepStrictEqual(a.state(), { on: true, connected: true, error: null, taken: false });
-    assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).mainConnectionID, 42);
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { mainConnectionID: 42, bootId: 'boot-now' });
     s.calls.length = 0;
     a.want(false);
     await settle();
-    assert.deepStrictEqual(s.calls, ['disconnect #42', 'hookSourceAvailablityStatusChange 287 A_UNAVAILABLE']);
+    assert.deepStrictEqual(s.calls, ['disconnect #42', 'getListMainConnections', 'hookSourceAvailablityStatusChange 287 A_UNAVAILABLE']);
     assert.strictEqual(a.state().connected, false);
     assert.ok(!fs.existsSync(file));
 });
 
 test('a refused connect is reported', async () => {
     const s = fakeSignals({ refuse: true });
-    const a = createCarAudio(s, log);
+    const a = createCarAudio(s, log, opt(tmpFile()));
     a.want(true);
     await settle();
     assert.strictEqual(a.state().connected, false);

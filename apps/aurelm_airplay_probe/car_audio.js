@@ -9,9 +9,11 @@
  * disconnect after it, in order.
  *
  * 287 is shared: the Emby app (aurelm-emby) plays into it too. So this module touches only its own connection: its
- * mainConnectionID is kept in a file (`file`), and only that id is ever disconnected, also the one a crash or a
- * power-off left. A 287 connection that is not ours is left alone, and the sound is not connected over it: the
- * state says the speakers are taken. The source is marked unavailable again only after our own disconnect.
+ * mainConnectionID is kept in a file (`file`, { mainConnectionID, bootId }, the same form as Emby's), and only that id
+ * is ever disconnected, also the one a crash left. An id saved before the head unit restarted is not ours any more
+ * (the audio manager numbers its connections afresh): the file is dropped, nothing disconnected. A 287 connection
+ * that is not ours is left alone, and the sound is not connected over it: the state says the speakers are taken.
+ * The source is marked unavailable only when no connection is left on 287 (the other app may have connected meanwhile).
  *
  *   const audio = createCarAudio(ctx.signals, log);
  *   audio.want(true | false);     // the receiver has an iPhone with sound and the app is up
@@ -26,10 +28,18 @@ function createCarAudio(signals, log, opts) {
     const fs = o.fs || require('fs');
     const am = { p: null, r: null, id: null, on: false, q: Promise.resolve(), connected: false, error: null, taken: false };
     // our connection's id, kept across a crash; null: none of ours
-    const saved = () => { try { const v = JSON.parse(fs.readFileSync(o.file, 'utf8')).mainConnectionID; return v == null ? null : v; } catch (e) { return null; } };
+    const bootId = () => { try { return fs.readFileSync(o.bootIdPath || '/proc/sys/kernel/random/boot_id', 'utf8').trim(); } catch (e) { return null; } };
+    const saved = () => {
+        try {
+            const v = JSON.parse(fs.readFileSync(o.file, 'utf8'));
+            // from an earlier start of the head unit: that number may now be another app's connection
+            if (v.mainConnectionID == null || !v.bootId || v.bootId !== bootId()) return null;
+            return v.mainConnectionID;
+        } catch (e) { return null; }
+    };
     const save = (id) => {
         if (!o.file) return;
-        try { if (id == null) fs.unlinkSync(o.file); else fs.writeFileSync(o.file, JSON.stringify({ mainConnectionID: id })); } catch (e) { /* none, or not writable */ }
+        try { if (id == null) fs.unlinkSync(o.file); else fs.writeFileSync(o.file, JSON.stringify({ mainConnectionID: id, bootId: bootId() })); } catch (e) { /* none, or not writable */ }
     };
     // a fresh proxy answers "Service unavailable" until the provider is found: wait for it (max 5 s)
     async function proxy(iface) {
@@ -49,12 +59,18 @@ function createCarAudio(signals, log, opts) {
     /** our connection a crash or a power-off left: disconnected, and the source unavailable again */
     async function leftover() {
         const id = saved();
-        if (id == null) return;
+        if (id == null) { save(null); return; }   // none, or from an earlier start: dropped
         if ((await on287()).some((c) => c.mainConnectionID === id)) {
             log.info('car audio: our leftover ' + id + ' ' + JSON.stringify(await signals.call(am.p, 'disconnect', { mainConnectionID: id })));
-            await avail(false);
+            await release();
         }
         save(null);
+    }
+    /** the source unavailable, unless another app's connection is on it now */
+    async function release() {
+        const left = await on287();
+        if (left.length) { log.info('car audio: 287 still in use (' + left.map((c) => c.mainConnectionID).join(', ') + '): left available'); return; }
+        await avail(false);
     }
     async function ready() {
         if (am.p) return;
@@ -88,7 +104,7 @@ function createCarAudio(signals, log, opts) {
                 am.connected = ok;
                 am.error = ok ? null : 'connect refused: ' + JSON.stringify(r);
                 log.info('car audio: connect ' + JSON.stringify(r));
-                if (!ok) await avail(false);
+                if (!ok) await release();
             } else {
                 am.taken = false;
                 if (am.id == null) { am.connected = false; return; }
@@ -96,7 +112,7 @@ function createCarAudio(signals, log, opts) {
                 am.id = null;
                 save(null);
                 am.connected = false;
-                await avail(false);
+                await release();
             }
         }).catch((e) => { am.error = String(e); log.warn('car audio: ' + e); });
     }
