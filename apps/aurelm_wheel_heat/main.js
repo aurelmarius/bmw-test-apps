@@ -18,6 +18,7 @@ const HOT = '#ff6a1a';
 const GREEN = '#2fd27a';
 const RED = '#ef2b2d';
 const ENTRY_DEBOUNCE_MS = 3000;     // MainApp can report one press twice (event + start reason)
+const AUTO_CLOSE_MS = 3000;         // setting showOnShortcut "brief": the status shows this long after the switch
 
 let onEntry = () => true;
 let lastOpen = null;                // { reason, fav, mode, t }: shown on the details page
@@ -43,6 +44,23 @@ mgu.run({
 
         const run = (want) => ready.then(() => heat.toggle(want)).then((r) => { say(r.msg || (r.ok ? 'Done' : 'Not switched')); kick(); return r; });
 
+        // after a favourite button (showOnShortcut "brief"): the screen closes on its own a few seconds after
+        // the switch, unless it is used meanwhile (a button, a tab, a tap) or the settings sheet is open
+        let autoClose = null;
+        const cancelAutoClose = () => { if (autoClose) { clearTimeout(autoClose); autoClose = null; log.info('auto close cancelled'); } };
+        const closeSoon = (after) => {
+            cancelAutoClose();
+            Promise.resolve(after).catch(() => {}).then(() => {
+                autoClose = setTimeout(() => {
+                    autoClose = null;
+                    if (!ui.isVisible('MAIN') || (ctx.display && ctx.display.sheet)) return;
+                    log.info('closing after the favourite button');
+                    Promise.resolve(ui.close('MAIN')).catch((e) => log.warn('auto close: ' + e));
+                }, AUTO_CLOSE_MS);
+            });
+        };
+        const userRun = () => { cancelAutoClose(); return run(); };
+
         // favourite button (BOOKMARK) / apps menu (ENTRY_POINT, ...): each has its own setting, so opening
         // the app from the menu to look doesn't switch off a heating the car switched on by itself
         let lastEntry = 0;
@@ -52,16 +70,18 @@ mgu.run({
             const mode = (fav ? settings.get('onOpen') : settings.get('onMenu')) || (fav ? 'toggle' : 'show');
             lastOpen = { reason: String(reason), fav, mode, t: now };
             log.info('opened (' + reason + (fav ? ', favourite button' : ', apps menu') + '): ' + mode);
-            if (mode !== 'show' && now - lastEntry > ENTRY_DEBOUNCE_MS) {
+            const screen = fav ? (settings.get('showOnShortcut') || 'brief') : 'show';
+            if (now - lastEntry > ENTRY_DEBOUNCE_MS) {
                 lastEntry = now;
-                run(mode === 'on' ? true : undefined);
+                const done = mode !== 'show' ? run(mode === 'on' ? true : undefined) : null;
+                if (screen === 'brief') closeSoon(done);
             }
             kick();
-            return !(fav && settings.get('showOnShortcut') === 'stay');
+            return screen !== 'stay';
         };
 
-        ui.onClick('BTN_TOGGLE', () => run());
-        ui.onClick('BTN_PAGE', () => { page = 1 - page; kick(); });
+        ui.onClick('BTN_TOGGLE', () => userRun());
+        ui.onClick('BTN_PAGE', () => { cancelAutoClose(); page = 1 - page; kick(); });
         heat.on('change', () => kick());
 
         /* ---------- drawing ---------- */
@@ -99,7 +119,7 @@ mgu.run({
             cv.fillRect(848, 290, 692, 110, withAlpha(on === true ? HOT : t.accent, 0.14));
             cv.strokeRoundRect(848, 290, 692, 110, 8, 1.5, withAlpha(on === true ? HOT : t.accent, 0.5));
             cv.text(heat.busy ? 'Switching...' : on === true ? 'Switch off' : 'Switch on', 1194, 358, 34, t.text, { font: 'bold', align: 'center' });
-            if (touch) cv.target(848, 290, 692, 110, () => run(), 'toggle', 8);
+            if (touch) cv.target(848, 290, 692, 110, () => userRun(), 'toggle', 8);
             const last = heat.last;
             if (last) {
                 cv.text(fitText(cv, (last.ok ? '' : 'Not switched: ') + (last.msg || '') + '  (' + ago(last.t) + ')', 21, 692), 848, 445, 21, last.ok ? (last.confirmed ? GREEN : t.text) : RED);
@@ -153,7 +173,7 @@ mgu.run({
             if (page === 0) drawStatus(cv, t); else drawDetails(cv, t);
             return ui.image('MAIN_GFX', cv);
         }
-        ctx.onTab((i) => { page = i; kick(); });
+        ctx.onTab((i) => { cancelAutoClose(); page = i; kick(); });
         loop = ctx.loop('MAIN', 2, render);
         function kick() { if (loop) loop.kick(); }
     },

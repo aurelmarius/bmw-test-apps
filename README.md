@@ -30,7 +30,7 @@ For an iDrive 7 car fitted with a heated iDrive 8 (LCI) steering wheel. That whe
 * **Status screen**: on / off as the car reports it, with an on / off button.
 * **Details page**: what both services report (available, level, coding) and every request sent with the car's answer. **Take a photo of this page when you report a test.**
 * **Client group**: which client group the climate service accepts from an app is not documented. When the climate service turns a request down, the app tries groups 0-7 and keeps the one it accepts (setting).
-* **Screen after a favourite button** (setting): show the status screen, or stay on the current screen.
+* **Screen after a favourite button** (setting): by default the status shows and the screen closes on its own 3 s after the switch (touching it meanwhile keeps it open); or keep the status screen open, or stay on the current screen.
 
 ![Wheel Heating - status](docs/screenshots/aurelm_wheel_heat-status.png)
 ![Wheel Heating - details](docs/screenshots/aurelm_wheel_heat-details.png)
@@ -75,13 +75,13 @@ The app and its root service announce a test receiver, **BMW iDrive test**, on t
 1. Download `<id>@<version>.tgz` from [Releases](https://github.com/aurelmarius/bmw-test-apps/releases).
 2. Build a USB repository:
    ```powershell
-   node mgu-install.js usb-repo E:\ aurelm_wheel_heat@1.0.2.tgz
+   node mgu-install.js usb-repo E:\ aurelm_wheel_heat@1.0.3.tgz
    ```
 3. Insert the USB drive into your car and install from the **USB** page of the Store.
 
 ### Via SSH
 ```bash
-/var/opt/mgu-deploy/mgu-deploy.sh install --artifact aurelm_wheel_heat@1.0.2.tgz --yes
+/var/opt/mgu-deploy/mgu-deploy.sh install --artifact aurelm_wheel_heat@1.0.3.tgz --yes
 ```
 A service (`aurelm-airplay-probe@<version>.tgz`) installs the same way, before the app that needs it.
 
