@@ -1,11 +1,19 @@
 {
   "id": "aurelm_airplay_probe",
   "title": "AirPlay Test",
-  "description": "AirPlay receiver for the head unit, in stages: the network test (can an iPhone find and reach the head unit?) and stage 1, UxPlay's protocol counting the mirrored picture during CarPlay. Needs the AirPlay test service.",
-  "version": "0.6.1",
+  "description": "AirPlay receiver for the head unit, in stages: the network test, and the receiver: the iPhone's screen mirroring on the centre screen while parked (picture only, no sound yet). Needs the AirPlay test service.",
+  "version": "0.7.0",
   "vendor": "custom",
   "loggingId": "OA9X",
   "iconGlyph": "AP",
+  "signals": {
+    "de.bmw.infotainment.vehicle.Vehicle2": {
+      "statusCarSpeed2": "rs"
+    }
+  },
+  "requires": {
+    "aurelm-airplay-probe": "0.7.0"
+  },
   "screens": [
     {
       "name": "MAIN",
@@ -88,8 +96,5 @@
         ]
       ]
     }
-  ],
-  "requires": {
-    "aurelm-airplay-probe": "0.6.1"
-  }
+  ]
 }

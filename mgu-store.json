@@ -2,7 +2,7 @@
   "apps": {
     "aurelm_airplay_probe": {
       "title": "AirPlay Test",
-      "description": "AirPlay receiver for the head unit, in stages: the network test (can an iPhone find and reach the head unit?) and stage 1, UxPlay's protocol counting the mirrored picture during CarPlay. Needs the AirPlay test service.",
+      "description": "AirPlay receiver for the head unit, in stages: the network test, and the receiver: the iPhone's screen mirroring on the centre screen while parked (picture only, no sound yet). Needs the AirPlay test service.",
       "author": "custom",
       "icon": "aurelm_airplay_probe.png",
       "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0"

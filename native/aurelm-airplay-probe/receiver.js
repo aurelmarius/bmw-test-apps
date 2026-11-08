@@ -16,6 +16,17 @@ const path = require('path');
 const cp = require('child_process');
 
 const BASE_PORT = 7300;
+// stage 2: the frame file the receiver's GPU decoder writes and the app shows (mgu-render takes it: owned by nobody)
+const VIDEO_PATH = '/dev/shm/mgu-video-aurelm-airplay';
+const VIDEO_SIZE = '1920x720';
+
+/** the gid of `group` (/etc/group), or null */
+function groupGid(group) {
+    try {
+        const l = fs.readFileSync('/etc/group', 'utf8').split('\n').find((x) => x.split(':')[0] === group);
+        return l ? Number(l.split(':')[2]) : null;
+    } catch (e) { return null; }
+}
 const PORTS = [BASE_PORT, BASE_PORT + 1, BASE_PORT + 2];   // uxplay -p 7300: tcp and udp 7300, 7301, 7302
 const MAX_RESTARTS = 3;
 // lines not worth keeping: UxPlay logs these every second while a client is quiet
@@ -24,14 +35,14 @@ const NOISE = /seconds since last client feedback|^\s*$|httpd didn't get respons
 function freshState() {
     return {
         running: false, pid: null, starts: 0, exit: null, error: null, ip: null, iface: null,
-        client: null, video: null, videoRunning: false, audio: null,
-        stream: { frames: 0, fps: 0, kbps: 0, idr: 0, sps: 0, audio: 0, at: 0 },
+        client: null, video: null, videoRunning: false, audio: null, decoder: null,
+        stream: { frames: 0, fps: 0, kbps: 0, idr: 0, sps: 0, audio: 0, shown: 0, decerr: 0, at: 0 },
         lines: [],
     };
 }
 
 /**
- * opts: { bin, uid (65534; null: this process's), gid (65534), home, log, now, onChange }
+ * opts: { bin, uid (65534; null: this process's), gid (65534; the group video when there is one), home, env (more), videoPath, log, now, onChange }
  * start({ name, deviceid, ip, iface }) / stop() / state()
  */
 function createReceiver(opts) {
@@ -67,7 +78,11 @@ function createReceiver(opts) {
             if (o.log) o.log('receiver: audio stream (type ' + j.ct + ')');
             break;
         case 'stats':
-            st.stream = { frames: j.frames, fps: j.fps, kbps: j.kbps, idr: j.idr, sps: j.sps, audio: j.audio, at: now() };
+            st.stream = { frames: j.frames, fps: j.fps, kbps: j.kbps, idr: j.idr, sps: j.sps, audio: j.audio, shown: j.shown || 0, decerr: j.decerr || 0, at: now() };
+            break;
+        case 'decoder':
+            st.decoder = j.ok ? { ok: true, path: j.path, w: j.w, h: j.h, at: now() } : { ok: false, error: j.error, at: now() };
+            if (o.log) o.log('receiver: GPU decoder ' + (j.ok ? 'open, ' + j.w + 'x' + j.h + ' into ' + j.path : 'failed: ' + j.error));
             break;
         default: break;
         }
@@ -100,11 +115,18 @@ function createReceiver(opts) {
         const home = o.home || '/tmp';
         try { fs.mkdirSync(home); } catch (e) { /* there */ }
         try { fs.chownSync(home, o.uid, o.gid); } catch (e) { /* not root (tests) */ }
-        const env = { HOME: home, PATH: '/usr/bin:/bin', UXPLAY_MDNS_IPV4: w.ip, UXPLAY_MDNS_NO_IPV6: '1' };
+        const env = Object.assign({ HOME: home, PATH: '/usr/bin:/bin', UXPLAY_MDNS_IPV4: w.ip, UXPLAY_MDNS_NO_IPV6: '1',
+            MGU_VIDEO_PATH: o.videoPath || VIDEO_PATH, MGU_VIDEO_SIZE: VIDEO_SIZE }, o.env || {});
         const args = ['-n', w.name, '-nh', '-p', String(BASE_PORT), '-m', w.deviceid.toLowerCase()];
         const spawnOpts = { env, cwd: home, stdio: ['ignore', 'pipe', 'pipe'] };
-        // as nobody when the service is root (the car); uid null: as this process (the tests)
-        if (o.uid != null && process.getuid && process.getuid() === 0) { spawnOpts.uid = o.uid; spawnOpts.gid = o.gid; }
+        // as nobody when the service is root (the car), its group video (the GPU's render node /dev/dri/renderD128 is
+        // root:video; a spawned process gets no supplementary groups); uid null: as this process (the tests)
+        if (o.uid != null && process.getuid && process.getuid() === 0) {
+            const video = groupGid('video');
+            spawnOpts.uid = o.uid;
+            spawnOpts.gid = video != null ? video : o.gid;
+            if (video == null && o.log) o.log('receiver: no group video: the GPU decoder will not open');
+        }
         st.starts++;
         st.running = true; st.exit = null; st.error = null; st.ip = w.ip; st.iface = w.iface;
         if (o.log) o.log('receiver: starting "' + w.name + '" on ' + w.iface + ' ' + w.ip + ', tcp/udp ' + PORTS.join(','));
@@ -129,6 +151,7 @@ function createReceiver(opts) {
             if (child === me) child = null;
             st.running = false; st.pid = null; st.videoRunning = false; st.stream.fps = 0; st.stream.kbps = 0;
             st.exit = { code, signal: sig, at: now() };
+            removeVideo();
             if (stopping || !want) { if (me.onEnded) me.onEnded(); return; }
             if (code === null && sig === null) { st.running = false; if (o.onChange) o.onChange(); return; }   // never started: st.error says why
             st.error = 'the receiver exited (' + (sig || 'code ' + code) + ')';
@@ -161,10 +184,13 @@ function createReceiver(opts) {
         });
     }
 
+    /** the frame file goes with the receiver (it removes it itself at a clean exit; this covers a crash or a kill) */
+    function removeVideo() { try { fs.unlinkSync(o.videoPath || VIDEO_PATH); } catch (e) { /* none */ } }
+
     /** for exit: no receiver left behind, synchronously */
-    function killSync() { if (child) { try { child.kill('SIGKILL'); } catch (e) { /* gone */ } } }
+    function killSync() { if (child) { try { child.kill('SIGKILL'); } catch (e) { /* gone */ } } removeVideo(); }
 
     return { start, stop, killSync, state: () => st };
 }
 
-module.exports = { createReceiver, PORTS, BASE_PORT };
+module.exports = { createReceiver, PORTS, BASE_PORT, VIDEO_PATH };

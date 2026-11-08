@@ -1,10 +1,10 @@
 {
   "id": "aurelm-airplay-probe",
   "kind": "tool",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "license": "GPL-3.0-or-later",
   "title": "AirPlay network test service",
-  "description": "For the app AirPlay Test: the network test (a test AirPlay receiver announced over mDNS) and, stage 1 of an AirPlay receiver, UxPlay's protocol on the head unit, which counts the mirrored picture it gets (nothing shown yet). Opens the firewall for its ports only while a test runs.",
+  "description": "For the app AirPlay Test: the network test, and the AirPlay receiver (UxPlay's protocol on the head unit): the iPhone's screen mirroring decoded on the GPU into mgu-render's frame file, shown by the app while parked. Picture only, no sound yet. Opens the firewall for its ports only while a test runs.",
   "requires": {
     "mgu-deploy": "0.7.0"
   },

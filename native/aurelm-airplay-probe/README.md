@@ -44,7 +44,7 @@ because the app polled it every second from the background.
 "Start receiver" in the app (`{"cmd":"start","mode":"receiver"}`) runs `uxplay-mgu` (`native/uxplay-mgu`:
 UxPlay's protocol, as `AppleTV5,4` / `366.0`, with a renderer that only counts) for 15 minutes:
 
-- as **nobody**, a child of this service (its limits: no core dump, nice 10, 50% CPU, 160 MiB; `uxplay-mgu`
+- as **nobody**, a child of this service (its limits: no core dump, nice 10, 50% CPU, 256 MiB; `uxplay-mgu`
   is on the crash handler's list too), started again at most 3 times when it exits;
 - announced as **BMW iDrive** on one address: the car's Wi-Fi (`wlan_bridge`, wireless CarPlay) first, else
   the iPhone's hotspot; started again when that address changes;
@@ -55,6 +55,14 @@ stream (frames per second, bit rate, sound packets). **PASS** (`rx-video`) is th
 unit; `rx-audio-only` is an iPhone that sends sound and no picture (what iOS does during CarPlay for a
 receiver it does not take for an Apple TV).
 
+## The picture (stage 2)
+
+`uxplay-mgu` decodes the mirrored H.264 on the GPU (`native/uxplay-mgu/video`, Moonride's MSDK decoder) into
+`/dev/shm/mgu-video-aurelm-airplay` (1920x720, I420, owned by nobody; the receiver runs in the group `video` for the
+render node). The app shows it over the whole screen through mgu-render (`mirror_view.js`) while the car is parked
+(strict: no speed reading counts as moving); a tap or the iDrive controller hides it. The frame file is removed when the
+receiver ends (by itself, by the service after a crash, by `cleanup.js` at a stop or an uninstall).
+
 ## Removal leaves nothing
 
 | What | Gone by |
@@ -63,6 +71,7 @@ receiver it does not take for an Apple TV).
 | `/var/opt/aurelm-airplay-probe/` (versions, `state/`: the receiver's identity, the last report) | the deploy tool's uninstall (removes the tool's whole folder) |
 | `aurelm-airplay-probe.socket`, `.service`, the `sockets.target` link, the deploy tool's limits drop-in, the recmgr names | the deploy tool's uninstall |
 | `/run/aurelm-airplay-probe.sock` | the socket's stop (`RemoveOnStop=yes`) |
+| `/dev/shm/mgu-video-aurelm-airplay` | the receiver's exit; the service after a crash; `cleanup.js` (stop, uninstall); a reboot |
 | the announcement on the network | a goodbye (TTL 0) when the test ends |
 
 Nothing is written under `/` (the read-only root file system), no stock file or unit is touched, no

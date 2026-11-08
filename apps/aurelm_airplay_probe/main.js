@@ -5,8 +5,9 @@
  * The screen of the AirPlay network test service (native/aurelm-airplay-probe, a root tool), for 15 minutes:
  *   "Start test"      the network test: a test receiver ("BMW iDrive test") is announced; the page shows the
  *                     network, the firewall, mDNS, the iPhone's AirPlay query and its connection;
- *   "Start receiver"  stage 1 of the receiver: UxPlay's protocol ("BMW iDrive") takes the iPhone's screen
- *                     mirroring and counts the picture it gets (nothing is shown yet).
+ *   "Start receiver"  the receiver: UxPlay's protocol ("BMW iDrive") takes the iPhone's screen mirroring; its GPU
+ *                     decoder writes the pictures, shown over the whole screen while the car is parked
+ *                     (mirror_view.js). A tap or the iDrive controller hides it; "Start receiver" shows it again.
  * On the iPhone: Control Center > Screen Mirroring.
  *
  * Talks to the service over /run/aurelm-airplay-probe.sock (a JSON object per line).
@@ -15,13 +16,18 @@ const net = require('net');
 const mgu = require('./kit/mgu');
 const { withAlpha } = require('./kit/canvas');
 const G = require('./kit/gauges');
+const fs = require('fs');
+const record = require('./kit/record');
+const Parked = require('./kit/parked');
+const { RenderClient } = require('./mgu_render_client');
+const { createMirrorView } = require('./mirror_view');
 
 const W = 1600, H = 520;
 const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.6.1';
+const SERVICE_VERSION = '0.7.0';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -88,6 +94,9 @@ function rxSteps(s) {
             detail: r.video ? r.video.codec + ' ' + r.video.w + 'x' + r.video.h + (st.frames ? ', ' + st.frames + ' frames, ' + st.idr + ' keyframes' : '') : r.client && r.audio ? 'none: the iPhone sends sound only' : 'not yet' },
         { label: 'Stream', state: st.fps > 0 ? 'ok' : gotVideo ? 'off' : off ? 'off' : 'wait',
             detail: st.fps > 0 ? st.fps + ' fps, ' + Math.round(st.kbps) + ' kbit/s' + (r.audio ? ', sound ' + st.audio + ' packets' : '') : gotVideo ? 'stopped' : r.audio ? 'sound only, ' + st.audio + ' packets' : 'not yet' },
+        { label: 'GPU decoder', state: r.decoder ? (r.decoder.ok ? (st.shown > 0 ? 'ok' : 'wait') : 'bad') : off ? 'off' : 'wait',
+            detail: r.decoder ? (r.decoder.ok ? st.shown + ' pictures' + (st.decerr ? ', ' + st.decerr + ' failed' : '') + ' into ' + r.decoder.w + 'x' + r.decoder.h : r.decoder.error) : 'opens with the first picture' },
+        { label: 'On screen', state: s.mirror && s.mirror.shown ? 'ok' : off ? 'off' : 'wait', detail: (s.mirror && s.mirror.why) || '' },
     ];
 }
 
@@ -147,7 +156,16 @@ mgu.run({
             return render();
         }
         ui.onClick('BTN_START', () => command('start', 'Starting...'));
-        ui.onClick('BTN_RX', () => command('start', 'Starting the receiver...', { mode: 'receiver' }));
+        ui.onClick('BTN_RX', () => { mirror.wantAgain(); return command('start', 'Starting the receiver...', { mode: 'receiver' }); });
+
+        /* ---------- stage 2: the picture over the screen, parked only ---------- */
+        const parked = Parked.watch(ctx, log, { strict: true });
+        const mirror = createMirrorView({ RenderClient, Recorder: record.Recorder, kit: record, appId: ctx.spec.id, log,
+            statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
+        function syncMirror() {
+            mirror.update({ rx: st && st.mode === 'receiver' && st.active ? st.rx : null, pageVisible: shown(), driving: parked.moving() });
+        }
+        if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => mirror.close());
         ui.onClick('BTN_STOP', () => command('stop', 'Stopping...'));
 
         function render() {
@@ -168,10 +186,12 @@ mgu.run({
             const vl = wrap(cv, v.text, 26, 1500, 'bold').slice(0, 2);
             vl.forEach((l, i) => cv.text(l, 52, 98 + i * 36 - (vl.length === 1 ? -14 : 0), 26, t.text, { font: 'bold', literal: true }));
             // steps
+            if (st && st.mode === 'receiver') st.mirror = mirror.state();
             const rows = steps(st);
             const COL = { ok: GREEN, wait: AMBER, bad: RED, off: withAlpha('#ffffff', 0.3) };
+            const rowH = rows.length > 7 ? 36 : 44;   // the receiver's 9 steps fit the page
             rows.forEach((r, i) => {
-                const y = 190 + i * 44;
+                const y = 190 + i * rowH;
                 cv.circle(44, y - 8, 9, COL[r.state]);
                 cv.text(r.label, 66, y, 22, t.text, { font: 'bold', literal: true });
                 cv.text(clip(cv, r.detail || '', 20, 700, 'label'), 260, y, 20, r.state === 'off' ? t.dim : t.text, { literal: true });
@@ -186,8 +206,9 @@ mgu.run({
 
         // only while the page shows: in the background the app leaves the service alone, so it can end
         // 10 minutes after the last request
-        const shown = () => !ui.isVisible || ui.isVisible('MAIN');
-        setInterval(() => { if (shown()) poll().catch(() => {}); }, 1000);
+        function shown() { return !ui.isVisible || ui.isVisible('MAIN'); }
+        setInterval(() => { if (shown()) poll().catch(() => {}); syncMirror(); }, 1000);
+        ui.onVisible(() => syncMirror());
         await poll();
         ctx.loop('MAIN', 2, render);
         render().then(() => log.info('AirPlay Test first frame done')).catch((e) => log.warn('first render: ' + e));

@@ -11,7 +11,11 @@
  *   {"ev":"audio","ct":..}                                       the audio stream's compression type
  *   {"ev":"stats","frames":..,"fps":..,"kbps":..,"idr":..,"sps":..,"audio":..}
  *
- * Stage 2 hands the H.264 (Annex B, decrypted, SPS+PPS before each IDR) to the GPU decoder instead.
+ *   {"ev":"decoder","ok":true,"path":"/dev/shm/...","w":1920,"h":720}  the GPU decoder and frame file opened
+ *   {"ev":"decoder","ok":false,"error":"..."}                          they could not (stage 1 counting goes on)
+ *
+ * Stage 2: every access unit also goes to the GPU decoder (video/src/mgu_video.cpp), which writes the pictures
+ * to mgu-render's frame file; stats then carry "shown" (pictures written) and "decerr" (failed access units).
  */
 #include <stdio.h>
 #include <stdarg.h>
@@ -25,11 +29,13 @@
 #include "../renderers/video_renderer.h"
 #include "../renderers/audio_renderer.h"
 #include "../renderers/mux_renderer.h"
+#include "mgu_video.h"
 
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     uint64_t frames, bytes, idr, sps, audio_packets, audio_bytes;
     uint64_t win_frames, win_bytes;
+    unsigned long long shown, decerr;
     double win_start;
     bool running;
 } st;
@@ -66,9 +72,9 @@ static void clean(char *out, size_t n, const char *in) {
 static void stats_locked(double t) {
     double dt = t - st.win_start;
     if (dt < 1.0) return;
-    emit("{\"ev\":\"stats\",\"frames\":%llu,\"fps\":%.1f,\"kbps\":%.0f,\"idr\":%llu,\"sps\":%llu,\"audio\":%llu}",
+    emit("{\"ev\":\"stats\",\"frames\":%llu,\"fps\":%.1f,\"kbps\":%.0f,\"idr\":%llu,\"sps\":%llu,\"audio\":%llu,\"shown\":%llu,\"decerr\":%llu}",
          (unsigned long long) st.frames, st.win_frames / dt, st.win_bytes * 8.0 / 1000.0 / dt,
-         (unsigned long long) st.idr, (unsigned long long) st.sps, (unsigned long long) st.audio_packets);
+         (unsigned long long) st.idr, (unsigned long long) st.sps, (unsigned long long) st.audio_packets, st.shown, st.decerr);
     st.win_frames = st.win_bytes = 0;
     st.win_start = t;
 }
@@ -86,6 +92,8 @@ void video_renderer_init(logger_t *logger, const char *server_name, videoflip_t 
     (void) videosink; (void) videosink_options; (void) initial_fullscreen; (void) video_sync; (void) h265_support;
     (void) coverart_support; (void) playbin_version;
     if (uri) emit("{\"ev\":\"hls\"}");
+    static bool once = false;
+    if (!once) { once = true; atexit(mgu_video_close); }   /* no frame file left behind */
 }
 
 void video_renderer_start() {
@@ -103,6 +111,7 @@ void video_renderer_stop() {
     st.running = false;
     pthread_mutex_unlock(&mu);
     if (was) emit("{\"ev\":\"stop\",\"frames\":%llu}", (unsigned long long) st.frames);
+    mgu_video_stop();
 }
 
 void video_renderer_set_device_model(const char *model, const char *name) {
@@ -135,7 +144,20 @@ uint64_t video_renderer_render_buffer(unsigned char *data, int *data_len, int *n
             i += 3;
         }
     }
+    /* the GPU decoder (stage 2), outside the stats lock: it takes a few ms */
+    unsigned long long shown = 0, decerr = 0;
+    int v = mgu_video_frame(data, len, &shown, &decerr);
+    if (v == 1) {
+        unsigned w = 0, h = 0;
+        mgu_video_size(&w, &h);
+        emit("{\"ev\":\"decoder\",\"ok\":true,\"path\":\"%s\",\"w\":%u,\"h\":%u}", mgu_video_path(), w, h);
+    } else if (v == -1) {
+        char e[200];
+        clean(e, sizeof e, mgu_video_error());
+        emit("{\"ev\":\"decoder\",\"ok\":false,\"error\":\"%s\"}", e);
+    }
     pthread_mutex_lock(&mu);
+    st.shown = shown; st.decerr = decerr;
     st.frames++; st.win_frames++;
     st.bytes += len; st.win_bytes += len;
     if (idr) st.idr++;
@@ -148,7 +170,7 @@ uint64_t video_renderer_render_buffer(unsigned char *data, int *data_len, int *n
 void video_renderer_display_jpeg(const void *data, int *data_len) { (void) data; (void) data_len; }
 void video_renderer_flush() {}
 unsigned int video_renderer_listen(void *loop, int id) { (void) loop; (void) id; return 0; }
-void video_renderer_destroy() { video_renderer_stop(); }
+void video_renderer_destroy() { video_renderer_stop(); mgu_video_close(); }
 bool waiting_for_x11_window() { return false; }
 
 bool video_get_playback_info(double *duration, double *position, double *seek_start, double *seek_duration, float *rate,

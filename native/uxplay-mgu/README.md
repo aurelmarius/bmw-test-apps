@@ -1,10 +1,10 @@
 # uxplay-mgu
 
 UxPlay's AirPlay mirroring protocol for the iDrive 7 head unit (MGU), run by the service
-`aurelm-airplay-probe` in its receiver test. **Stage 1: nothing is shown or played.** The renderer
-(`renderer/mgu_renderer.c`) replaces UxPlay's GStreamer renderers and only reports what the iPhone sends
-(client, codec and size, frames, frame rate, bit rate, keyframes, sound packets) on stdout as
-`MGU {json}` lines. Stage 2 hands the H.264 to the GPU decoder and mgu-render.
+`aurelm-airplay-probe` in its receiver test. The renderer (`renderer/mgu_renderer.c`) replaces UxPlay's GStreamer renderers: it reports what the iPhone sends
+(client, codec and size, frames, frame rate, bit rate, keyframes, sound packets, pictures decoded) on stdout as
+`MGU {json}` lines and, **stage 2**, hands every access unit to the GPU decoder (`video/`, see its README), which writes
+the pictures to mgu-render's frame file. No sound yet (stage 3).
 
 | | |
 |---|---|

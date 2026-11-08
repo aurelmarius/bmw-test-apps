@@ -34,7 +34,7 @@ const nft = require('./nft');
 const rxm = require('./receiver');
 const sockgroup = require('./sockgroup');
 
-const VERSION = '0.6.1';
+const VERSION = '0.7.0';
 const MDNS_GROUP = '224.0.0.251';
 const QUERY_NAMES = ['_airplay._tcp.local', '_raop._tcp.local', '_companion-link._tcp.local', '_apple-mobdev2._tcp.local'];
 
@@ -109,6 +109,9 @@ function portHolders(port, proto) {
 function rxVerdict(s) {
     const r = s.rx || {};
     const v = r.video, c = r.client, fresh = r.stream && r.stream.fps > 0;
+    if (v && r.stream && r.stream.frames > 0 && r.decoder && !r.decoder.ok) {
+        return { code: 'rx-decoder-failed', text: 'The picture reaches the head unit, but the GPU decoder failed: ' + r.decoder.error };
+    }
     if (v && r.stream && r.stream.frames > 0) {
         return { code: 'rx-video', text: 'PASS: ' + ((c && c.name) || 'the iPhone') + ' mirrors ' + v.w + 'x' + v.h + (fresh ? ' at ' + r.stream.fps + ' fps' : '') + ': the picture reaches the head unit' };
     }
@@ -161,7 +164,8 @@ function createProbe(opts) {
 
     const id = loadIdentity();
     const st = freshState();
-    const rx = rxm.createReceiver({ bin: o.rxBin, uid: o.rxUid, gid: o.rxUid, home: o.stateDir ? path.join(o.stateDir, 'rx') : null, log, now, onChange: () => { if (o.onChange) o.onChange(); } });
+    const rx = rxm.createReceiver({ bin: o.rxBin, uid: o.rxUid, gid: o.rxUid, home: o.stateDir ? path.join(o.stateDir, 'rx') : null, env: o.rxEnv, videoPath: o.rxVideoPath,
+        log, now, onChange: () => { if (o.onChange) o.onChange(); } });
     let sock = null, servers = [], timers = [], endT = null, sendQ = Promise.resolve();
 
     function loadIdentity() {
@@ -192,7 +196,8 @@ function createProbe(opts) {
         if (st.mode === 'receiver') {
             const r = rx.state();
             s.rx = { name: o.rxName, running: r.running, pid: r.pid, starts: r.starts, error: r.error, exit: r.exit, ip: r.ip, iface: r.iface,
-                client: r.client, video: r.video, videoRunning: r.videoRunning, audio: r.audio, stream: r.stream, ports: rxm.PORTS, lines: r.lines.slice(-15) };
+                client: r.client, video: r.video, videoRunning: r.videoRunning, audio: r.audio, stream: r.stream, ports: rxm.PORTS, lines: r.lines.slice(-15),
+                decoder: r.decoder, videoPath: o.rxVideoPath || rxm.VIDEO_PATH };
         }
         s.verdict = verdict(s);
         return s;

@@ -20,6 +20,13 @@ C_SRCS  = $(wildcard $(SRC)/lib/*.c) $(wildcard $(SRC)/lib/playfair/*.c) $(wildc
           $(wildcard $(SRC)/lib/mdnsd/*.c) renderer/mgu_renderer.c
 C_OBJS  = $(patsubst %.c,$(OUT)/obj/%.o,$(notdir $(C_SRCS)))
 
+# stage 2: the GPU decoder (video/: Moonride's copy of waze-on-cluster's MSDK decoder, its frame file writer), linked
+# against stubs of the unit's libmfxhw64 / libva / libva-drm made from their export lists; every import is checked
+VIDEO_SRCS = video/src/decoder_msdk.cpp video/src/nal_reader.cpp video/src/mgvf.cpp video/src/mgu_video.cpp
+VIDEO_OBJS = $(patsubst %.cpp,$(OUT)/obj/v_%.o,$(notdir $(VIDEO_SRCS)))
+VIDEO_CXXFLAGS = -std=c++14 -O2 -g0 -Wall -Wno-missing-field-initializers -DNDEBUG -Ivideo/src -Ivideo/abi/include
+STUBS   = $(OUT)/stub/libmfxhw64.so $(OUT)/stub/libva.so.1 $(OUT)/stub/libva-drm.so.1
+
 STATIC  = -Wl,-Bstatic -L$(PLIST)/lib -lplist-2.0 -lglib-2.0 -lpcre -lcrypto -Wl,-Bdynamic
 # the head unit's loader is /lib/ld-linux-x86-64.so.2 (no /lib64: a binary asking for /lib64/... fails to start, ENOENT)
 LIBS    = $(STATIC) -lpthread -ldl -lm -static-libstdc++ -static-libgcc -Wl,--dynamic-linker=/lib/ld-linux-x86-64.so.2
@@ -32,14 +39,32 @@ $(OUT)/obj/%.o: %.c
 	@mkdir -p $(OUT)/obj
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OUT)/obj/mgu_renderer.o: renderer/mgu_renderer.c
+$(OUT)/obj/mgu_renderer.o: renderer/mgu_renderer.c video/src/mgu_video.h
 	@mkdir -p $(OUT)/obj
-	$(CC) $(CFLAGS) -I$(SRC)/renderers -c $< -o $@
+	$(CC) $(CFLAGS) -I$(SRC)/renderers -Ivideo/src -c $< -o $@
+
+$(OUT)/obj/v_%.o: video/src/%.cpp
+	@mkdir -p $(OUT)/obj
+	$(CXX) $(VIDEO_CXXFLAGS) -c $< -o $@
+
+$(OUT)/stub/libmfxhw64.so: video/abi/libmfx.symbols
+	@mkdir -p $(@D)
+	python3 video/tools/ramses_abi.py stub-source $< > $(@D)/mfx_stub.c
+	$(CC) -shared -Wl,-soname,libmfxhw64.so -o $@ $(@D)/mfx_stub.c
+$(OUT)/stub/libva.so.1: video/abi/libva.symbols
+	@mkdir -p $(@D)
+	python3 video/tools/ramses_abi.py stub-source $< > $(@D)/va_stub.c
+	$(CC) -shared -Wl,-soname,libva.so.1 -o $@ $(@D)/va_stub.c
+$(OUT)/stub/libva-drm.so.1: video/abi/libva-drm.symbols
+	@mkdir -p $(@D)
+	python3 video/tools/ramses_abi.py stub-source $< > $(@D)/va_drm_stub.c
+	$(CC) -shared -Wl,-soname,libva-drm.so.1 -o $@ $(@D)/va_drm_stub.c
 
 $(OUT)/obj/uxplay.o: $(SRC)/uxplay.cpp
 	@mkdir -p $(OUT)/obj
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(OUT)/uxplay-mgu: $(C_OBJS) $(OUT)/obj/uxplay.o
-	$(CXX) -o $@ $(OUT)/obj/uxplay.o $(C_OBJS) $(LIBS)
+$(OUT)/uxplay-mgu: $(C_OBJS) $(VIDEO_OBJS) $(OUT)/obj/uxplay.o $(STUBS)
+	$(CXX) -o $@ $(OUT)/obj/uxplay.o $(C_OBJS) $(VIDEO_OBJS) $(STUBS) $(LIBS)
+	python3 video/tools/woc_abi.py check-imports $@ --prefix MFX va -- video/abi/libmfx.symbols video/abi/libva.symbols video/abi/libva-drm.symbols
 	strip $@

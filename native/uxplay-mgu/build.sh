@@ -25,7 +25,7 @@ docker run --rm -v "$here:/w" -w /w ubuntu:18.04 sh -c '
     set -e
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null
-    apt-get install -y -qq --no-install-recommends build-essential pkg-config libssl-dev libplist-dev libglib2.0-dev libpcre3-dev >/dev/null
+    apt-get install -y -qq --no-install-recommends build-essential pkg-config libssl-dev libplist-dev libglib2.0-dev libpcre3-dev python3 python3-pyelftools >/dev/null
     if [ ! -f build/plist/lib/libplist-2.0.a ]; then
         rm -rf build/plist-src && mkdir -p build/plist-src && tar -xjf build/dl/libplist-2.6.0.tar.bz2 -C build/plist-src --strip-components 1
         (cd build/plist-src && ./configure -q --prefix=/w/build/plist --enable-static --disable-shared --without-cython --without-tests >/dev/null && make -s -j"$(nproc)" >/dev/null && make -s install >/dev/null)
@@ -37,9 +37,11 @@ docker run --rm -v "$here:/w" -w /w ubuntu:18.04 sh -c '
 interp=$(readelf -l "$work/out/uxplay-mgu" | sed -n 's/.*Requesting program interpreter: \(.*\)]/\1/p')
 [ "$interp" = "/lib/ld-linux-x86-64.so.2" ] || { echo "build.sh: interpreter is '$interp', not /lib/ld-linux-x86-64.so.2" >&2; exit 1; }
 # it starts on glibc 2.27 with the loader where the unit has it
-docker run --rm -v "$here:/w" ubuntu:18.04 sh -c 'ln -sf /lib/x86_64-linux-gnu/ld-2.27.so /lib/ld-linux-x86-64.so.2 && /w/build/out/uxplay-mgu -h 2>&1 | head -1' | grep -q "UxPlay" \
+docker run --rm -v "$here:/w" ubuntu:18.04 sh -c 'ln -sf /lib/x86_64-linux-gnu/ld-2.27.so /lib/ld-linux-x86-64.so.2 && LD_LIBRARY_PATH=/w/build/out/stub /w/build/out/uxplay-mgu -h 2>&1 | head -1' | grep -q "UxPlay" \
     || { echo "build.sh: uxplay-mgu does not start in ubuntu:18.04 with /lib/ld-linux-x86-64.so.2" >&2; exit 1; }
 cp "$work/out/uxplay-mgu" "$work/uxplay-mgu"
 cp "$work/src/LICENSE" "$work/UXPLAY-LICENSE"
+# link-only stubs of the unit's video libraries: lets the binary start on a PC (tests); never shipped
+rm -rf "$work/stub" && cp -r "$work/out/stub" "$work/stub"
 file "$work/uxplay-mgu" 2>/dev/null || true
 ls -l "$work/uxplay-mgu"

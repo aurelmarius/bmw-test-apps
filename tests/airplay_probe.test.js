@@ -289,7 +289,8 @@ function fakeReceiver(dir) {
         "setTimeout(() => out({ ev: 'client', model: 'iPhone18,2', name: 'Test \"iPhone' }), 100);",
         "setTimeout(() => out({ ev: 'video', codec: 'h264', w: 498, h: 1080, sw: 498, sh: 1080 }), 200);",
         "setTimeout(() => out({ ev: 'start' }), 250);",
-        "setTimeout(() => out({ ev: 'stats', frames: 60, fps: 30, kbps: 4200, idr: 1, sps: 1, audio: 10 }), 400);",
+        "setTimeout(() => out({ ev: 'decoder', ok: true, path: process.env.MGU_VIDEO_PATH, w: 1920, h: 720 }), 300);",
+        "setTimeout(() => { require('fs').writeFileSync(process.env.MGU_VIDEO_PATH, 'MGVF'); out({ ev: 'stats', frames: 60, fps: 30, kbps: 4200, idr: 1, sps: 1, audio: 10, shown: 58, decerr: 0 }); }, 400);",
         "process.on('SIGTERM', () => { out({ ev: 'stop', frames: 60 }); process.exit(0); });",
         "setInterval(() => {}, 1000);",
     ].join('\n'));
@@ -300,7 +301,8 @@ function fakeReceiver(dir) {
 test('receiver: started with its address and ports, its reports read, stopped', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rx-'));
     fs.chmodSync(tmp, 0o755);   // run as root, the receiver runs as nobody: it must reach its binary
-    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: fakeReceiver(tmp), rxName: 'BMW iDrive', rxUid: null });
+    const videoPath = path.join(tmp, 'mgu-video-test');
+    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: fakeReceiver(tmp), rxName: 'BMW iDrive', rxUid: null, rxVideoPath: videoPath });
     try {
         const s0 = await probe.start(1, 'receiver');
         assert.strictEqual(s0.mode, 'receiver');
@@ -311,6 +313,10 @@ test('receiver: started with its address and ports, its reports read, stopped', 
         assert.strictEqual(s.rx.client.model, 'iPhone18,2');
         assert.strictEqual(s.rx.video.w, 498);
         assert.strictEqual(s.rx.stream.fps, 30);
+        // stage 2: the GPU decoder and its frame file
+        assert.deepStrictEqual([s.rx.decoder.ok, s.rx.decoder.w, s.rx.decoder.h, s.rx.decoder.path], [true, 1920, 720, videoPath]);
+        assert.strictEqual(s.rx.stream.shown, 58);
+        assert.ok(fs.existsSync(videoPath));
         assert.strictEqual(s.verdict.code, 'rx-video');
         assert.ok(/PASS: Test .iPhone mirrors 498x1080 at 30 fps/.test(s.verdict.text), s.verdict.text);
         const args = s.rx.lines.find((l) => / args /.test(l));
@@ -319,8 +325,9 @@ test('receiver: started with its address and ports, its reports read, stopped', 
         assert.ok(!s.rx.lines.some((l) => /client feedback/.test(l)));
         const s2 = await probe.stop('test');
         assert.strictEqual(s2.active, false);
-        // what the receiver got stays on the page after the test
+        // what the receiver got stays on the page after the test; its frame file does not
         assert.strictEqual(s2.rx.running, false);
+        assert.ok(!fs.existsSync(videoPath), 'the frame file is left');
         assert.strictEqual(s2.verdict.code, 'rx-video');
     } finally { await probe.stop('finally'); }
 });
@@ -347,6 +354,7 @@ test('receiver: the verdict while waiting, with sound only, and when it failed',
     assert.strictEqual(P.verdict(base({ running: true, client: { name: 'X' }, stream: {} })).code, 'rx-connected');
     assert.strictEqual(P.verdict(base({ running: true, client: { name: 'X' }, audio: { ct: 8 }, stream: { frames: 0 } })).code, 'rx-audio-only');
     assert.strictEqual(P.verdict(base({ running: false, error: 'the receiver exited (code 1)', stream: {} })).code, 'rx-failed');
+    assert.strictEqual(P.verdict(base({ running: true, client: { name: 'X' }, video: { w: 1, h: 1 }, stream: { frames: 9 }, decoder: { ok: false, error: 'decoder: x' } })).code, 'rx-decoder-failed');
 });
 
 test('nft: the receiver test opens tcp and udp 7300-7302, out only for its uid', () => {
@@ -374,7 +382,9 @@ test('receiver: the real uxplay-mgu runs, listens on 7301 and ends with the test
     if (!fs.existsSync('/lib/ld-linux-x86-64.so.2')) { console.log('     (no /lib/ld-linux-x86-64.so.2 here, as on the unit: skipped; build.sh runs it in ubuntu:18.04)'); return; }
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rxreal-'));
     fs.chmodSync(tmp, 0o755);
-    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: REAL, rxName: 'BMW iDrive test rx', rxUid: null });
+    // the unit's video libraries: their link-only stubs (build/stub), enough to start; nothing is decoded here
+    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: REAL, rxName: 'BMW iDrive test rx', rxUid: null,
+        rxEnv: { LD_LIBRARY_PATH: path.join(path.dirname(REAL), 'stub') }, rxVideoPath: path.join(tmp, 'mgu-video-test') });
     try {
         await probe.start(1, 'receiver');
         await new Promise((r) => setTimeout(r, 1500));
