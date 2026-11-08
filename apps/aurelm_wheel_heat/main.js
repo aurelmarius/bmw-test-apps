@@ -18,7 +18,6 @@ const HOT = '#ff6a1a';
 const GREEN = '#2fd27a';
 const RED = '#ef2b2d';
 const ENTRY_DEBOUNCE_MS = 3000;     // MainApp can report one press twice (event + start reason)
-const AUTO_CLOSE_MS = 3000;         // setting showOnShortcut "brief": the status shows this long after the switch
 
 let onEntry = () => true;
 let lastOpen = null;                // { reason, fav, mode, t }: shown on the details page
@@ -49,33 +48,6 @@ mgu.run({
 
         const run = (want) => ready.then(() => heat.toggle(want)).then((r) => { say(r.msg || (r.ok ? 'Done' : 'Not switched')); kick(); return r; });
 
-        // after a favourite button (showOnShortcut "brief"): the screen closes on its own a few seconds after
-        // the switch, unless it is used meanwhile (a button, a tab, a tap) or the settings sheet is open
-        // what this head unit's HMI offers an app (shown on the details page, for the next tests)
-        let hmiNote = '';
-        const hmiApi = (() => {
-            const names = new Set();
-            for (let o = ui.rhmi; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) Object.getOwnPropertyNames(o).forEach((n) => { try { if (typeof ui.rhmi[n] === 'function') names.add(n); } catch (e) { /* getter */ } });
-            const want = ['closeTask', 'removeStateFromHistory', 'removeTaskFromHistory', 'closeState', 'openState', 'openEntryState'];
-            log.info('rhmi methods: ' + Array.from(names).sort().join(', '));
-            return want.filter((n) => names.has(n)).join(' ') || 'none of ' + want.join(' ');
-        })();
-        let autoClose = null;
-        const cancelAutoClose = () => { if (autoClose) { clearTimeout(autoClose); autoClose = null; log.info('auto close cancelled'); } };
-        const closeSoon = (after) => {
-            cancelAutoClose();
-            Promise.resolve(after).catch(() => {}).then(() => {
-                autoClose = setTimeout(() => {
-                    autoClose = null;
-                    if (!ui.isVisible('MAIN') || (ctx.display && ctx.display.sheet)) return;
-                    log.info('closing after the favourite button');
-                    hmiNote = 'closed ' + new Date().toTimeString().slice(0, 8) + ', stack before: ' + JSON.stringify(ui.stack || null);
-                    log.info('auto close: ' + hmiNote);
-                    Promise.resolve(ui.close('MAIN')).catch((e) => log.warn('auto close: ' + e));
-                }, AUTO_CLOSE_MS);
-            });
-        };
-        const userRun = () => { cancelAutoClose(); return run(); };
 
         // favourite button (BOOKMARK) / apps menu (ENTRY_POINT, ...): each has its own setting, so opening
         // the app from the menu to look doesn't switch off a heating the car switched on by itself
@@ -86,18 +58,18 @@ mgu.run({
             const mode = (fav ? settings.get('onOpen') : settings.get('onMenu')) || (fav ? 'toggle' : 'show');
             lastOpen = { reason: String(reason), fav, mode, t: now };
             log.info('opened (' + reason + (fav ? ', favourite button' : ', apps menu') + '): ' + mode);
-            const screen = fav ? (settings.get('showOnShortcut') || 'brief') : 'show';
-            if (now - lastEntry > ENTRY_DEBOUNCE_MS) {
+            const screen = fav ? (settings.get('showOnShortcut') || 'stay') : 'show';
+            // one press can arrive twice (event + start reason): only presses that switch count for that
+            if (mode !== 'show' && now - lastEntry > ENTRY_DEBOUNCE_MS) {
                 lastEntry = now;
-                const done = mode !== 'show' ? run(mode === 'on' ? true : undefined) : null;
-                if (screen === 'brief') closeSoon(done);
+                run(mode === 'on' ? true : undefined);
             }
             kick();
             return screen !== 'stay';
         };
 
-        ui.onClick('BTN_TOGGLE', () => userRun());
-        ui.onClick('BTN_PAGE', () => { cancelAutoClose(); page = 1 - page; kick(); });
+        ui.onClick('BTN_TOGGLE', () => run());
+        ui.onClick('BTN_PAGE', () => { page = 1 - page; kick(); });
         heat.on('change', () => kick());
 
         /* ---------- drawing ---------- */
@@ -135,7 +107,7 @@ mgu.run({
             cv.fillRect(848, 290, 692, 110, withAlpha(on === true ? HOT : t.accent, 0.14));
             cv.strokeRoundRect(848, 290, 692, 110, 8, 1.5, withAlpha(on === true ? HOT : t.accent, 0.5));
             cv.text(heat.busy ? 'Switching...' : on === true ? 'Switch off' : 'Switch on', 1194, 358, 34, t.text, { font: 'bold', align: 'center' });
-            if (touch) cv.target(848, 290, 692, 110, () => userRun(), 'toggle', 8);
+            if (touch) cv.target(848, 290, 692, 110, () => run(), 'toggle', 8);
             const last = heat.last;
             if (last) {
                 cv.text(fitText(cv, (last.ok ? '' : 'Not switched: ') + (last.msg || '') + '  (' + ago(last.t) + ')', 21, 692), 848, 445, 21, last.ok ? (last.confirmed ? GREEN : t.text) : RED);
@@ -168,13 +140,11 @@ mgu.run({
                 y += 34;
             });
             G.panel(cv, t, 816, 44, 760, 468, 'Requests sent');
-            cv.text(fitText(cv, 'HMI offers: ' + hmiApi, 17, 692), 848, 392, 17, t.dim);
-            cv.text(fitText(cv, hmiNote ? 'Auto close: ' + hmiNote : 'HMI stack: ' + JSON.stringify(ui.stack || null), 17, 692), 848, 420, 17, t.dim);
             if (lastOpen) cv.text(fitText(cv, 'Last opened: ' + (lastOpen.fav ? 'favourite button' : 'apps menu') + ' (' + lastOpen.reason + ') -> ' + lastOpen.mode + '  ·  ' + ago(lastOpen.t), 19, 692), 848, 482, 19, t.dim);
             cv.text(fitText(cv, 'Client group ' + settings.get('clientGroupId') + '  ·  path ' + settings.display('path') + (settings.get('probe') !== false ? '  ·  tries other groups' : ''), 19, 692), 848, 124, 19, t.dim);
             y = 170;
             if (!heat.history.length) cv.text('Nothing sent yet', 848, y, 21, t.dim);
-            heat.history.slice(0, 5).forEach((h) => {
+            heat.history.slice(0, 8).forEach((h) => {
                 const a = h.via === 'climate' ? 'group ' + h.args.clientGroupId + ', level ' + h.args.steeringWheelHeating
                     : h.via === 'climate-set' ? 'write level ' + h.args.configuredIntensityLevel : 'heating ' + h.args.heating;
                 const ok = ['IS_ACCEPTED', 'NO_CHANGES', 'SENT', 'SET'].indexOf(h.answer) >= 0;
@@ -191,7 +161,7 @@ mgu.run({
             if (page === 0) drawStatus(cv, t); else drawDetails(cv, t);
             return ui.image('MAIN_GFX', cv);
         }
-        ctx.onTab((i) => { cancelAutoClose(); page = i; kick(); });
+        ctx.onTab((i) => { page = i; kick(); });
         loop = ctx.loop('MAIN', 2, render);
         function kick() { if (loop) loop.kick(); }
     },

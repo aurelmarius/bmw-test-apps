@@ -48,17 +48,17 @@
     {
       "id": "aurelm_wheel_heat",
       "kind": "app",
-      "version": "1.0.4",
+      "version": "1.0.5",
       "title": "Wheel Heating",
       "description": "Steering wheel heating on/off from a favourite button: for a heated iDrive 8 (LCI) steering wheel without its own button, fitted to an iDrive 7 car",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_wheel_heat@1.0.4.tgz",
-        "size": 561745,
-        "sha256": "6e8b3239a19d1d1f971d6d7b6fa3b65180528f4069fadbb4e235774d17e2d998",
-        "url": "packages/aurelm_wheel_heat@1.0.4.tgz"
+        "name": "aurelm_wheel_heat@1.0.5.tgz",
+        "size": 560947,
+        "sha256": "f0c9b1b026116dceb5fabf679746d2706938ac5f685ac2b13e760bd1788dd7c0",
+        "url": "packages/aurelm_wheel_heat@1.0.5.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_wheel_heat.png",
