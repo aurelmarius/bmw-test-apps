@@ -110,6 +110,7 @@ function soundStep(r, st, ca, off) {
     if (!snd.ok) return { label: 'Sound', state: 'bad', detail: snd.error };
     // dropped: late (the device fell behind: CPU, Wi-Fi) or full (nothing read it yet: the speakers still connecting)
     const n = st.adec ? st.adec + ' played' + (st.alate ? ', ' + st.alate + ' late' : '') + (st.afull ? ', ' + st.afull + ' unread' : '') : 'nothing played yet';
+    if (ca && ca.taken) return { label: 'Sound', state: 'bad', detail: n + '; the speakers are in use by another app (Emby): stop it there' };
     if (ca && ca.error) return { label: 'Sound', state: 'bad', detail: n + '; route: ' + ca.error };
     return { label: 'Sound', state: ca && ca.connected ? 'ok' : 'wait', detail: n + (ca && ca.connected ? ', on the speakers' : ', connecting the speakers') + (st.adev >= 0 ? ' (' + Math.round(st.adev) + ' ms)' : '') };
 }
@@ -180,7 +181,7 @@ mgu.run({
         // (setting endOnLeave, on): 1.5 s after the page went, once per session
         let goneAt = 0, ended = false;
         // stage 3: the speakers while the receiver has an iPhone with sound and the app is up (leaving it ends the session)
-        const carAudio = createCarAudio(ctx.signals, log);
+        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? require('path').join(ctx.dataDir, 'car-audio.json') : null });
         function syncMirror() {
             const rxOn = st && st.mode === 'receiver' && st.active ? st.rx : null;
             mirror.update({ rx: rxOn, pageVisible: shown(), driving: parked.moving() });
