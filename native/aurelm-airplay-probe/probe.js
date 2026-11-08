@@ -34,7 +34,7 @@ const nft = require('./nft');
 const rxm = require('./receiver');
 const sockgroup = require('./sockgroup');
 
-const VERSION = '0.8.1';
+const VERSION = '0.8.2';
 const MDNS_GROUP = '224.0.0.251';
 const QUERY_NAMES = ['_airplay._tcp.local', '_raop._tcp.local', '_companion-link._tcp.local', '_apple-mobdev2._tcp.local'];
 
@@ -197,7 +197,7 @@ function createProbe(opts) {
             const r = rx.state();
             s.rx = { name: o.rxName, running: r.running, pid: r.pid, starts: r.starts, error: r.error, exit: r.exit, ip: r.ip, iface: r.iface,
                 client: r.client, video: r.video, videoRunning: r.videoRunning, audio: r.audio, stream: r.stream, ports: rxm.PORTS, lines: r.lines.slice(-15),
-                decoder: r.decoder, videoPath: o.rxVideoPath || rxm.VIDEO_PATH, sound: r.sound, cpu: r.cpu };
+                decoder: r.decoder, videoPath: o.rxVideoPath || rxm.VIDEO_PATH, sound: r.sound, soundRunning: r.soundRunning, cpu: r.cpu };
         }
         s.verdict = verdict(s);
         return s;

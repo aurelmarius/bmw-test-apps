@@ -14,6 +14,7 @@
  *   {"ev":"decoder","ok":true,"path":"/dev/shm/...","w":1920,"h":720}  the GPU decoder and frame file opened
  *   {"ev":"decoder","ok":false,"error":"..."}                          they could not (stage 1 counting goes on)
  *   {"ev":"sound","ok":true,"device":"plug:smartx:...","ct":8} / {"ev":"sound","ok":false,"error":"..."}
+ *   {"ev":"soundstop"}                                                 the iPhone's session ended (its last connection)
  *                                                                      stage 3: the sound's decoder and ALSA device
  *
  * Stage 2: every access unit also goes to the GPU decoder (video/src/mgu_video.cpp), which writes the pictures
@@ -234,6 +235,7 @@ void video_renderer_set_window_handle(uintptr_t handle) { (void) handle; }
 void audio_renderer_init(logger_t *logger, const char *audiosink, const bool *audio_sync, const bool *video_sync, const char *artp_pipeline) {
     (void) logger; (void) audiosink; (void) audio_sync; (void) video_sync; (void) artp_pipeline;
 }
+static bool sound_on = false;   /* the sound started and not stopped yet */
 void audio_renderer_start(unsigned char *compression_type) {
     const int ct = compression_type ? (int) *compression_type : -1;
     emit("{\"ev\":\"audio\",\"ct\":%d}", ct);
@@ -241,12 +243,17 @@ void audio_renderer_start(unsigned char *compression_type) {
     if (mgu_audio_start(ct) == 0) {
         clean(d, sizeof d, mgu_audio_device());
         emit("{\"ev\":\"sound\",\"ok\":true,\"device\":\"%s\",\"ct\":%d}", d, ct);
+        sound_on = true;
     } else {
         clean(e, sizeof e, mgu_audio_error());
         emit("{\"ev\":\"sound\",\"ok\":false,\"error\":\"%s\",\"ct\":%d}", e, ct);
     }
 }
-void audio_renderer_stop() { mgu_audio_stop(); }
+/* UxPlay calls this when the iPhone's last connection closes (conn_destroy): the session is over, whoever ended it */
+void audio_renderer_stop() {
+    mgu_audio_stop();
+    if (sound_on) { sound_on = false; emit("{\"ev\":\"soundstop\"}"); }
+}
 void audio_renderer_render_buffer(unsigned char *data, int *data_len, unsigned short *seqnum, uint64_t *ntp_time) {
     (void) seqnum; (void) ntp_time;
     if (data && data_len) mgu_audio_packet(data, *data_len);   /* stage 3: decoded and played (outside the stats lock) */

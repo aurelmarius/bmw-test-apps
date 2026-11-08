@@ -292,6 +292,7 @@ function fakeReceiver(dir) {
         "setTimeout(() => out({ ev: 'decoder', ok: true, path: process.env.MGU_VIDEO_PATH, w: 1920, h: 720 }), 300);",
         "setTimeout(() => { out({ ev: 'audio', ct: 8 }); out({ ev: 'sound', ok: true, device: process.env.MGU_AUDIO.slice(5), ct: 8 }); }, 320);",
         "setTimeout(() => { require('fs').writeFileSync(process.env.MGU_VIDEO_PATH, 'MGVF'); out({ ev: 'stats', frames: 60, fps: 30, kbps: 4200, idr: 1, sps: 1, audio: 10, shown: 58, decerr: 0 }); }, 400);",
+        "setTimeout(() => out({ ev: 'soundstop' }), 1400);",
         "process.on('SIGTERM', () => { out({ ev: 'stop', frames: 60 }); process.exit(0); });",
         "setInterval(() => {}, 1000);",
     ].join('\n'));
@@ -319,6 +320,11 @@ test('receiver: started with its address and ports, its reports read, stopped', 
         assert.strictEqual(s.rx.stream.shown, 58);
         // stage 3: the sound into SmartXbar's CarLife input
         assert.deepStrictEqual([s.rx.sound.ok, s.rx.sound.device, s.rx.sound.ct], [true, 'plug:smartx:CarLifeMedia_CF_48_STEREO', 8]);
+        assert.strictEqual(s.rx.soundRunning, true);
+        // the iPhone ends the session (stopped on the phone): the sound is no longer running
+        await new Promise((r) => setTimeout(r, 700));
+        assert.strictEqual(probe.status().rx.soundRunning, false);
+        assert.ok(probe.status().log.some((l) => /the iPhone ended the session/.test(l)));
         assert.ok(fs.existsSync(videoPath));
         assert.strictEqual(s.verdict.code, 'rx-video');
         assert.ok(/PASS: Test .iPhone mirrors 498x1080 at 30 fps/.test(s.verdict.text), s.verdict.text);

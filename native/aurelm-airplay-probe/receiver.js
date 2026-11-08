@@ -63,7 +63,7 @@ const NOISE = /seconds since last client feedback|^\s*$|httpd didn't get respons
 function freshState() {
     return {
         running: false, pid: null, starts: 0, exit: null, error: null, ip: null, iface: null,
-        client: null, video: null, videoRunning: false, audio: null, decoder: null, sound: null, cpu: null,
+        client: null, video: null, videoRunning: false, audio: null, decoder: null, sound: null, soundRunning: false, cpu: null,
         stream: { frames: 0, fps: 0, kbps: 0, idr: 0, sps: 0, audio: 0, shown: 0, decerr: 0, adec: 0, alate: 0, afull: 0, aerr: 0, axrun: 0, adev: -1, at: 0 },
         lines: [],
     };
@@ -112,11 +112,17 @@ function createReceiver(opts) {
             break;
         case 'sound':
             st.sound = j.ok ? { ok: true, device: j.device, ct: j.ct, at: now() } : { ok: false, error: j.error, ct: j.ct, at: now() };
+            st.soundRunning = !!j.ok;
             if (o.log) o.log('receiver: sound ' + (j.ok ? 'into ' + j.device + ' (type ' + j.ct + ')' : 'failed: ' + j.error));
             break;
         case 'decoder':
             st.decoder = j.ok ? { ok: true, path: j.path, w: j.w, h: j.h, at: now() } : { ok: false, error: j.error, at: now() };
             if (o.log) o.log('receiver: GPU decoder ' + (j.ok ? 'open, ' + j.w + 'x' + j.h + ' into ' + j.path : 'failed: ' + j.error));
+            break;
+        case 'soundstop':
+            // the iPhone's session is over (its last connection closed), stopped from the phone or not
+            st.soundRunning = false;
+            if (o.log) o.log('receiver: the iPhone ended the session');
             break;
         default: break;
         }
@@ -199,7 +205,7 @@ function createReceiver(opts) {
             if (ended) return;
             ended = true;
             if (child === me) child = null;
-            st.running = false; st.pid = null; st.videoRunning = false; st.stream.fps = 0; st.stream.kbps = 0;
+            st.running = false; st.pid = null; st.videoRunning = false; st.soundRunning = false; st.stream.fps = 0; st.stream.kbps = 0;
             st.exit = { code, signal: sig, at: now() };
             removeVideo();
             if (stopping || !want) { if (me.onEnded) me.onEnded(); return; }

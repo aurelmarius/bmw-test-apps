@@ -28,7 +28,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.8.1';
+const SERVICE_VERSION = '0.8.2';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -106,6 +106,7 @@ function rxSteps(s) {
 function soundStep(r, st, ca, off) {
     const snd = r.sound;
     if (!snd) return { label: 'Sound', state: off ? 'off' : 'wait', detail: r.audio ? 'starting' : 'none yet' };
+    if (snd.ok && !r.soundRunning) return { label: 'Sound', state: 'off', detail: 'ended by the iPhone; the speakers are back to the source before' };
     if (!snd.ok) return { label: 'Sound', state: 'bad', detail: snd.error };
     // dropped: late (the device fell behind: CPU, Wi-Fi) or full (nothing read it yet: the speakers still connecting)
     const n = st.adec ? st.adec + ' played' + (st.alate ? ', ' + st.alate + ' late' : '') + (st.afull ? ', ' + st.afull + ' unread' : '') : 'nothing played yet';
@@ -183,7 +184,8 @@ mgu.run({
         function syncMirror() {
             const rxOn = st && st.mode === 'receiver' && st.active ? st.rx : null;
             mirror.update({ rx: rxOn, pageVisible: shown(), driving: parked.moving() });
-            carAudio.want(!!(rxOn && rxOn.running && rxOn.client && rxOn.sound && rxOn.sound.ok && shown()));
+            // the speakers while the iPhone's sound plays: stopped on the phone, they go back to the source before at once
+            carAudio.want(!!(rxOn && rxOn.running && rxOn.soundRunning && shown()));
             if (shown()) { goneAt = 0; ended = false; return; }
             if (!rxOn || !rxOn.client || ended || ctx.settings.get('endOnLeave') === false) return;
             if (!goneAt) goneAt = Date.now();
