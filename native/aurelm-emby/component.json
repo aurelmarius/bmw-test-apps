@@ -1,0 +1,54 @@
+{
+  "id": "aurelm-emby",
+  "kind": "tool",
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "title": "Emby cast service",
+  "description": "For the app Emby: the head unit as a cast target in the Emby phone app (Emby's remote control, as Kodi's Emby add-on). Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code); keeps only the access token. Its internet goes through mgu-uplink, as uid 13101 only.",
+  "requires": {
+    "mgu-deploy": "0.7.0",
+    "mgu-uplink": "0.7.0"
+  },
+  "uninstallable": true,
+  "mguHmi": [
+    "ID7"
+  ],
+  "internet": true,
+  "uids": [
+    13101
+  ],
+  "files": [
+    { "path": "service.js", "from": "service.js", "mode": "0644" },
+    { "path": "client.js", "from": "client.js", "mode": "0644" },
+    { "path": "emby.js", "from": "emby.js", "mode": "0644" },
+    { "path": "ws.js", "from": "ws.js", "mode": "0644" },
+    { "path": "netx.js", "from": "netx.js", "mode": "0644" },
+    { "path": "page.js", "from": "page.js", "mode": "0644" },
+    { "path": "nft.js", "from": "nft.js", "mode": "0644" },
+    { "path": "sockgroup.js", "from": "sockgroup.js", "mode": "0644" },
+    { "path": "check.js", "from": "check.js", "mode": "0644" },
+    { "path": "cleanup.js", "from": "cleanup.js", "mode": "0644" },
+    { "path": "cacert.pem", "from": "cacert.pem", "mode": "0644" },
+    { "path": "README.md", "from": "README.md", "mode": "0644" }
+  ],
+  "check": [
+    "check.js"
+  ],
+  "deactivate": [
+    "node",
+    "cleanup.js"
+  ],
+  "units": [
+    { "name": "aurelm-emby.socket", "from": "systemd/aurelm-emby.socket" },
+    { "name": "aurelm-emby.service", "from": "systemd/aurelm-emby.service" }
+  ],
+  "enable": [
+    { "unit": "aurelm-emby.socket", "target": "sockets.target" }
+  ],
+  "recmgr": [
+    "aurelm-emby"
+  ],
+  "restart": [
+    "aurelm-emby.service"
+  ]
+}
