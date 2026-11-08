@@ -361,8 +361,17 @@ test('nft: the receiver test opens tcp and udp 7300-7302, out only for its uid',
 });
 
 const REAL = path.join(__dirname, '..', 'native', 'uxplay-mgu', 'build', 'uxplay-mgu');
-test('receiver: the real uxplay-mgu runs, listens on 7301 and ends with the test (skipped when not built)', async () => {
+test('receiver: uxplay-mgu asks for the head unit\'s loader, /lib/ld-linux-x86-64.so.2 (skipped when not built)', () => {
     if (!fs.existsSync(REAL)) { console.log('     (uxplay-mgu not built: skipped)'); return; }
+    // the unit has no /lib64: a binary that asks for /lib64/ld-linux-x86-64.so.2 does not start there (ENOENT, 0.6.0)
+    const b = fs.readFileSync(REAL);
+    assert.ok(b.indexOf('/lib/ld-linux-x86-64.so.2\0') >= 0, 'interpreter is not /lib/ld-linux-x86-64.so.2');
+    assert.strictEqual(b.indexOf('/lib64/ld-linux-x86-64.so.2'), -1);
+});
+
+test('receiver: the real uxplay-mgu runs, listens on 7301 and ends with the test (skipped when not built, or without /lib/ld-linux-x86-64.so.2)', async () => {
+    if (!fs.existsSync(REAL)) { console.log('     (uxplay-mgu not built: skipped)'); return; }
+    if (!fs.existsSync('/lib/ld-linux-x86-64.so.2')) { console.log('     (no /lib/ld-linux-x86-64.so.2 here, as on the unit: skipped; build.sh runs it in ubuntu:18.04)'); return; }
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rxreal-'));
     fs.chmodSync(tmp, 0o755);
     const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: REAL, rxName: 'BMW iDrive test rx', rxUid: null });

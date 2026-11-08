@@ -33,6 +33,12 @@ docker run --rm -v "$here:/w" -w /w ubuntu:18.04 sh -c '
     make -s SRC=build/src OUT=build/out PLIST=/w/build/plist -j"$(nproc)"
     chown -R '"$(id -u):$(id -g)"' build
 '
+# the unit has only /lib/ld-linux-x86-64.so.2 (no /lib64): refuse a binary that asks for another loader
+interp=$(readelf -l "$work/out/uxplay-mgu" | sed -n 's/.*Requesting program interpreter: \(.*\)]/\1/p')
+[ "$interp" = "/lib/ld-linux-x86-64.so.2" ] || { echo "build.sh: interpreter is '$interp', not /lib/ld-linux-x86-64.so.2" >&2; exit 1; }
+# it starts on glibc 2.27 with the loader where the unit has it
+docker run --rm -v "$here:/w" ubuntu:18.04 sh -c 'ln -sf /lib/x86_64-linux-gnu/ld-2.27.so /lib/ld-linux-x86-64.so.2 && /w/build/out/uxplay-mgu -h 2>&1 | head -1' | grep -q "UxPlay" \
+    || { echo "build.sh: uxplay-mgu does not start in ubuntu:18.04 with /lib/ld-linux-x86-64.so.2" >&2; exit 1; }
 cp "$work/out/uxplay-mgu" "$work/uxplay-mgu"
 cp "$work/src/LICENSE" "$work/UXPLAY-LICENSE"
 file "$work/uxplay-mgu" 2>/dev/null || true

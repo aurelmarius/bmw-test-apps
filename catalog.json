@@ -5,7 +5,7 @@
     {
       "id": "aurelm-airplay-probe",
       "kind": "tool",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "title": "AirPlay network test service",
       "description": "For the app AirPlay Test: the network test (a test AirPlay receiver announced over mDNS) and, stage 1 of an AirPlay receiver, UxPlay's protocol on the head unit, which counts the mirrored picture it gets (nothing shown yet). Opens the firewall for its ports only while a test runs.",
       "author": "aurelmarius",
@@ -13,10 +13,10 @@
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm-airplay-probe@0.6.0.tgz",
-        "size": 2052887,
-        "sha256": "ad59b4ec51432073579e3ddbacd221856c36bb4f37dbb484066e90f7abbd2f57",
-        "url": "packages/aurelm-airplay-probe@0.6.0.tgz"
+        "name": "aurelm-airplay-probe@0.6.1.tgz",
+        "size": 2052928,
+        "sha256": "635d1f4f20ae8ab58d9ed918822cf106d24d423f5a50230869540ddc8f406823",
+        "url": "packages/aurelm-airplay-probe@0.6.1.tgz"
       },
       "requires": {
         "mgu-deploy": "0.7.0"
@@ -26,23 +26,23 @@
     {
       "id": "aurelm_airplay_probe",
       "kind": "app",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "title": "AirPlay Test",
       "description": "AirPlay receiver for the head unit, in stages: the network test (can an iPhone find and reach the head unit?) and stage 1, UxPlay's protocol counting the mirrored picture during CarPlay. Needs the AirPlay test service.",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_airplay_probe@0.6.0.tgz",
-        "size": 556069,
-        "sha256": "ca2828948801a6fcbf790d4a9c5ee2a83c672c2c01aa68cb3f16d751ae6390af",
-        "url": "packages/aurelm_airplay_probe@0.6.0.tgz"
+        "name": "aurelm_airplay_probe@0.6.1.tgz",
+        "size": 556322,
+        "sha256": "6ffc95917c4e89e19a2d9cf07ce41feae36603b7eecca96809167474045a9211",
+        "url": "packages/aurelm_airplay_probe@0.6.1.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_airplay_probe.png",
       "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0",
       "requires": {
-        "aurelm-airplay-probe": "0.6.0"
+        "aurelm-airplay-probe": "0.6.1"
       }
     },
     {

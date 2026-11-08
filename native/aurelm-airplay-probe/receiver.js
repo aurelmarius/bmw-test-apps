@@ -121,7 +121,7 @@ function createReceiver(opts) {
         const me = child;
         let ended = false;
         // a receiver that could not start (not executable for its uid, ...) gets 'error' and no 'exit'
-        child.on('error', (e) => { st.error = 'start: ' + e.message; if (o.log) o.log('receiver: ' + st.error); if (!me.pid) finish(null, null); });
+        child.on('error', (e) => { st.error = 'start: ' + e.message + (e.code === 'ENOENT' && fs.existsSync(o.bin) ? ' (the binary is there: its program loader is missing)' : ''); if (o.log) o.log('receiver: ' + st.error); if (!me.pid) finish(null, null); });
         child.on('exit', (code, sig) => finish(code, sig));
         function finish(code, sig) {
             if (ended) return;

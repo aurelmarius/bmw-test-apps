@@ -21,7 +21,8 @@ C_SRCS  = $(wildcard $(SRC)/lib/*.c) $(wildcard $(SRC)/lib/playfair/*.c) $(wildc
 C_OBJS  = $(patsubst %.c,$(OUT)/obj/%.o,$(notdir $(C_SRCS)))
 
 STATIC  = -Wl,-Bstatic -L$(PLIST)/lib -lplist-2.0 -lglib-2.0 -lpcre -lcrypto -Wl,-Bdynamic
-LIBS    = $(STATIC) -lpthread -ldl -lm -static-libstdc++ -static-libgcc
+# the head unit's loader is /lib/ld-linux-x86-64.so.2 (no /lib64: a binary asking for /lib64/... fails to start, ENOENT)
+LIBS    = $(STATIC) -lpthread -ldl -lm -static-libstdc++ -static-libgcc -Wl,--dynamic-linker=/lib/ld-linux-x86-64.so.2
 
 vpath %.c $(SRC)/lib $(SRC)/lib/playfair $(SRC)/lib/llhttp $(SRC)/lib/mdnsd renderer
 

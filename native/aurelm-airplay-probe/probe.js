@@ -34,7 +34,7 @@ const nft = require('./nft');
 const rxm = require('./receiver');
 const sockgroup = require('./sockgroup');
 
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 const MDNS_GROUP = '224.0.0.251';
 const QUERY_NAMES = ['_airplay._tcp.local', '_raop._tcp.local', '_companion-link._tcp.local', '_apple-mobdev2._tcp.local'];
 

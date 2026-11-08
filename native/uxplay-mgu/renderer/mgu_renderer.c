@@ -153,8 +153,13 @@ bool waiting_for_x11_window() { return false; }
 
 bool video_get_playback_info(double *duration, double *position, double *seek_start, double *seek_duration, float *rate,
                              bool *buffer_empty, bool *buffer_full) {
-    if (duration) *duration = 0; if (position) *position = 0; if (seek_start) *seek_start = 0; if (seek_duration) *seek_duration = 0;
-    if (rate) *rate = 0; if (buffer_empty) *buffer_empty = true; if (buffer_full) *buffer_full = false;
+    if (duration) *duration = 0;
+    if (position) *position = 0;
+    if (seek_start) *seek_start = 0;
+    if (seek_duration) *seek_duration = 0;
+    if (rate) *rate = 0;
+    if (buffer_empty) *buffer_empty = true;
+    if (buffer_full) *buffer_full = false;
     return false;
 }
 
