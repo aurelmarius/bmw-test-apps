@@ -2,7 +2,7 @@
   "id": "aurelm_wheel_heat",
   "title": "Wheel Heating",
   "description": "Steering wheel heating on/off from a favourite button: for a heated iDrive 8 (LCI) steering wheel without its own button, fitted to an iDrive 7 car",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "vendor": "custom",
   "loggingId": "OA9F",
   "iconGlyph": "wheel",
@@ -23,6 +23,13 @@
       "_optional": "switching through the steering wheel's own service (fallback)"
     }
   },
+  "entries": [
+    {
+      "key": "TOGGLE",
+      "title": "Wheel Heat On/Off",
+      "map": false
+    }
+  ],
   "screens": [
     {
       "name": "MAIN",
@@ -47,7 +54,7 @@
   "settings": [
     {
       "key": "onOpen",
-      "label": "When opened from a favourite button",
+      "label": "Wheel Heat On/Off tile (or its favourite button)",
       "type": "choice",
       "default": "toggle",
       "options": [
@@ -58,16 +65,12 @@
         [
           "on",
           "Always switch heating on"
-        ],
-        [
-          "show",
-          "Only show the status"
         ]
       ]
     },
     {
       "key": "onMenu",
-      "label": "When opened from the apps menu",
+      "label": "Wheel Heating tile (or its favourite button)",
       "type": "choice",
       "default": "show",
       "options": [
@@ -84,23 +87,6 @@
           "Always switch heating on"
         ]
       ]
-    },
-    {
-      "key": "showOnShortcut",
-      "label": "Screen after a favourite button (from the next restart)",
-      "type": "choice",
-      "default": "stay",
-      "options": [
-        [
-          "stay",
-          "Stay on the current screen"
-        ],
-        [
-          "show",
-          "Show the status screen"
-        ]
-      ],
-      "reset": 2
     },
     {
       "key": "path",

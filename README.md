@@ -21,16 +21,14 @@ mgu-store** and **IterioDev's App Manager**. Built with the same kit as
 ### 🔥 Wheel Heating (`aurelm_wheel_heat`)
 *Steering wheel heating on/off from a favourite button.*
 
-**Status:** works in the car (G20, iDrive 7) through the steering wheel's own service; the climate service is not offered on that car. The favourite button switches without opening the app (1.0.5); the apps menu only shows the status.
+**Status:** works in the car (G20, iDrive 7) through the steering wheel's own service; the climate service is not offered on that car. 1.0.6: two tiles, **Wheel Heat On/Off** (for a favourite button: switches without opening the app) and **Wheel Heating** (the status screen). A favourite button saved on Wheel Heating before 1.0.6 now opens the status screen: save it again on Wheel Heat On/Off.
 
 For an iDrive 7 car fitted with a heated iDrive 8 (LCI) steering wheel. That wheel has no heating button, and on iDrive 7 only the voice command could switch it. The app tries to switch it the way the voice command does, through the head unit's climate service (`ClimateMaster.requestSteeringWheelHeating`). If the climate service turns the request down, the app writes the level to the climate service's status field (`statusSteeringWheelHeating`, which has a setter), and then tries the steering wheel's own service (`SteeringWheelClimate.requestHeating`).
 
-* **Favourite button shortcut**: highlight *Wheel Heating* in the apps menu and hold a favourite button (1-8) to save it. Each press then switches the heating on or off (setting: switch on / off, always on, or only show the status).
-* **Opened from the apps menu**: only shows the status, so a heating the car switched on by itself stays on (setting: also switch, or always switch on).
-* **Status screen**: on / off as the car reports it, with an on / off button.
-* **Details page**: what both services report (available, level, coding) and every request sent with the car's answer. **Take a photo of this page when you report a test.**
-* **Client group**: which client group the climate service accepts from an app is not documented. When the climate service turns a request down, the app tries groups 0-7 and keeps the one it accepts (setting).
-* **Screen after a favourite button** (setting, from 1.0.5): by default the app doesn't open at all: the favourite button switches the heating and you stay on the screen you were on (the app's entry is not mapped to its screen, so the HMI asks the app first). The first press after the head unit starts shows "Loading app" while the app starts. Or show the status screen. A change takes effect at the head unit's next start. An app cannot return the HMI to the screen you were on once it has opened (the HMI offers apps only closeState / openState / openEntryState), which is why no "close after a few seconds" is offered.
+* **Two tiles in the apps menu** (1.0.6):
+  * **Wheel Heat On/Off** switches the heating without opening anything: you stay on the screen you were on. Put this one on a favourite button: highlight it in the apps menu and hold a favourite button (1-8). The first press after the head unit starts shows "Loading app" while the app starts. Setting: switch on / off, or always switch on.
+  * **Wheel Heating** opens the status screen and switches nothing, so a heating the car switched on by itself stays on (setting: also switch, or always switch on).
+  * Why two: an entry the HMI opens a screen for (mapped) always opens it, even from a favourite button, and once an app's screen is open the app can't take the HMI back to the screen you were on (it can only close its own screen, which leaves the apps menu). An unmapped entry opens nothing, but then the app can't open its screen from it either. So one tile does each.
 
 ![Wheel Heating - status](docs/screenshots/aurelm_wheel_heat-status.png)
 ![Wheel Heating - details](docs/screenshots/aurelm_wheel_heat-details.png)
@@ -77,13 +75,13 @@ The app and its root service announce a test receiver, **BMW iDrive test**, on t
 1. Download `<id>@<version>.tgz` from [Releases](https://github.com/aurelmarius/bmw-test-apps/releases).
 2. Build a USB repository:
    ```powershell
-   node mgu-install.js usb-repo E:\ aurelm_wheel_heat@1.0.5.tgz
+   node mgu-install.js usb-repo E:\ aurelm_wheel_heat@1.0.6.tgz
    ```
 3. Insert the USB drive into your car and install from the **USB** page of the Store.
 
 ### Via SSH
 ```bash
-/var/opt/mgu-deploy/mgu-deploy.sh install --artifact aurelm_wheel_heat@1.0.5.tgz --yes
+/var/opt/mgu-deploy/mgu-deploy.sh install --artifact aurelm_wheel_heat@1.0.6.tgz --yes
 ```
 A service (`aurelm-airplay-probe@<version>.tgz`) installs the same way, before the app that needs it.
 
