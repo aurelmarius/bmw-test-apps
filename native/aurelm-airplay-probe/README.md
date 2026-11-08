@@ -60,7 +60,10 @@ receiver it does not take for an Apple TV).
 `uxplay-mgu` decodes the mirrored H.264 on the GPU (`native/uxplay-mgu/video`, Moonride's MSDK decoder) into
 `/dev/shm/mgu-video-aurelm-airplay` (1920x720, I420, owned by nobody; the receiver runs in the group `video` for the
 render node). The app shows it over the whole screen through mgu-render (`mirror_view.js`) while the car is parked
-(strict: no speed reading counts as moving); a tap or the iDrive controller hides it. The frame file is removed when the
+(strict: no speed reading counts as moving); a tap or the iDrive controller hides it, and the touch screen and the
+controller are the HMI's again (claims and grab only while shown). The app ends the iPhone's session when it leaves the
+front (`{"cmd":"end-session"}`: the receiver is started again, the iPhone stops mirroring), so CarPlay opens at once.
+The receiver asks the iPhone for 1920x720 (`-s 1920x720@60`). The frame file is removed when the
 receiver ends (by itself, by the service after a crash, by `cleanup.js` at a stop or an uninstall).
 
 ## Removal leaves nothing

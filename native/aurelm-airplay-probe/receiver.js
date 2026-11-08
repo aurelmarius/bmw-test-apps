@@ -117,7 +117,8 @@ function createReceiver(opts) {
         try { fs.chownSync(home, o.uid, o.gid); } catch (e) { /* not root (tests) */ }
         const env = Object.assign({ HOME: home, PATH: '/usr/bin:/bin', UXPLAY_MDNS_IPV4: w.ip, UXPLAY_MDNS_NO_IPV6: '1',
             MGU_VIDEO_PATH: o.videoPath || VIDEO_PATH, MGU_VIDEO_SIZE: VIDEO_SIZE }, o.env || {});
-        const args = ['-n', w.name, '-nh', '-p', String(BASE_PORT), '-m', w.deviceid.toLowerCase()];
+        // -s: the size the iPhone mirrors for, the centre screen's (landscape fills it; portrait has bars either side)
+        const args = ['-n', w.name, '-nh', '-p', String(BASE_PORT), '-m', w.deviceid.toLowerCase(), '-s', '1920x720@60'];
         const spawnOpts = { env, cwd: home, stdio: ['ignore', 'pipe', 'pipe'] };
         // as nobody when the service is root (the car), its group video (the GPU's render node /dev/dri/renderD128 is
         // root:video; a spawned process gets no supplementary groups); uid null: as this process (the tests)

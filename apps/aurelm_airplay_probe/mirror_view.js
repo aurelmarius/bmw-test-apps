@@ -19,6 +19,7 @@
  */
 const VID = 1;
 const KEEPALIVE_MS = 800;   // mgu-render hides an app silent for 3 s
+const HINT_MS = 4000;       // how long "tap to return" stays over the picture
 
 function createMirrorView(o) {
     const log = o.log || { info() {}, warn() {} };
@@ -32,7 +33,6 @@ function createMirrorView(o) {
         ready = true;
         gpu.mode('layer');
         gpu.place({ x: 0, y: 0, w: screen.w, h: screen.h, scale: 1, ox: 0, oy: 0 });
-        gpu.claim([{ x: 0, y: 0, w: screen.w, h: screen.h }]);
         ino = null;   // the renderer forgot the video with the connection
         rec = null;
         log.info('mirror: mgu-render ' + screen.w + 'x' + screen.h + (info.video ? '' : ' (no video support)'));
@@ -52,10 +52,20 @@ function createMirrorView(o) {
     });
     gpu.connect();
 
+    let shownAt = 0, hinted = false;
     function frame() {
         const pl = gpu.placement;
         if (!pl) return;
-        if (!rec) rec = new o.Recorder(pl.w, pl.h).clear(0x000000ff).video(VID, 0, 0, pl.w, pl.h, 0);
+        // the first seconds: how to get back, over the picture
+        const hint = now() - shownAt < HINT_MS;
+        if (!rec || hint !== hinted) {
+            rec = new o.Recorder(pl.w, pl.h).clear(0x000000ff).video(VID, 0, 0, pl.w, pl.h, 0);
+            if (hint) {
+                rec.roundRect(pl.w / 2 - 330, pl.h - 96, 660, 60, 30, 0x000000b0);
+                rec.text(o.hintText || 'Tap the screen or press a button to return', pl.w / 2, pl.h - 56, 26, 0xffffffff, { align: 'center', font: 'bold', literal: true });
+            }
+            hinted = hint;
+        }
         gpu.frame(rec);
         lastFrame = now();
     }
@@ -64,9 +74,12 @@ function createMirrorView(o) {
         if (want === shown) return;
         shown = want;
         if (!want) { gpu.video(VID, null); ino = null; }
+        // touch and the controller are ours only while the picture is up: hidden, the HMI gets them all (CarPlay's tile)
+        const pl = gpu.placement;
+        gpu.claim(want && pl ? [{ x: 0, y: 0, w: pl.w, h: pl.h }] : []);
         gpu.grab(want);
         gpu.show(want);
-        if (want) frame();
+        if (want) { shownAt = now(); rec = null; frame(); }
         log.info('mirror: ' + (want ? 'shown' : 'hidden'));
     }
 
@@ -95,7 +108,7 @@ function createMirrorView(o) {
             ino = cur;
         }
         apply(want);
-        if (shown && now() - lastFrame >= KEEPALIVE_MS) frame();
+        if (shown && (now() - lastFrame >= KEEPALIVE_MS || (hinted && now() - shownAt >= HINT_MS))) frame();
     }
 
     function wantAgain() { userHid = false; }

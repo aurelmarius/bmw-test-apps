@@ -320,7 +320,7 @@ test('receiver: started with its address and ports, its reports read, stopped', 
         assert.strictEqual(s.verdict.code, 'rx-video');
         assert.ok(/PASS: Test .iPhone mirrors 498x1080 at 30 fps/.test(s.verdict.text), s.verdict.text);
         const args = s.rx.lines.find((l) => / args /.test(l));
-        assert.ok(/-n BMW iDrive -nh -p 7300 -m [0-9a-f:]{17} ip 127\.0\.0\.1 v6off 1/.test(args), args);
+        assert.ok(/-n BMW iDrive -nh -p 7300 -m [0-9a-f:]{17} -s 1920x720@60 ip 127\.0\.0\.1 v6off 1/.test(args), args);
         // UxPlay's per-second complaint is not kept
         assert.ok(!s.rx.lines.some((l) => /client feedback/.test(l)));
         const s2 = await probe.stop('test');
@@ -329,6 +329,25 @@ test('receiver: started with its address and ports, its reports read, stopped', 
         assert.strictEqual(s2.rx.running, false);
         assert.ok(!fs.existsSync(videoPath), 'the frame file is left');
         assert.strictEqual(s2.verdict.code, 'rx-video');
+    } finally { await probe.stop('finally'); }
+});
+
+test('receiver: end-session starts the receiver again (the iPhone stops mirroring), only with a client', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rxend-'));
+    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: fakeReceiver(tmp), rxUid: null, rxVideoPath: path.join(tmp, 'v') });
+    try {
+        await probe.start(1, 'receiver');
+        await new Promise((r) => setTimeout(r, 600));
+        const pid = probe.status().rx.pid;
+        assert.ok(probe.status().rx.client);
+        const s = await probe.endSession('test');
+        assert.strictEqual(s.rx.running, true);
+        assert.notStrictEqual(s.rx.pid, pid);
+        assert.strictEqual(s.rx.client, null);
+        assert.ok(s.log.some((l) => /ending the iPhone's session \(test\)/.test(l)));
+        // without a client: nothing to end
+        const pid2 = s.rx.pid;
+        assert.strictEqual((await probe.endSession('again')).rx.pid, pid2);
     } finally { await probe.stop('finally'); }
 });
 

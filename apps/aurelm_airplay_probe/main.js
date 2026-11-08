@@ -27,7 +27,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.7.0';
+const SERVICE_VERSION = '0.7.1';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -162,8 +162,20 @@ mgu.run({
         const parked = Parked.watch(ctx, log, { strict: true });
         const mirror = createMirrorView({ RenderClient, Recorder: record.Recorder, kit: record, appId: ctx.spec.id, log,
             statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
+        // leaving the app (HOME, another app, CarPlay's tile) ends the iPhone's mirroring, so CarPlay is free at once
+        // (setting endOnLeave, on): 1.5 s after the page went, once per session
+        let goneAt = 0, ended = false;
         function syncMirror() {
-            mirror.update({ rx: st && st.mode === 'receiver' && st.active ? st.rx : null, pageVisible: shown(), driving: parked.moving() });
+            const rxOn = st && st.mode === 'receiver' && st.active ? st.rx : null;
+            mirror.update({ rx: rxOn, pageVisible: shown(), driving: parked.moving() });
+            if (shown()) { goneAt = 0; ended = false; return; }
+            if (!rxOn || !rxOn.client || ended || ctx.settings.get('endOnLeave') === false) return;
+            if (!goneAt) goneAt = Date.now();
+            if (Date.now() - goneAt >= 1500) {
+                ended = true;
+                log.info('airplay: the app left the front: ending the iPhone\'s mirroring');
+                ask('end-session', { why: 'the app left the front' }).then((r) => { if (r) st = r; });
+            }
         }
         if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => mirror.close());
         ui.onClick('BTN_STOP', () => command('stop', 'Stopping...'));

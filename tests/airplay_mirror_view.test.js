@@ -41,15 +41,21 @@ const test = (n, f) => tests.push({ n, f });
 test('shown while parked, the page up and pictures coming: the file named, grabbed, a frame with the video op', () => {
     const { v, gpu } = setup();
     v.update({ rx: rx(), pageVisible: true, driving: false });
-    assert.deepStrictEqual(gpu.calls, ['video 1 /dev/shm/mgu-video-aurelm-airplay', 'grab true', 'show true', 'frame']);
+    assert.deepStrictEqual(gpu.calls, ['video 1 /dev/shm/mgu-video-aurelm-airplay', 'claim 1', 'grab true', 'show true', 'frame']);
     assert.strictEqual(v.state().shown, true);
     assert.strictEqual(v.state().why, 'on the screen');
     const w = gpu.lastRec.words();
     assert.ok(Array.prototype.indexOf.call(w, record.OP.VIDEO) >= 0);
+    // the hint is over the picture at first (text drawn), then gone
+    const words = (r) => Array.prototype.slice.call(r.words());
+    assert.ok(words(gpu.lastRec).indexOf(record.OP.GLYPHS) >= 0, 'no hint');
     // the keepalive: a frame again within the renderer's 3 s
     gpu.calls = []; clock += 900;
     v.update({ rx: rx(), pageVisible: true, driving: false });
     assert.deepStrictEqual(gpu.calls, ['frame']);
+    clock += 4000;
+    v.update({ rx: rx(), pageVisible: true, driving: false });
+    assert.ok(words(gpu.lastRec).indexOf(record.OP.GLYPHS) < 0, 'the hint stays');
 });
 
 test('hidden while driving, and when the app is not in front', () => {
@@ -57,7 +63,8 @@ test('hidden while driving, and when the app is not in front', () => {
     v.update({ rx: rx(), pageVisible: true, driving: false });
     gpu.calls = [];
     v.update({ rx: rx(), pageVisible: true, driving: true });
-    assert.deepStrictEqual(gpu.calls, ['video 1 null', 'grab false', 'show false']);
+    // hidden: no touch claimed, the controller let go (the HMI gets them all: CarPlay's tile)
+    assert.deepStrictEqual(gpu.calls, ['video 1 null', 'claim 0', 'grab false', 'show false']);
     assert.strictEqual(v.state().why, 'hidden while driving');
     v.update({ rx: rx(), pageVisible: false, driving: false });
     assert.strictEqual(v.state().shown, false);

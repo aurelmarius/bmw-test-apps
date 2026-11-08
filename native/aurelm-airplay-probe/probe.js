@@ -34,7 +34,7 @@ const nft = require('./nft');
 const rxm = require('./receiver');
 const sockgroup = require('./sockgroup');
 
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 const MDNS_GROUP = '224.0.0.251';
 const QUERY_NAMES = ['_airplay._tcp.local', '_raop._tcp.local', '_companion-link._tcp.local', '_apple-mobdev2._tcp.local'];
 
@@ -482,9 +482,20 @@ function createProbe(opts) {
         return status();
     }
     /** for exit: the firewall as the unit had it, synchronously */
+    /** ends the iPhone's mirroring session: the receiver is started again (the phone sees it go and stops) */
+    async function endSession(why) {
+        if (!st.active || st.mode !== 'receiver') return status();
+        const r = rx.state();
+        if (!r.client) return status();
+        log('receiver: ending the iPhone\'s session (' + (why || 'asked') + ')');
+        await rx.stop();
+        const t = rxTarget();
+        if (st.active && t) rx.start(t);
+        return status();
+    }
     function cleanupSync() { rx.killSync(); if (o.nft) { try { nft.remove({ nft: o.nft }); } catch (e) { /* best effort */ } } }
 
-    return { start, stop, status, cleanupSync, identity: id };
+    return { start, stop, status, endSession, cleanupSync, identity: id };
 }
 
 /* ---------------- control socket ---------------- */
@@ -513,7 +524,7 @@ function serveControl(probe, sockPath, log, onRequest, onExit) {
                     onExit();
                     return;
                 }
-                const p = m.cmd === 'start' ? probe.start(m.minutes, m.mode) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
+                const p = m.cmd === 'end-session' ? probe.endSession(m.why) : m.cmd === 'start' ? probe.start(m.minutes, m.mode) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
                 Promise.resolve(p).then((s) => { try { c.write(JSON.stringify(s) + '\n'); } catch (e) { /* gone */ } }, (e) => { try { c.write(JSON.stringify({ error: String(e.message || e) }) + '\n'); } catch (x) { /* gone */ } });
             }
         });
