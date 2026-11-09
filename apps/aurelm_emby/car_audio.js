@@ -37,13 +37,13 @@ function createCarAudio(signals, log, opts) {
     const saved = () => {
         try {
             const j = JSON.parse(fs.readFileSync(o.file, 'utf8'));
-            if (j.mainConnectionID == null || !j.boot || j.boot !== bootId()) return null;
+            if (j.mainConnectionID == null || !j.bootId || j.bootId !== bootId()) return null;
             return j.mainConnectionID;
         } catch (e) { return null; }
     };
     const save = (id) => {
         if (!o.file) return;
-        try { if (id == null) fs.unlinkSync(o.file); else fs.writeFileSync(o.file, JSON.stringify({ mainConnectionID: id, boot: bootId() })); } catch (e) { /* none, or not writable */ }
+        try { if (id == null) fs.unlinkSync(o.file); else fs.writeFileSync(o.file, JSON.stringify({ mainConnectionID: id, bootId: bootId() })); } catch (e) { /* none, or not writable */ }
     };
     /** unavailable again, only when nothing but ours (just disconnected, maybe still listed) is on 287 */
     async function release(ours) {

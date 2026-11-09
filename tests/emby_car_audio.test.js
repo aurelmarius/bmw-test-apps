@@ -50,7 +50,7 @@ test('on, then off: connect 287 -> 1024 with the id saved with the boot; off: ou
     a.want(true);
     await settle();
     assert.deepStrictEqual(s.calls, ['getListMainConnections', 'hookSourceAvailablityStatusChange 287 A_AVAILABLE', 'connect 287->1024']);
-    assert.deepStrictEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { mainConnectionID: 42, boot: 'b1' });
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { mainConnectionID: 42, bootId: 'b1' });
     s.calls.length = 0;
     a.want(false);
     await settle();
@@ -60,7 +60,7 @@ test('on, then off: connect 287 -> 1024 with the id saved with the boot; off: ou
 
 test('a leftover of ours from this boot: disconnected at start', async () => {
     const file = tmpFile();
-    fs.writeFileSync(file, JSON.stringify({ mainConnectionID: 7, boot: 'b1' }));
+    fs.writeFileSync(file, JSON.stringify({ mainConnectionID: 7, bootId: 'b1' }));
     const s = fakeSignals({ list: [{ mainConnectionID: 7, sourceID: 287 }] });
     createCarAudio(s, log, { file, bootId: boot('b1') });
     await settle();
@@ -70,13 +70,13 @@ test('a leftover of ours from this boot: disconnected at start', async () => {
 
 test('an id from before a restart: forgotten, the connection with that number (AirPlay\'s now) left alone', async () => {
     const file = tmpFile();
-    fs.writeFileSync(file, JSON.stringify({ mainConnectionID: 7, boot: 'old' }));
+    fs.writeFileSync(file, JSON.stringify({ mainConnectionID: 7, bootId: 'old' }));
     const s = fakeSignals({ list: [{ mainConnectionID: 7, sourceID: 287 }] });
     createCarAudio(s, log, { file, bootId: boot('new') });
     await settle();
     assert.deepStrictEqual(s.calls, []);
     assert.ok(!fs.existsSync(file));
-    // AirPlay Test 0.8.3's file (no boot): forgotten too
+    // a file without a boot id (AirPlay Test 0.8.3's form): forgotten too
     fs.writeFileSync(file, JSON.stringify({ mainConnectionID: 7 }));
     const s2 = fakeSignals({ list: [{ mainConnectionID: 7, sourceID: 287 }] });
     createCarAudio(s2, log, { file, bootId: boot('new') });
