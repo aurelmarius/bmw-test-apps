@@ -8,7 +8,7 @@ a new player.
 | Part | Does |
 |---|---|
 | demux | libavformat's mpegts demuxer on stdin (1 MiB read to find the streams; a sound stream that shows up later, as Emby's transcoder may write it, is taken when it does), a video and an audio queue (6 s or 40 MiB at most: when the player is ahead, the stream waits in the pipe and so in the server's socket) |
-| picture | `src/decoder_msdk.cpp`: our copy of Moonride's MSDK decoder (VA-API on `/dev/dri/renderD128`), changed in two ways: frames come out in **display order** (films have B frames; the AirPlay receiver's copy decodes in decoding order) and a film is **fitted whole** (black bars, never cropped). VPP fits the picture into 1920x720, and each picture goes into the frame file (`/dev/shm/mgu-video-aurelm-emby`, MGVF, 3 slots, I420) when the clock reaches it. A picture already late is decoded without VPP and without its copy. |
+| picture | `src/decoder_msdk.cpp`: our copy of Moonride's MSDK decoder (VA-API on `/dev/dri/renderD128`), changed in two ways: frames come out in **display order** (films have B frames; the AirPlay receiver's copy decodes in decoding order) and a film is **fitted whole** (black bars, never cropped). VPP scales the picture to the film's own shape fitted into 1920x1080 (a 2.40:1 film: 1920x800), and each picture goes into the frame file (`/dev/shm/mgu-video-aurelm-emby`, MGVF, 3 slots, I420, made once the stream's picture is known) when the clock reaches it; the app places it on the screen (fit, zoom, fill). A picture already late is decoded without VPP and without its copy. |
 | sound | libavcodec's aac, ac3 and eac3 decoders, mixed down to stereo S16 at the volume, written to ALSA `plug:smartx:CarLifeMedia_CF_48_STEREO` (libasound opened at run time, the device non-blocking, as the AirPlay receiver's). The sound is kept on the clock: late sound is dropped, early sound waits. |
 | clock | monotonic, from the first picture's timestamp. It stops while paused, and while the stream runs dry (buffering, until 1 s is queued again). |
 
@@ -16,9 +16,8 @@ The NAL framing (`nal_reader.cpp`), the frame-file writer (`mgvf.cpp`), the MSDK
 checks are the AirPlay receiver's, read from `native/uxplay-mgu/video` by the Makefile. They are not copied and not
 changed.
 
-**Runs as.** The service starts it as root. It creates the frame file, owned by nobody (mgu-render takes that),
-then becomes `MGU_RUN_AS` (nobody, as the AirPlay receiver: the smartx sound plugin refused uid 13101 in the car) with the groups in `MGU_GROUPS` (`video`: the GPU's render node;
-`mgu_alsa`: the sound devices), before it reads a byte of the stream. It refuses to run as root. It has the
+**Runs as.** The service starts it as root. It becomes `MGU_RUN_AS` (nobody, as the AirPlay receiver: the smartx sound plugin refused uid 13101 in the car) with the groups in `MGU_GROUPS` (`video`: the GPU's render node;
+`mgu_alsa`: the sound devices), before it reads a byte of the stream, and refuses to run as root; then, once the stream's picture is known, it makes the frame file (owned by nobody, which mgu-render takes). It has the
 service's limits: its cgroup, nice 10, and `LimitCORE=1` (no core dump to the crash handler; the tool lists
 `emby-player` in `crashNames`).
 
@@ -32,7 +31,7 @@ shown and late, sound played, dropped and unread, buffered seconds), `end` and `
 | Variable | |
 |---|---|
 | `MGU_VIDEO_PATH` | the frame file (default `/dev/shm/mgu-video-aurelm-emby`) |
-| `MGU_VIDEO_SIZE` | `WxH` of the output (default `1920x720`, the centre screen) |
+| `MGU_VIDEO_SIZE` | `WxH`, the largest picture (default `1920x1080`): the film's shape fitted into it |
 | `MGU_VIDEO_OFF` | set: no decoder (a PC); pictures are only timed and counted |
 | `MGU_AUDIO` | `alsa:<device>` (default), `null`, or `wav:<path>` (tests) |
 | `MGU_ALSA_US` | the ALSA buffer in µs (default 64000) |

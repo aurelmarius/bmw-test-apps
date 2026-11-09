@@ -17,7 +17,8 @@
  *                 user, access token; 0600; no password)
  *
  * Control: one JSON object per line: {"cmd":"status"}, {"cmd":"signin-open"}, {"cmd":"signin-close"},
- * {"cmd":"signout"}, {"cmd":"playstate","command":"PlayPause"|"Stop"}, {"cmd":"exit"}; the reply is the status.
+ * {"cmd":"signout"}, {"cmd":"playstate","command":"PlayPause"|"Stop"|"Rewind"|"FastForward"|"Seek","seek":<seconds>},
+ * {"cmd":"exit"}; the reply is the status.
  * {"cmd":"subs"}: the film's text subtitles instead ({ key, cues: [{ s, e, t }] }), which the app draws.
  */
 const fs = require('fs');
@@ -32,7 +33,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.2.6';
+const VERSION = '0.3.0';
 const PAGE_PORT = 8490;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -264,7 +265,7 @@ function createService(opts) {
         } else if (cmd === 'subs') {
             return { key: subs.key, cues: subs.cues };
         } else if (cmd === 'playstate' && m.command) {
-            toChild({ op: 'playstate', command: String(m.command) });
+            toChild({ op: 'playstate', command: String(m.command), seek: m.seek != null && isFinite(Number(m.seek)) ? Number(m.seek) : null });
         } else if (cmd === 'exit') { setTimeout(() => stop(0), 100); }
         return status();
     }

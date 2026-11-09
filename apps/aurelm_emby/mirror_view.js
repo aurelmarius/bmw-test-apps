@@ -18,8 +18,10 @@
  *   view.state()                                 // { shown, why }
  *   view.tick()                                  // Emby: o.overlay() changed? drawn again (the subtitles)
  *
- * Emby's copy of AirPlay Test's mirror_view.js: o.overlay() -> { key, draw(rec, placement, hinting) } draws over
- * the picture (the subtitles), o.idleText / o.hiddenText word the reasons for the player.
+ * Emby's copy of AirPlay Test's mirror_view.js: o.overlay() -> { key, rect(placement), draw(rec, placement, hinting) }
+ * places the picture (fit, zoom, fill) and draws over it (the controls, the subtitles); o.onTouch(phase, x, y,
+ * placement) and o.onCcu(c) (true: taken) get touch and the controller while the picture is up (the film's
+ * controls; their "exit" calls view.hide()); o.idleText / o.hiddenText word the reasons for the player.
  */
 const VID = 1;
 const KEEPALIVE_MS = 800;   // mgu-render hides an app silent for 3 s
@@ -50,8 +52,10 @@ function createMirrorView(o) {
     };
     // touch on the picture is kept (claimed) and ignored: it must not reach the page's buttons underneath, and a tap
     // must not take the picture away (the owner's choice in the car); the controller's buttons hide it
-    gpu.on('touch', () => true);
+    // Emby: touch and the controller go to the film's controls (o.onTouch, o.onCcu) while the picture is up
+    gpu.on('touch', (phase, x, y) => { if (shown && o.onTouch) o.onTouch(phase, x, y, gpu.placement); return true; });
     gpu.on('ccu', (c) => {
+        if (shown && o.onCcu && o.onCcu(c)) { lastPress = c.press; lastTilt = c.tilt; return; }
         if (c.press && c.press !== lastPress) hide('the controller');
         else if (c.tilt && c.tilt !== lastTilt) hide('the controller');
         lastPress = c.press; lastTilt = c.tilt;
@@ -68,7 +72,9 @@ function createMirrorView(o) {
         const ov = o.overlay ? o.overlay() : null;
         const ok = ov ? ov.key : null;
         if (!rec || hint !== hinted || ok !== overKey) {
-            rec = new o.Recorder(pl.w, pl.h).clear(0x000000ff).video(VID, 0, 0, pl.w, pl.h, 0);
+            // Emby: the overlay may place the picture (fit, zoom, fill: the frame file has the film's own shape)
+            const r = ov && ov.rect ? ov.rect(pl) : { x: 0, y: 0, w: pl.w, h: pl.h };
+            rec = new o.Recorder(pl.w, pl.h).clear(0x000000ff).video(VID, r.x, r.y, r.w, r.h, 0);
             if (ov && ov.draw) ov.draw(rec, pl, hint);
             if (hint) {
                 rec.roundRect(pl.w / 2 - 330, pl.h - 96, 660, 60, 30, 0x000000b0);
@@ -132,7 +138,7 @@ function createMirrorView(o) {
     function state() { return { shown, why }; }
     function close() { apply(false); try { gpu.close(); } catch (e) { /* closed */ } }
 
-    return { update, wantAgain, state, close, tick, gpu };
+    return { update, wantAgain, state, close, tick, hide: (by) => hide(by || 'the app'), gpu };
 }
 
 module.exports = { createMirrorView, VID };

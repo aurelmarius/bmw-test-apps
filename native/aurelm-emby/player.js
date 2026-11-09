@@ -2,11 +2,12 @@
 /**
  * player.js - emby-player (native/emby-player) for the service: one process per stream (a seek is a new one).
  *
- * Started by the service, as root, so it can create the frame file owned by nobody (mgu-render takes that); it then
+ * Started by the service, as root, so it can take the groups below; it then
  * becomes nobody with the groups video (the GPU's render node) and mgu_alsa (the sound devices) itself, before it
  * reads the stream (MGU_RUN_AS, MGU_GROUPS), and refuses to run as root. Nobody, as AirPlay Test's receiver: the
  * smartx sound plugin refused uid 13101 (0.2.0 in the car: snd_pcm_open "Operation not permitted", the picture
- * fine), and the player needs no internet (the client fetches the stream). It has the service's
+ * fine), and the player needs no internet (the client fetches the stream).
+ * Its frame file (owned by nobody, which mgu-render takes) is made in the film's own shape; the app places it. It has the service's
  * limits (its cgroup, LimitCORE=1: no core dump). The stream comes from the Emby client (client.js) on its fd 4,
  * in frames (stream id, length); this module hands the current stream's bytes to the player's stdin, with the
  * pipe's backpressure, and drops a stream that was left. Control goes to the player's fd 3; its "MGU {json}" lines
@@ -23,7 +24,7 @@ const fs = require('fs');
 const cp = require('child_process');
 
 const VIDEO_PATH = '/dev/shm/mgu-video-aurelm-emby';
-const VIDEO_SIZE = '1920x720';
+const VIDEO_SIZE = '1920x1080';   // the largest picture: the film's shape fitted into it, the app places it (fit, zoom, fill)
 const AUDIO_DEVICE = 'plug:smartx:CarLifeMedia_CF_48_STEREO';
 const GROUPS = ['video', 'mgu_alsa'];
 const RUN_AS = 'nobody';   // as AirPlay Test's receiver, whose sound the smartx plugin takes

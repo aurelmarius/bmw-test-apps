@@ -4,9 +4,10 @@
  *
  * The Emby service (native/aurelm-emby) fetches the stream (the server transcodes what the profile does not take to
  * H.264 up to 1080p with AAC or AC-3, in MPEG-TS) and writes it to our stdin; a seek or another film is a new
- * player. Started as root, it creates the frame file (owned by nobody, which mgu-render takes) and then becomes
- * MGU_RUN_AS with the groups in MGU_GROUPS (video: the GPU's render node; mgu_alsa: the sound devices) before it
- * reads a byte of the stream; it refuses to run as root.
+ * player. Started as root, it becomes MGU_RUN_AS (nobody) with the groups in MGU_GROUPS (video: the GPU's render
+ * node; mgu_alsa: the sound devices) before it reads a byte of the stream, and refuses to run as root. The frame file
+ * is made once the stream's picture is known, in the film's own shape (fitted into MGU_VIDEO_SIZE), owned by nobody
+ * (which mgu-render takes): the app places it on the screen (fit, zoom, fill).
  *
  *   demux (main thread)  libavformat's mpegts demuxer on stdin -> a video and an audio queue (bounded: the
  *                        stream waits in the pipe, and so in the server's socket, when we are ahead)
@@ -23,7 +24,7 @@
  * Events (stdout, one per line): MGU {json}: open, decoder, audio, tick (each 500 ms), end, error
  *
  * MGU_VIDEO_PATH  the frame file (default /dev/shm/mgu-video-aurelm-emby)
- * MGU_VIDEO_SIZE  WxH, the output (default 1920x720, the centre screen)
+ * MGU_VIDEO_SIZE  WxH, the largest picture (default 1920x1080): the film's shape fitted into it; the app places it
  * MGU_VIDEO_OFF   set: no decoder (a PC: pictures are only timed and counted)
  * MGU_AUDIO       alsa:<device> (default alsa:plug:smartx:CarLifeMedia_CF_48_STEREO) | null | wav:<path> (tests)
  * MGU_ALSA_US     the ALSA buffer in us (default 64000)
@@ -230,7 +231,17 @@ double first_pts() { std::lock_guard<std::mutex> l(g_first_mu); return isnan(g_f
 bool g_video_off = false;
 ytdec::Mgvf g_mgvf;
 std::string g_video_path = "/dev/shm/mgu-video-aurelm-emby";
-uint32_t g_vw = 1920, g_vh = 720;
+uint32_t g_vw = 1920, g_vh = 1080, g_maxw = 1920, g_maxh = 1080;
+
+/* the picture's size: the film's display shape (its pixels' aspect included), fitted into the largest one, even */
+void picture_size(const AVCodecParameters *cp, AVRational sar) {
+    double w = cp->width > 0 ? cp->width : 1920, h = cp->height > 0 ? cp->height : 1080;
+    if (sar.num > 0 && sar.den > 0) w = w * sar.num / sar.den;
+    double k = std::min(std::min(g_maxw / w, g_maxh / h), 1.0);
+    if (w * k < 16 || h * k < 16) k = std::max(16 / w, 16 / h);
+    g_vw = std::max(16u, (uint32_t) (w * k + 0.5) & ~1u);
+    g_vh = std::max(16u, (uint32_t) (h * k + 0.5) & ~1u);
+}
 const double kPtsOffset = 20.0;   /* timestamps given to MSDK: never negative (B frames before the first I) */
 
 /* waits until the clock reaches pts; false: quit */
@@ -246,6 +257,15 @@ bool wait_until(double pts) {
 void video_thread() {
     woc::Decoder dec;
     bool open = false;
+    if (!g_video_off) {
+        /* the frame file in the film's shape (0.2.x: 1920x720 with the decoder's black bars), as nobody: the
+         * owner mgu-render takes */
+        std::string err, warn;
+        if (!g_mgvf.open(g_video_path.c_str(), g_vw, g_vh, 3, &err, &warn)) {
+            event("{\"ev\":\"decoder\",\"ok\":false,\"error\":\"frame file: %s\"}", js(err).c_str());
+            g_video_off = true;
+        } else if (!warn.empty()) fprintf(stderr, "emby-player: %s\n", warn.c_str());
+    }
     if (!g_video_off) {
         std::string err;
         open = dec.init("/dev/dri/renderD128", g_vw, g_vh, false, &err);
@@ -677,22 +697,15 @@ int main() {
     sa.sa_handler = on_term;
     sigaction(SIGTERM, &sa, nullptr);
     sigaction(SIGINT, &sa, nullptr);
-    /* the frame file, while root: owned by nobody, which mgu-render takes */
     g_video_off = getenv("MGU_VIDEO_OFF") != nullptr;
     if (const char *p = getenv("MGU_VIDEO_PATH")) if (*p) g_video_path = p;
+    /* the largest picture: the film's own shape is fitted into it (the app places it: fit, zoom, fill) */
     if (const char *sz = getenv("MGU_VIDEO_SIZE")) {
         unsigned w = 0, h = 0;
-        if (sscanf(sz, "%ux%u", &w, &h) == 2 && w >= 16 && h >= 16 && w <= 2048 && h <= 2048) g_vw = w & ~1u, g_vh = h & ~1u;
-    }
-    std::string ferr;
-    if (!g_video_off) {
-        std::string warn;
-        if (!g_mgvf.open(g_video_path.c_str(), g_vw, g_vh, 3, &ferr, &warn)) g_video_off = true;
-        else if (!warn.empty()) fprintf(stderr, "emby-player: %s\n", warn.c_str());
+        if (sscanf(sz, "%ux%u", &w, &h) == 2 && w >= 16 && h >= 16 && w <= 2048 && h <= 2048) g_maxw = w & ~1u, g_maxh = h & ~1u;
     }
     drop_root();
     std::thread(watchdog).detach();
-    if (!ferr.empty()) event("{\"ev\":\"decoder\",\"ok\":false,\"error\":\"frame file: %s\"}", js(ferr).c_str());
     std::thread ctl;
     if (fcntl(3, F_GETFD) != -1) ctl = std::thread(control_thread);
     else ctl = std::thread([] {});
@@ -731,6 +744,10 @@ int main() {
         vs = nullptr;
     }
     g_has_video = vs != nullptr;
+    if (vs) {
+        picture_size(vs->codecpar, av_guess_sample_aspect_ratio(fmt, vs, nullptr));
+        fprintf(stderr, "emby-player: the picture %ux%u\n", g_vw, g_vh);
+    }
     g_has_audio = as != nullptr;
     if (as) { g_apar = as->codecpar; g_atb = as->time_base; }
     event("{\"ev\":\"open\",\"video\":%s%s%s,\"audio\":%s%s%s}",

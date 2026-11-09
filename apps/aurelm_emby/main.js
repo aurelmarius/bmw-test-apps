@@ -29,13 +29,14 @@ const Parked = require('./kit/parked');
 const qrcode = require('./qrcode');
 const { RenderClient } = require('./mgu_render_client');
 const { createMirrorView } = require('./mirror_view');
+const { createControls, videoRect } = require('./controls');
 const { createCarAudio } = require('./car_audio');
 
 const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.2.6';
+const SERVICE_VERSION = '0.3.0';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
@@ -195,7 +196,9 @@ mgu.run({
         /* ---------- the film: the picture over the screen (parked only), the sound on the speakers ---------- */
         const parked = Parked.watch(ctx, log, { strict: true });
         const mirror = createMirrorView({ RenderClient, Recorder: record.Recorder, kit: record, appId: ctx.spec.id, log,
-            hintText: 'Press a button on the iDrive controller to return', overlay: () => subtitleOverlay(),
+            hintText: 'Touch the picture or use the iDrive controller for the controls', overlay: () => filmOverlay(),
+            onTouch: (phase, x, y, pl) => { if (pl && controls.touch(phase, x, y, pl, barInfo())) mirror.tick(); },
+            onCcu: (c) => { const r = controls.ccu(c); mirror.tick(); return r; },
             idleText: 'the player is not running', hiddenText: 'hidden: press "Show picture" to show it again',
             statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
         const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
@@ -240,34 +243,88 @@ mgu.run({
             for (let i = found; i != null && i >= 0 && i > found - 4; i--) if (c[i].e > t) out.unshift(c[i].t);
             return out.length ? out.join('\n') : null;
         }
-        function subtitleOverlay() {
+        /** the subtitle line now, or null */
+        function subtitleText() {
             if (!subs.cues.length) return null;
             const t = posNow();
-            const text = t == null ? null : cueAt(t);
-            if (!text) return null;
-            return { key: text, draw: (rec, pl, hinting) => {
-                const size = Math.round(pl.h * 0.058), lh = Math.round(size * 1.22), maxW = pl.w * 0.86;
-                // each line wrapped to the screen's width, at most 4
-                const lines = [];
-                text.split('\n').forEach((line) => {
-                    let cur = '';
-                    line.split(' ').forEach((w) => {
-                        const next = cur ? cur + ' ' + w : w;
-                        if (cur && rec.textWidth(next, size, { font: 'bold', literal: true }) > maxW) { lines.push(cur); cur = w; } else cur = next;
-                    });
-                    if (cur) lines.push(cur);
-                });
-                const shown = lines.slice(-4);
-                const base = pl.h - Math.round(pl.h * 0.06) - (hinting ? 80 : 0);
-                shown.forEach((l, i) => {
-                    const y = base - (shown.length - 1 - i) * lh, x = pl.w / 2;
-                    // a black outline, then the white letters
-                    [[-2, 0], [2, 0], [0, -2], [0, 2], [2, 2]].forEach((d) => rec.text(l, x + d[0], y + d[1], size, 0x000000ff, { align: 'center', font: 'bold', literal: true }));
-                    rec.text(l, x, y, size, 0xffffffff, { align: 'center', font: 'bold', literal: true });
-                });
-            } };
+            return t == null ? null : cueAt(t);
         }
-        // a subtitle line comes or goes: a new frame (only then; the picture itself needs none)
+        function drawSubs(rec, pl, hinting, text, lift) {
+            const size = Math.round(pl.h * 0.058), lh = Math.round(size * 1.22), maxW = pl.w * 0.86;
+            // each line wrapped to the screen's width, at most 4
+            const lines = [];
+            text.split('\n').forEach((line) => {
+                let cur = '';
+                line.split(' ').forEach((w) => {
+                    const next = cur ? cur + ' ' + w : w;
+                    if (cur && rec.textWidth(next, size, { font: 'bold', literal: true }) > maxW) { lines.push(cur); cur = w; } else cur = next;
+                });
+                if (cur) lines.push(cur);
+            });
+            const shown = lines.slice(-4);
+            // above the controls when they show, above the hint while it shows
+            const base = pl.h - Math.round(pl.h * 0.06) - (lift ? lift : hinting ? 80 : 0);
+            shown.forEach((l, i) => {
+                const y = base - (shown.length - 1 - i) * lh, x = pl.w / 2;
+                // a black outline, then the white letters
+                [[-2, 0], [2, 0], [0, -2], [0, 2], [2, 2]].forEach((d) => rec.text(l, x + d[0], y + d[1], size, 0x000000ff, { align: 'center', font: 'bold', literal: true }));
+                rec.text(l, x, y, size, 0xffffffff, { align: 'center', font: 'bold', literal: true });
+            });
+        }
+
+        /* ---------- the film's controls (controls.js): a bar over the picture, the aspect ---------- */
+        const ASPECTS = ['fit', 'zoom', 'fill'];
+        const aspect = () => (ASPECTS.indexOf(ctx.settings.get('aspect')) >= 0 ? ctx.settings.get('aspect') : 'fit');
+        // a seek from the bar: the target shows at once; it is sent once the buttons rest a moment (several taps on
+        // +30 s make one seek, not one new stream each)
+        let seekTo = null, seekTimer = null, seekSentAt = 0;
+        function seekBy(d) { seekAt((seekTo != null ? seekTo : posNow() || 0) + d); }
+        function seekAt(t) {
+            const dur = st && st.playback && st.playback.dur;
+            seekTo = Math.max(0, dur ? Math.min(t, dur - 2) : t);
+            clearTimeout(seekTimer);
+            seekTimer = setTimeout(() => {
+                const t0 = seekTo;
+                seekSentAt = Date.now();
+                ask('playstate', { command: 'Seek', seek: t0 }).then((r) => { if (r) st = r; });
+            }, 800);
+            mirror.tick();
+        }
+        const controls = createControls({
+            act: (a) => {
+                if (a && a.seek != null) return seekAt(a.seek);
+                if (a === 'back10') return seekBy(-10);
+                if (a === 'fwd30') return seekBy(30);
+                if (a === 'playpause') return ask('playstate', { command: 'PlayPause' }).then((r) => { if (r) st = r; mirror.tick(); });
+                if (a === 'stop') { controls.hide(); return ask('playstate', { command: 'Stop' }).then((r) => { if (r) st = r; }); }
+                if (a === 'aspect') { ctx.settings.set('aspect', ASPECTS[(ASPECTS.indexOf(aspect()) + 1) % ASPECTS.length]); log.info('emby: aspect ' + aspect()); return mirror.tick(); }
+                if (a === 'exit') return mirror.hide('the controls');
+            },
+        });
+        function barInfo() {
+            const pb = (st && st.playback) || {};
+            // the seek's target until the new stream plays near it (or 15 s)
+            if (seekTo != null && seekSentAt && (Date.now() - seekSentAt > 15000 || (pb.state === 'playing' && Math.abs((pb.pos || 0) - seekTo) < 5 && Date.now() - seekSentAt > 1500))) seekTo = null;
+            return { title: pb.item ? pb.item.title : '', pos: posNow(), dur: pb.dur, paused: pb.state === 'paused', aspect: aspect(), seeking: seekTo };
+        }
+        let wasPaused = false;
+        function filmOverlay() {
+            const pl = st && st.player, d = pl && pl.decoder;
+            const fw = d && d.ok ? d.w : 0, fh = d && d.ok ? d.h : 0, mode = aspect();
+            const info = barInfo();
+            // paused: the bar stays
+            if (info.paused !== wasPaused) { wasPaused = info.paused; controls.keepOpen(info.paused); }
+            const sub = subtitleText(), bar = controls.key(info);
+            return {
+                key: [mode, fw, fh, sub, bar].join('#'),
+                rect: (p) => videoRect(mode, fw, fh, p),
+                draw: (rec, p, hinting) => {
+                    if (sub) drawSubs(rec, p, hinting, sub, bar ? controls.height(p) + 10 : 0);
+                    if (bar) controls.draw(rec, p, info);
+                },
+            };
+        }
+        // a subtitle line comes or goes, the bar's time moves on or it hides: a new frame (only then; the picture itself needs none)
         setInterval(() => { if (mirror.state().shown) mirror.tick(); }, 100);
 
         let soundUntil = 0;

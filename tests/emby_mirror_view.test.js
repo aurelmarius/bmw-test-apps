@@ -47,6 +47,35 @@ test('the overlay: drawn over the picture, a new frame when its line changes, no
     assert.strictEqual(gpu.frames, f0 + 2, 'the line went: a frame without it');
 });
 
+test('the picture placed by the overlay (aspect); touch and the controller to the controls while it is up', () => {
+    let gpu = null;
+    const touches = [], ccus = [];
+    class RC extends FakeGpu { constructor() { super(); gpu = this; } }
+    let rect = { x: 0, y: -40, w: 1920, h: 800 };
+    const v = createMirrorView({ RenderClient: RC, Recorder: record.Recorder, kit: record, appId: 'aurelm_emby', statIno: () => 7, now: () => clock,
+        overlay: () => ({ key: JSON.stringify(rect), rect: () => rect }),
+        onTouch: (ph, x, y, pl) => touches.push([ph, x, y, pl.w]), onCcu: (c) => { ccus.push(c); return true; } });
+    gpu.emit('ready', { w: 1920, h: 720 }, { video: true });
+    gpu.emit('touch', 'down', 10, 10);
+    assert.strictEqual(touches.length, 0, 'not shown: no touch to the controls');
+    v.update({ rx: { running: true, videoRunning: true, decoder: { ok: true, path: '/dev/shm/x' }, stream: { shown: 5 } }, pageVisible: true, driving: false });
+    const words = Array.from(gpu.lastRec.words());
+    const f = new Float32Array(new Uint32Array(words).buffer);
+    // the VIDEO op after CLEAR (2 words): op, x, y, w, h
+    assert.deepStrictEqual([f[3], f[4], f[5], f[6]], [0, -40, 1920, 800]);
+    gpu.emit('touch', 'down', 900, 650);
+    assert.deepStrictEqual(touches, [['down', 900, 650, 1920]]);
+    gpu.emit('ccu', { knob: 5, press: 1, tilt: 0 });
+    assert.strictEqual(ccus.length, 1);
+    assert.strictEqual(v.state().shown, true, 'the controls took the press: the picture stays');
+    rect = { x: 96, y: 0, w: 1728, h: 720 };
+    v.tick();
+    const f2 = new Float32Array(new Uint32Array(Array.from(gpu.lastRec.words())).buffer);
+    assert.deepStrictEqual([f2[3], f2[4], f2[5], f2[6]], [96, 0, 1728, 720], 'another aspect: drawn again');
+    v.hide('the controls');
+    assert.strictEqual(v.state().shown, false);
+});
+
 (async () => {
     let failed = 0;
     for (const t of tests) {
