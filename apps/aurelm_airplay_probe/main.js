@@ -207,7 +207,8 @@ mgu.run({
         const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? require('path').join(ctx.dataDir, 'car-audio.json') : null });
         function syncMirror() {
             const rxOn = st && st.mode === 'receiver' && st.active ? st.rx : null;
-            mirror.update({ rx: rxOn, pageVisible: shown(), driving: parked.moving() });
+            // "Picture only while parked" (on by default): off, the picture stays while driving (for passengers)
+            mirror.update({ rx: rxOn, pageVisible: shown(), driving: ctx.settings.get('parkedOnly') !== false && parked.moving() });
             // the speakers while the iPhone's sound plays: stopped on the phone, they go back to the source before at once
             carAudio.want(!!(rxOn && rxOn.running && rxOn.soundRunning && shown()));
             if (shown()) { goneAt = 0; ended = false; return; }
