@@ -5,21 +5,22 @@
     {
       "id": "aurelm-airplay-probe",
       "kind": "tool",
-      "version": "0.8.2",
+      "version": "0.9.0",
       "title": "AirPlay network test service",
-      "description": "For the app AirPlay Test: the network test, and the AirPlay receiver (UxPlay's protocol on the head unit): the iPhone's screen mirroring decoded on the GPU into mgu-render's frame file, shown by the app while parked, and its sound into SmartXbar's CarLife input. Opens the firewall for its ports only while a test runs.",
+      "description": "For the app AirPlay Test: the network test, and the AirPlay receiver (UxPlay's protocol on the head unit): the iPhone's screen mirroring decoded on the GPU into mgu-render's frame file, shown by the app while parked, and its sound into SmartXbar's CarLife input; a video sent with the AirPlay button (YouTube) played by its own player from the internet (mgu-uplink, through a proxy running as uid 13102). Opens the firewall for its ports only while a test runs.",
       "author": "aurelmarius",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm-airplay-probe@0.8.2.tgz",
-        "size": 2506406,
-        "sha256": "f77d271f6428a4daad914f9fdd7a420d2ab4263c29f95caff4c3a5f9231a98dd",
-        "url": "packages/aurelm-airplay-probe@0.8.2.tgz"
+        "name": "aurelm-airplay-probe@0.9.0.tgz",
+        "size": 3208938,
+        "sha256": "fbc4ca198da35b4f1dc0b4d480890187ed7eb73f061033ae67e73fa2395df8f8",
+        "url": "packages/aurelm-airplay-probe@0.9.0.tgz"
       },
       "requires": {
-        "mgu-deploy": "0.7.0"
+        "mgu-deploy": "0.7.0",
+        "mgu-uplink": "0.7.0"
       },
       "uninstallable": true
     },
@@ -48,23 +49,23 @@
     {
       "id": "aurelm_airplay_probe",
       "kind": "app",
-      "version": "0.8.4",
+      "version": "0.9.0",
       "title": "AirPlay Test",
-      "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers. Also the network test. Needs the AirPlay test service.",
+      "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers; videos sent with the AirPlay button (YouTube) played by the head unit itself. Also the network test. Needs the AirPlay test service.",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_airplay_probe@0.8.4.tgz",
-        "size": 569720,
-        "sha256": "afaf286a6f68885052cf624773336faea4b9319c58ce901e4ec140632a8f08e6",
-        "url": "packages/aurelm_airplay_probe@0.8.4.tgz"
+        "name": "aurelm_airplay_probe@0.9.0.tgz",
+        "size": 570359,
+        "sha256": "cb24057ec5f993c21adff5a91207e31d8563ba315580ea3566756709123c9131",
+        "url": "packages/aurelm_airplay_probe@0.9.0.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_airplay_probe.png",
       "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0",
       "requires": {
-        "aurelm-airplay-probe": "0.8.2"
+        "aurelm-airplay-probe": "0.9.0"
       }
     },
     {
