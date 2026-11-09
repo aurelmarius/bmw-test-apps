@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Changes to UxPlay (at UXPLAY_REV) for the head unit. Each edit must find its text exactly once.
 
-1. lib/global.h: model AppleTV5,4 and version 366.0. iOS 27 sends the screen-mirroring video during a
+1. lib/global.h: model AppleTV5,4 and version 366.0 by default. iOS 27 sends the screen-mirroring video during a
    CarPlay session only to a receiver that presents itself so (found 2026-11-08 against iCarCast: with
-   UxPlay's AppleTV3,2 / 220.68 the iPhone sets up audio only, stream type 96, never 110).
+   UxPlay's AppleTV3,2 / 220.68 the iPhone sets up audio only, stream type 96, never 110). Read at run time:
+   MGU_MODEL and MGU_SRCVERS give another identity (UxPlay's own, AppleTV3,2 / 220.68, is the one its
+   AirPlay video support was made with) without another build; lib/raop.c's Server header follows.
 2. lib/mdnsd/mdnsd.c: the address mDNS announces comes from UXPLAY_MDNS_IPV4 when set (the head unit has
    several interfaces; the route to 224.0.0.251 is not the car's Wi-Fi), and UXPLAY_MDNS_NO_IPV6 leaves
    IPv6 out (the iPhone reaches the unit over IPv4 on the car's Wi-Fi).
@@ -26,8 +28,19 @@ def edit(rel, pairs):
     print('patched ' + rel)
 
 edit('lib/global.h', [
-    ('#define GLOBAL_MODEL    "AppleTV3,2"', '#define GLOBAL_MODEL    "AppleTV5,4"   /* mgu: iOS 27 mirrors during CarPlay */'),
-    ('#define GLOBAL_VERSION  "220.68"', '#define GLOBAL_VERSION  "366.0"       /* mgu */'),
+    ('#define GLOBAL_MODEL    "AppleTV3,2"',
+     '/* mgu: the identity, AppleTV5,4 / 366.0 (iOS 27 mirrors during CarPlay) unless MGU_MODEL / MGU_SRCVERS say */\n'
+     '#include <stdio.h>\n#include <stdlib.h>\n'
+     'static inline const char *mgu_env_or(const char *name, const char *dflt) {\n'
+     '    const char *e = getenv(name);\n    return e && *e ? e : dflt;\n}\n'
+     'static inline const char *mgu_server_header(void) {\n'
+     '    static char b[64];\n    snprintf(b, sizeof b, "AirTunes/%s", mgu_env_or("MGU_SRCVERS", "366.0"));\n    return b;\n}\n'
+     '#define GLOBAL_MODEL    mgu_env_or("MGU_MODEL", "AppleTV5,4")'),
+    ('#define GLOBAL_VERSION  "220.68"', '#define GLOBAL_VERSION  mgu_env_or("MGU_SRCVERS", "366.0")'),
+])
+
+edit('lib/raop.c', [
+    ('"Server", "AirTunes/"GLOBAL_VERSION)', '"Server", mgu_server_header())   /* mgu */'),
 ])
 
 edit('lib/mdnsd/mdnsd.c', [

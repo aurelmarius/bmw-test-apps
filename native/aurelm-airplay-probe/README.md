@@ -96,6 +96,13 @@ does.
 `LANGUAGE=zxx` (no linguistic content) always. It matches no audio track, so UxPlay keeps the one the iPhone's playlist
 marks default: YouTube's own choice.
 
+**The receiver's identity** (the app's setting): `AppleTV5,4` / `366.0` as "BMW iDrive" (the default: iOS 27 mirrors
+during CarPlay only to it), or UxPlay's own `AppleTV3,2` / `220.68` as "BMW iDrive Video", another receiver to the iPhone
+(its device id differs in the last bit; iOS keeps what it learnt per id). YouTube's video button went through UxPlay's
+whole HLS exchange on a Mac with the classic one (2026-11-08); with the default one in the car it did not start (0.9.0).
+`uxplay-mgu` reads `MGU_MODEL` / `MGU_SRCVERS`. The app's log shows the receiver's own lines with the service's: each
+request of the iPhone (`iPhone: POST /play`) and UxPlay's errors.
+
 **The video button's TXT bits.** `-hls` adds AirPlay's "video" and "HLS" feature bits to the announcement. Mirroring
 during CarPlay depended on the model and version (stage 1); should these bits change that, the setting turns them off
 (and the receiver runs as in 0.8).

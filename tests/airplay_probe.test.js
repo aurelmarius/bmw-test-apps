@@ -432,6 +432,7 @@ function fakeVideoReceiver(dir) {
     fs.writeFileSync(f, '#!' + process.execPath + '\n' + [
         "const out = (j) => process.stdout.write('MGU ' + JSON.stringify(j) + '\\n');",
         "console.log('args ' + process.argv.slice(2).join(' '));",
+        "console.log('id ' + process.env.MGU_MODEL + ' ' + process.env.MGU_SRCVERS);",
         "console.log('env LANGUAGE=' + process.env.LANGUAGE + ' http_proxy=' + process.env.http_proxy + ' no_proxy=' + process.env.no_proxy + ' ca=' + process.env.MGU_CA_FILE);",
         "setTimeout(() => out({ ev: 'client', model: 'iPhone18,2', name: 'Test iPhone' }), 100);",
         "setTimeout(() => out({ ev: 'hls', url: 'http://localhost:7300/master.m3u8', start: 12.5 }), 150);",
@@ -483,6 +484,32 @@ test('receiver with the video button: -hls and the H.264 filter, the proxy for i
         await new Promise((res) => { const c = net.connect(port, '127.0.0.1', () => { c.destroy(); res('open'); }); c.on('error', () => res('closed')); }).then((v) => assert.strictEqual(v, 'closed'));
         const args2 = probe.status().rx.lines.find((l) => / args /.test(l));
         assert.ok(args2 && args2.indexOf('-hls') < 0, args2);
+    } finally { await probe.stop('finally'); }
+});
+
+test('receiver identity: AppleTV5,4 by default; the classic one is another receiver (name, id) as AppleTV3,2', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rxid-'));
+    fs.chmodSync(tmp, 0o755);
+    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: fakeVideoReceiver(tmp), rxUid: null, rxVideoPath: path.join(tmp, 'v'), proxyUid: null, proxyPort: await freePort() });
+    const idLine = () => probe.status().rx.lines.find((l) => / id /.test(l));
+    const argsLine = () => probe.status().rx.lines.find((l) => / args /.test(l));
+    try {
+        let s = await probe.start(1, 'receiver', false);
+        await new Promise((r) => setTimeout(r, 400));
+        assert.ok(/ id AppleTV5,4 366\.0$/.test(idLine()), idLine());
+        const dev1 = / -m (\S+)/.exec(argsLine())[1];
+        assert.ok(/-n BMW iDrive -nh/.test(argsLine()));
+        s = await probe.start(1, 'receiver', false, 'classic');
+        assert.strictEqual(s.rx.identity, 'classic');
+        assert.strictEqual(s.rx.name, 'BMW iDrive Video');
+        await new Promise((r) => setTimeout(r, 400));
+        assert.ok(/ id AppleTV3,2 220\.68$/.test(idLine()), idLine());
+        assert.ok(/-n BMW iDrive Video -nh/.test(argsLine()), argsLine());
+        const dev2 = / -m (\S+)/.exec(argsLine())[1];
+        assert.notStrictEqual(dev1, dev2);
+        assert.strictEqual(dev1.slice(0, 15), dev2.slice(0, 15));
+        // the iPhone's requests, short, in the receiver's lines
+        assert.ok(probe.status().log.some((l) => /identity classic/.test(l)));
     } finally { await probe.stop('finally'); }
 });
 

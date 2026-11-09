@@ -28,6 +28,10 @@ const HLS_PROFILE = 'AVC:1080,720;HEVC:0;VP9:0;AV1:0';
 // UxPlay keeps the audio track of this language, or else the one the iPhone's playlist marks default: a code that
 // matches no track (zxx: no linguistic content) leaves the choice to the phone (YouTube's own). UxPlay needs one set.
 const HLS_LANGUAGE = 'zxx';
+// the identity the receiver presents (uxplay-mgu reads MGU_MODEL / MGU_SRCVERS): AppleTV5,4 / 366.0, with which iOS 27
+// mirrors during CarPlay (the default), or UxPlay's own AppleTV3,2 / 220.68, the one its AirPlay video support was
+// made with (YouTube's video button worked so on a Mac, 2026-11-08)
+const IDENTITIES = { carplay: { model: 'AppleTV5,4', srcvers: '366.0' }, classic: { model: 'AppleTV3,2', srcvers: '220.68' } };
 
 /** CPU seconds a process has used (utime + stime, /proc/<pid>/stat), or null */
 function cpuSeconds(pid) {
@@ -86,6 +90,9 @@ function createReceiver(opts) {
 
     function keep(line) {
         if (NOISE.test(line)) return;
+        // each request of the iPhone, short: "iPhone: POST /play"
+        const rq = /httpd request received on socket \d+, connection \d+, method = (\S+), url = (\S+)/.exec(line);
+        if (rq) line = 'iPhone: ' + rq[1] + ' ' + rq[2].replace(/^rtsp:\/\/[^/]+/, '').slice(0, 80);
         st.lines.push(new Date(now()).toISOString().slice(11, 19) + ' ' + line.slice(0, 200));
         if (st.lines.length > 40) st.lines.shift();
     }
@@ -201,6 +208,9 @@ function createReceiver(opts) {
         const args = ['-n', w.name, '-nh', '-p', String(BASE_PORT), '-m', w.deviceid.toLowerCase(), '-s', '1920x720@60'];
         // stage 4: AirPlay's video button too (the iPhone hands over the video's address; YouTube's HLS); its segments
         // come through the service's proxy (the uid mgu-uplink routes), TLS checked against the tool's CA list
+        const ident = IDENTITIES[w.identity] || IDENTITIES.carplay;
+        env.MGU_MODEL = ident.model;
+        env.MGU_SRCVERS = ident.srcvers;
         if (w.hls) {
             args.push('-hls', '-custom', HLS_PROFILE);
             Object.assign(env, { LANGUAGE: HLS_LANGUAGE, http_proxy: 'http://127.0.0.1:' + (w.proxyPort || 7390), no_proxy: 'localhost,127.0.0.1',
@@ -283,4 +293,4 @@ function createReceiver(opts) {
     return { start, stop, killSync, state: () => st };
 }
 
-module.exports = { createReceiver, PORTS, BASE_PORT, VIDEO_PATH, AUDIO_DEVICE, HLS_PROFILE };
+module.exports = { createReceiver, PORTS, BASE_PORT, VIDEO_PATH, AUDIO_DEVICE, HLS_PROFILE, IDENTITIES };

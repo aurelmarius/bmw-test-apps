@@ -31,7 +31,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.9.0';
+const SERVICE_VERSION = '0.9.1';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -194,7 +194,7 @@ mgu.run({
             return render();
         }
         ui.onClick('BTN_START', () => command('start', 'Starting...'));
-        ui.onClick('BTN_RX', () => { mirror.wantAgain(); return command('start', 'Starting the receiver...', { mode: 'receiver', hls: ctx.settings.get('videoButton') !== false }); });
+        ui.onClick('BTN_RX', () => { mirror.wantAgain(); return command('start', 'Starting the receiver...', { mode: 'receiver', hls: ctx.settings.get('videoButton') !== false, identity: ctx.settings.get('identity') || 'carplay' }); });
 
         /* ---------- stage 2: the picture over the screen, parked only ---------- */
         const parked = Parked.watch(ctx, log, { strict: true });
@@ -250,11 +250,12 @@ mgu.run({
                 cv.text(r.label, 66, y, 22, t.text, { font: 'bold', literal: true });
                 cv.text(clip(cv, r.detail || '', 20, 700, 'label'), 260, y, 20, r.state === 'off' ? t.dim : t.text, { literal: true });
             });
-            // the service's log
+            // the service's log, with the receiver's own lines (the iPhone's requests, UxPlay's errors) in time order
             cv.fillRect(990, 172, 1.5, 320, withAlpha('#ffffff', 0.15));
             cv.text('LOG', 1010, 190, 18, t.dim, { font: 'bold', literal: true });
-            const lines = (st && st.log ? st.log : []).slice(-12);
-            lines.forEach((l, i) => cv.text(clip(cv, l, 16, 570, 'label'), 1010, 222 + i * 24, 16, t.dim, { literal: true }));
+            const all = (st && st.log ? st.log : []).concat(st && st.mode === 'receiver' && st.rx && st.rx.lines ? st.rx.lines.map((l) => l.slice(0, 9) + '> ' + l.slice(9)) : []);
+            const lines = all.map((l, i) => ({ l, i })).sort((a, b) => (a.l.slice(0, 8) < b.l.slice(0, 8) ? -1 : a.l.slice(0, 8) > b.l.slice(0, 8) ? 1 : a.i - b.i)).map((x) => x.l).slice(-15);
+            lines.forEach((l, i) => cv.text(clip(cv, l, 14, 570, 'label'), 1010, 216 + i * 19, 14, l.indexOf('> ') === 9 ? t.text : t.dim, { literal: true }));
             if (!lines.length) cv.text('On the iPhone: Control Center > Screen Mirroring', 1010, 222, 16, t.dim, { literal: true });
         }
 
