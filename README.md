@@ -48,7 +48,7 @@ The app and its root service announce a test receiver, **BMW iDrive test**, on t
 ### 🎬 Emby (`aurelm_emby`) + Emby cast service (`aurelm-emby`)
 *The head unit as a cast target for the Emby phone app, as Emby's TV apps and Kodi's Emby add-on are.*
 
-**Status:** step 2, playback (0.2.5). Works in the car: the picture on the GPU, the sound on the speakers, pause, seek, volume, the cast menu (0.2.4 keeps the head unit in it). 0.2.5: text subtitles (SubRip, ASS, VTT) are no longer burned in by the server but drawn by the app over the picture (in ASCII: the kit's fonts have no diacritics, so ș is s); a 4K Dolby Vision film with Romanian SubRip burned in failed on the server (HTTP 500), and burning in cost every film a transcode. Picture subtitles (PGS, DVD) are still burned in.
+**Status:** step 2, playback (0.2.6). Works in the car: the picture on the GPU, the sound on the speakers, pause, seek, volume, the cast menu, text subtitles drawn by the app (in ASCII: the kit's fonts have no diacritics), a 4K Dolby Vision film tone-mapped by the server. 0.2.6: cast chosen while a film plays on the phone hands that film over (PlayMediaSource), from where it was; before, nothing played until another film was chosen.
 
 The service signs in once with your Emby account and stays connected to your Emby server, so **BMW iDrive** shows in the Emby app's cast menu. The phone only sends the command through the server: it does not connect to the head unit, and wireless CarPlay stays connected. The server must be reachable from the internet; the head unit gets there through **mgu-uplink**, as its own uid only.
 

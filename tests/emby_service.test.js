@@ -270,7 +270,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.2.5');
+        assert.strictEqual(s.version, '0.2.6');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -466,6 +466,26 @@ test('playback: the server\'s transcoder failing (HTTP 500) says why', async () 
         srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow' } });
         const s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'error', 5000, 'the error');
         assert.ok(/HTTP 500 \(Conversion failed!\)/.test(s.playback.error), s.playback.error);
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('cast during a film on the phone: PlayMediaSource plays it, from where it was', async () => {
+    const srv = await fakeEmby({ seconds: 600 });
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100' } });
+    try {
+        // the phone hands over what it plays: a GeneralCommand, its numbers as text (then its volume)
+        srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'PlayMediaSource', Arguments: { ItemId: 'film2', MediaSourceId: 'ms2',
+            StartPositionTicks: '1234500000', AudioStreamIndex: '1', SubtitleStreamIndex: '2' } } });
+        srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetVolume', Arguments: { Volume: '60' } } });
+        await until(() => srv.seen.reports.some((r) => r.path === '/Sessions/Playing'), 5000, 'Sessions/Playing');
+        const pi = srv.seen.pbinfo[0];
+        assert.strictEqual(pi.query.StartTimeTicks, '1234500000');
+        assert.strictEqual(pi.query.MediaSourceId, 'ms2');
+        assert.strictEqual(pi.query.AudioStreamIndex, '1');
+        assert.strictEqual(pi.query.SubtitleStreamIndex, '2');
+        const s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'playing', 5000, 'playing');
+        assert.ok(s.playback.pos >= 123, String(s.playback.pos));
+        assert.strictEqual(s.play.item.title, 'Sample');
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 

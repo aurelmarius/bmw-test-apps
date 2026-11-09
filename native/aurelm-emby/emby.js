@@ -23,6 +23,12 @@ const CLIENT = 'BMW iDrive';
 const COMMANDS = ['Play', 'Playstate', 'PlayNext', 'PlayMediaSource', 'SetVolume', 'VolumeUp', 'VolumeDown', 'Mute', 'Unmute',
     'ToggleMute', 'SetAudioStreamIndex', 'SetSubtitleStreamIndex', 'DisplayMessage', 'Pause', 'Unpause'];
 const TICKS = 10000000;   // Emby's ticks per second
+// the general commands playback.js handles; any other one is logged as not handled
+const KNOWN = ['SetVolume', 'VolumeUp', 'VolumeDown', 'Mute', 'Unmute', 'ToggleMute', 'SetAudioStreamIndex', 'SetSubtitleStreamIndex', 'DisplayMessage'];
+// the server's messages that are news for others, not commands for us
+const QUIET = ['UserDataChanged', 'LibraryChanged', 'RefreshProgress', 'ScheduledTaskEnded', 'PackageInstalling', 'PackageInstallationCompleted',
+    'ServerRestarting', 'ServerShuttingDown', 'RestartRequired', 'SessionEnded', 'PlaybackStart', 'PlaybackStopped', 'TimerCreated', 'SeriesTimerCreated',
+    'TimerCancelled', 'SeriesTimerCancelled', 'UserUpdated', 'UserConfigurationUpdated'];
 
 /** "emby.example.com:8920/emby/" -> ['https://emby.example.com:8920/emby', 'http://...'] (the ones to try) */
 function candidates(text) {
@@ -126,20 +132,37 @@ function createClient(o) {
         if (type === 'KeepAlive' || type === 'Sessions' || type === 'ScheduledTasksInfo' || type === 'ActivityLogEntry') return;
         st.lastMessage = { type, at: now() };
         if (type === 'Play') {
-            const ids = d.ItemIds || [];
-            log('Play ' + (d.PlayCommand || '') + ' ' + ids.join(',') + (d.StartPositionTicks ? ' from ' + Math.round(d.StartPositionTicks / TICKS) + ' s' : ''));
-            const first = ids[(Number(d.StartIndex) || 0)] || ids[0];
-            const item = first ? await itemInfo(first) : null;
-            ev.emit('play', { command: d.PlayCommand || 'PlayNow', ids, start: d.StartPositionTicks ? d.StartPositionTicks / TICKS : 0,
-                startIndex: Number(d.StartIndex) || 0, mediaSourceId: d.MediaSourceId || null, audioIndex: d.AudioStreamIndex != null ? d.AudioStreamIndex : null,
-                subtitleIndex: d.SubtitleStreamIndex != null ? d.SubtitleStreamIndex : null, from: d.ControllingUserId || null, item, at: now() });
+            await play(d, 'Play');
         } else if (type === 'Playstate') {
             log('Playstate ' + d.Command + (d.SeekPositionTicks != null ? ' ' + Math.round(d.SeekPositionTicks / TICKS) + ' s' : ''));
             ev.emit('playstate', { command: d.Command, seek: d.SeekPositionTicks != null ? d.SeekPositionTicks / TICKS : null, at: now() });
+        } else if (type === 'GeneralCommand' && /^PlayMediaSource$/i.test(d.Name || '')) {
+            // the phone hands over what it plays (cast chosen during a film): the film, its source, where it was
+            // (0.2.5 left it out: nothing played until another film was chosen)
+            const a = d.Arguments || {};
+            log('GeneralCommand PlayMediaSource ' + JSON.stringify(a).slice(0, 200));
+            await play({ ItemIds: a.ItemIds ? String(a.ItemIds).split(',') : [a.ItemId || a.Id].filter(Boolean), PlayCommand: 'PlayNow',
+                StartPositionTicks: a.StartPositionTicks, MediaSourceId: a.MediaSourceId, AudioStreamIndex: a.AudioStreamIndex,
+                SubtitleStreamIndex: a.SubtitleStreamIndex, StartIndex: a.StartIndex }, 'PlayMediaSource');
         } else if (type === 'GeneralCommand') {
-            log('GeneralCommand ' + d.Name);
+            log('GeneralCommand ' + d.Name + (KNOWN.indexOf(d.Name) < 0 ? ' (not handled) ' + JSON.stringify(d.Arguments || {}).slice(0, 160) : ''));
             ev.emit('command', { name: d.Name, args: d.Arguments || {}, at: now() });
+        } else if (QUIET.indexOf(type) < 0) {
+            log('message ' + type + ' (not handled) ' + JSON.stringify(d).slice(0, 160));
         }
+    }
+    /** a Play (or a PlayMediaSource made one): its numbers may come as text */
+    async function play(d, how) {
+        const num = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
+        const ids = (d.ItemIds || []).map(String).filter(Boolean);
+        const startTicks = num(d.StartPositionTicks) || 0;
+        log(how + ' ' + (d.PlayCommand || '') + ' ' + ids.join(',') + (startTicks ? ' from ' + Math.round(startTicks / TICKS) + ' s' : ''));
+        if (!ids.length) return;
+        const startIndex = num(d.StartIndex) || 0;
+        const first = ids[startIndex] || ids[0];
+        const item = first ? await itemInfo(first) : null;
+        ev.emit('play', { command: d.PlayCommand || 'PlayNow', ids, start: startTicks / TICKS, startIndex, mediaSourceId: d.MediaSourceId || null,
+            audioIndex: num(d.AudioStreamIndex), subtitleIndex: num(d.SubtitleStreamIndex), from: d.ControllingUserId || null, item, at: now() });
     }
 
     function schedule(seconds) {
