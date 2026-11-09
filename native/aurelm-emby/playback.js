@@ -52,12 +52,47 @@ function deviceProfile(bitrate) {
                 { Condition: 'LessThanEqual', Property: 'AudioChannels', Value: '6', IsRequired: false },
             ] },
         ],
-        // the player draws no subtitles: chosen ones are burned into the picture by the server
-        SubtitleProfiles: ['srt', 'subrip', 'ass', 'ssa', 'vtt', 'pgs', 'pgssub', 'dvdsub', 'dvbsub', 'sub', 'smi']
-            .map((f) => ({ Format: f, Method: 'Encode' })),
+        // text subtitles come apart (External) and the app draws them over the picture: burned in, they cost the server a
+        // whole transcode, and 0.2.4 in the car got HTTP 500 for a 4K Dolby Vision film with Romanian SubRip burned in;
+        // picture subtitles (PGS, DVD, DVB) can only be burned in
+        SubtitleProfiles: TEXT_SUBS.map((f) => ({ Format: f, Method: 'External' }))
+            .concat(['pgs', 'pgssub', 'dvdsub', 'dvbsub', 'sub'].map((f) => ({ Format: f, Method: 'Encode' }))),
         ResponseProfiles: [],
     };
 }
+
+const TEXT_SUBS = ['srt', 'subrip', 'ass', 'ssa', 'vtt', 'webvtt', 'smi', 'ttml', 'mov_text'];
+
+/** HH:MM:SS,mmm -> seconds */
+function srtTime(t) {
+    const m = /(\d+):(\d{1,2}):(\d{1,2})[,.](\d{1,3})/.exec(t);
+    return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number((m[4] + '00').slice(0, 3)) / 1000 : null;
+}
+/** the kit's fonts have ASCII only: Romanian and other accented letters, typographic quotes and dashes as ASCII */
+const ASCII = { 'ș': 's', 'ş': 's', 'Ș': 'S', 'Ş': 'S', 'ț': 't', 'ţ': 't', 'Ț': 'T', 'Ţ': 'T', '„': '"', '“': '"', '”': '"', '«': '"', '»': '"',
+    '‘': "'", '’': "'", '‚': "'", '–': '-', '—': '-', '…': '...', ' ': ' ', 'ß': 'ss', 'æ': 'ae', 'Æ': 'AE', 'ø': 'o', 'Ø': 'O',
+    'œ': 'oe', 'Œ': 'OE', 'ł': 'l', 'Ł': 'L', 'đ': 'd', 'Đ': 'D' };
+function ascii(s) {
+    return String(s).replace(/[\s\S]/g, (ch) => (ASCII[ch] !== undefined ? ASCII[ch] : ch)).normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^\x20-\x7e\n]/g, '');
+}
+/** SubRip text -> [{ s, e, t }] (seconds; the lines without tags, in ASCII), sorted */
+function parseSrt(text) {
+    const out = [];
+    String(text).replace(/^﻿/, '').replace(/\r/g, '').split(/\n\s*\n/).forEach((block) => {
+        const lines = block.split('\n').filter((l) => l.trim() !== '');
+        const i = lines.findIndex((l) => l.indexOf('-->') >= 0);
+        if (i < 0) return;
+        const parts = lines[i].split('-->');
+        const st = srtTime(parts[0]), en = srtTime(parts[1]);
+        if (st == null || en == null || en <= st) return;
+        const t = lines.slice(i + 1).join('\n').replace(/<[^>]*>/g, '').replace(/\{[^}]*\}/g, '').trim();
+        if (t) out.push({ s: st, e: en, t: ascii(t) });
+    });
+    out.sort((x, y) => x.s - y.s);
+    return out;
+}
+const isText = (x) => !!x && (x.DeliveryMethod === 'External' || TEXT_SUBS.indexOf(String(x.Codec || '').toLowerCase()) >= 0) && x.DeliveryMethod !== 'Encode';
 
 /** url with `key` set to `value` (replaced if there, case-insensitive) */
 function setParam(u, key, value) {
@@ -119,6 +154,8 @@ function createPlayback(o) {
         return Object.assign({}, st, {
             serverSays: st.serverSays || null,
             item: cur ? cur.info : null, pos: cur ? position() : null, dur: cur && cur.info ? cur.info.seconds : null,
+            posAt: cur ? cur.tAt || null : null,
+            subs: cur && cur.subs ? { key: cur.subs.key, count: cur.subs.count, lang: cur.subs.lang, error: cur.subs.error || null } : null,
             paused: cur ? cur.paused : false, playMethod: cur ? cur.playMethod : null, volume, muted,
             queue: { index: q.index, length: q.ids.length }, player: cur ? cur.player : null,
             audioIndex: cur ? cur.audioIndex : null, subtitleIndex: cur ? cur.subtitleIndex : null,
@@ -182,8 +219,44 @@ function createPlayback(o) {
             method = 'DirectStream';
         }
         u = setParam(u, 'StartTimeTicks', Math.round(startSec * TICKS));
+        const subs = (src.MediaStreams || []).filter((x) => x.Type === 'Subtitle');
         return { url: acc.server + (u[0] === '/' ? '' : '/') + u, playSessionId: info.PlaySessionId || null, mediaSourceId: src.Id,
-            playMethod: method, reasons: src.TranscodeReasons || null };
+            playMethod: method, reasons: src.TranscodeReasons || null, subs,
+            defaultSub: src.DefaultSubtitleStreamIndex != null ? src.DefaultSubtitleStreamIndex : -1 };
+    }
+
+    /** the subtitle stream `index` of the current media source, or null */
+    function subStream(c, index) {
+        if (index == null || index < 0) return null;
+        return (c.subStreams || []).filter((x) => x.Index === index)[0] || null;
+    }
+    /** the chosen text subtitles (as SubRip, from the server), parsed, for the app to draw; none: cleared */
+    function loadSubs(c) {
+        const x = subStream(c, c.subtitleIndex);
+        if (!x || !isText(x)) {
+            c.subs = null;
+            if (o.onSubs) o.onSubs(null, []);
+            return;
+        }
+        const key = c.id + ':' + c.mediaSourceId + ':' + x.Index;
+        if (c.subs && c.subs.key === key && !c.subs.error) return;
+        c.subs = { key, count: 0, lang: x.DisplayTitle || x.Language || null, error: null };
+        // the server converts any text format to SubRip at its .srt address
+        let u = x.DeliveryUrl || ('/Videos/' + encodeURIComponent(c.id) + '/' + encodeURIComponent(c.mediaSourceId) + '/Subtitles/' + x.Index + '/0/Stream.srt');
+        u = u.replace(/^https?:\/\/[^/]+/, '').replace(/\/Stream\.\w+/, '/Stream.srt');
+        const fetch = o.apiText ? o.apiText(u.replace(/^\//, '')) : Promise.reject(new Error('no text API'));
+        fetch.then((r) => {
+            if (cur !== c || !c.subs || c.subs.key !== key) return;
+            if (r.status !== 200) throw new Error('HTTP ' + r.status);
+            const cues = parseSrt(r.text);
+            c.subs.count = cues.length;
+            log('subtitles: ' + (c.subs.lang || x.Index) + ', ' + cues.length + ' lines');
+            if (o.onSubs) o.onSubs(key, cues);
+        }).catch((e) => {
+            if (cur !== c || !c.subs || c.subs.key !== key) return;
+            c.subs.error = e.message;
+            log('subtitles: ' + e.message);
+        });
     }
 
     /** the transcode behind a stream we leave: stopped on the server */
@@ -210,7 +283,9 @@ function createPlayback(o) {
             s = await playbackInfo(c, startSec);
             if (cur !== c || c.streamId !== id) return;
             if (!had && s.playSessionId !== c.playSessionId) stopEncoding(c.playSessionId);
-            Object.assign(c, { playSessionId: s.playSessionId, mediaSourceId: s.mediaSourceId, playMethod: s.playMethod, reasons: s.reasons });
+            Object.assign(c, { playSessionId: s.playSessionId, mediaSourceId: s.mediaSourceId, playMethod: s.playMethod, reasons: s.reasons, subStreams: s.subs });
+            if (c.subtitleIndex == null) c.subtitleIndex = s.defaultSub;
+            loadSubs(c);
             log('stream ' + id + ' (' + why + '): ' + s.playMethod + (s.reasons ? ' (' + [].concat(s.reasons).join(', ') + ')' : '') + ' from ' + Math.round(startSec) + ' s');
             log('stream ' + id + ': ' + describeUrl(s.url));
             const acc = account();
@@ -232,7 +307,13 @@ function createPlayback(o) {
             finally { clearTimeout(look); }
             if (cur !== c || c.streamId !== id) { r.abort(); return; }
             log('stream ' + id + ': HTTP ' + r.status + ' ' + (r.headers['content-type'] || '') + ' after ' + ((now() - asked) / 1000).toFixed(1) + ' s');
-            if (r.status < 200 || r.status >= 300) { r.res.resume(); throw new Error('the server\'s stream: HTTP ' + r.status); }
+            if (r.status < 200 || r.status >= 300) {
+                r.res.resume();
+                // the transcoder failed: what it says (an administrator's log)
+                const says = r.status >= 500 ? await serverLog().catch(() => null) : null;
+                if (says) { st.serverSays = says; says.split('\n').forEach((l) => log('server transcoder: ' + l)); }
+                throw new Error('the server\'s stream: HTTP ' + r.status + (says ? ' (' + says.split('\n').pop() + ')' : ''));
+            }
             phase('player');
             c.stream = r;
             sink.start(id);
@@ -351,7 +432,14 @@ function createPlayback(o) {
         case 'Unmute': muted = false; setVolume(volume); break;
         case 'ToggleMute': muted = !muted; setVolume(volume); break;
         case 'SetAudioStreamIndex': if (cur) { cur.audioIndex = Number(a.Index); seek(position()); } break;
-        case 'SetSubtitleStreamIndex': if (cur) { cur.subtitleIndex = Number(a.Index) >= 0 ? Number(a.Index) : -1; seek(position()); } break;
+        case 'SetSubtitleStreamIndex': if (cur) {
+            const was = subStream(cur, cur.subtitleIndex);
+            cur.subtitleIndex = Number(a.Index) >= 0 ? Number(a.Index) : -1;
+            const next = subStream(cur, cur.subtitleIndex);
+            // text subtitles are ours to draw: only a burned-in one (before or now) needs a new stream
+            if ((was && !isText(was)) || (next && !isText(next))) seek(position());
+            else { loadSubs(cur); report('progress', { EventName: 'subtitletrackchange' }); }
+        } break;
         default: break;
         }
     }
@@ -362,6 +450,7 @@ function createPlayback(o) {
         if (!c || c.streamId !== id || !ev) return;
         if (ev.ev === 'tick') {
             c.t = ev.t || 0;
+            c.tAt = now();
             c.player = Object.assign({}, c.player, { state: ev.state, shown: ev.shown, late: ev.late, decerr: ev.decerr, aplayed: ev.aplayed,
                 alate: ev.alate, aunread: ev.aunread, adev: ev.adev, buffered: ev.buffered, kbytes: ev.kbytes });
             if (st.state !== 'error') set(ev.state === 'starting' ? 'loading' : ev.state);
@@ -404,4 +493,4 @@ function createPlayback(o) {
     return { play, playstate, command, onPlayer, stop, status, position: () => position() };
 }
 
-module.exports = { createPlayback, deviceProfile, setParam, describeUrl, TICKS };
+module.exports = { createPlayback, deviceProfile, setParam, describeUrl, parseSrt, ascii, TICKS };

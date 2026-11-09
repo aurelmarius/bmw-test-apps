@@ -35,7 +35,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.2.4';
+const SERVICE_VERSION = '0.2.5';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
@@ -136,7 +136,7 @@ function playRows(s, rows) {
         detail: !open ? (pb.serverSays ? 'the server\'s transcoder: ' + pb.serverSays.split('\n').pop()
             : fresh && pl.open ? 'no picture in the stream' : 'waiting for the stream')
             : (d && !d.ok ? 'GPU decoder: ' + d.error : 'H.264 ' + open.w + 'x' + open.h + ', ' + (tk.shown || 0) + ' shown' + (tk.late ? ', ' + tk.late + ' late' : '') +
-                (v.why ? '; ' + v.why : '')) });
+                (v.why ? '; ' + v.why : '') + (pb.subs ? '; subtitles ' + (pb.subs.error ? 'failed: ' + pb.subs.error : (pb.subs.lang || '') + ' (' + pb.subs.count + ' lines)') : '')) });
     const a = fresh ? pl.audio : null, ca = s.carAudio || {};
     let snd;
     if (!a) snd = { state: 'wait', detail: fresh && pl.open && pl.running ? 'no sound in the stream yet' : 'waiting for the stream' };
@@ -195,7 +195,7 @@ mgu.run({
         /* ---------- the film: the picture over the screen (parked only), the sound on the speakers ---------- */
         const parked = Parked.watch(ctx, log, { strict: true });
         const mirror = createMirrorView({ RenderClient, Recorder: record.Recorder, kit: record, appId: ctx.spec.id, log,
-            hintText: 'Press a button on the iDrive controller to return',
+            hintText: 'Press a button on the iDrive controller to return', overlay: () => subtitleOverlay(),
             idleText: 'the player is not running', hiddenText: 'hidden: press "Show picture" to show it again',
             statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
         const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
@@ -210,6 +210,66 @@ mgu.run({
             return { running: true, videoRunning: true, stream: { shown: pl.tick ? pl.tick.shown : 0 },
                 decoder: d ? { ok: d.ok, error: d.error, path: d.path || pl.videoPath, w: d.w, h: d.h } : null };
         }
+        /* ---------- the film's text subtitles, drawn over the picture (the server sends them apart) ---------- */
+        const subs = { key: null, cues: [], asking: false };
+        async function syncSubs() {
+            const sb = st && st.playback && st.playback.subs;
+            const want = sb && sb.count ? sb.key : null;
+            if (want === subs.key || subs.asking) return;
+            if (!want) { subs.key = null; subs.cues = []; return; }
+            subs.asking = true;
+            const r = await ask('subs');
+            subs.asking = false;
+            if (r && r.key === want) { subs.key = want; subs.cues = r.cues || []; log.info('emby: subtitles, ' + subs.cues.length + ' lines'); }
+        }
+        /** the film's position now: the last one the player told, moved on by the time since while it plays */
+        function posNow() {
+            const pb = st && st.playback;
+            if (!pb || pb.pos == null) return null;
+            return pb.pos + (pb.state === 'playing' && pb.posAt ? Math.max(0, Date.now() - pb.posAt) / 1000 : 0);
+        }
+        function cueAt(t) {
+            const c = subs.cues;
+            let lo = 0, hi = c.length - 1, found = null;
+            while (lo <= hi) {   // the last cue starting at or before t
+                const mid = (lo + hi) >> 1;
+                if (c[mid].s <= t) { found = mid; lo = mid + 1; } else hi = mid - 1;
+            }
+            // overlapping cues: the ones before still running are shown too
+            const out = [];
+            for (let i = found; i != null && i >= 0 && i > found - 4; i--) if (c[i].e > t) out.unshift(c[i].t);
+            return out.length ? out.join('\n') : null;
+        }
+        function subtitleOverlay() {
+            if (!subs.cues.length) return null;
+            const t = posNow();
+            const text = t == null ? null : cueAt(t);
+            if (!text) return null;
+            return { key: text, draw: (rec, pl, hinting) => {
+                const size = Math.round(pl.h * 0.058), lh = Math.round(size * 1.22), maxW = pl.w * 0.86;
+                // each line wrapped to the screen's width, at most 4
+                const lines = [];
+                text.split('\n').forEach((line) => {
+                    let cur = '';
+                    line.split(' ').forEach((w) => {
+                        const next = cur ? cur + ' ' + w : w;
+                        if (cur && rec.textWidth(next, size, { font: 'bold', literal: true }) > maxW) { lines.push(cur); cur = w; } else cur = next;
+                    });
+                    if (cur) lines.push(cur);
+                });
+                const shown = lines.slice(-4);
+                const base = pl.h - Math.round(pl.h * 0.06) - (hinting ? 80 : 0);
+                shown.forEach((l, i) => {
+                    const y = base - (shown.length - 1 - i) * lh, x = pl.w / 2;
+                    // a black outline, then the white letters
+                    [[-2, 0], [2, 0], [0, -2], [0, 2], [2, 2]].forEach((d) => rec.text(l, x + d[0], y + d[1], size, 0x000000ff, { align: 'center', font: 'bold', literal: true }));
+                    rec.text(l, x, y, size, 0xffffffff, { align: 'center', font: 'bold', literal: true });
+                });
+            } };
+        }
+        // a subtitle line comes or goes: a new frame (only then; the picture itself needs none)
+        setInterval(() => { if (mirror.state().shown) mirror.tick(); }, 100);
+
         let soundUntil = 0;
         function sync() {
             const pb = st && st.playback;
@@ -277,7 +337,7 @@ mgu.run({
         setInterval(() => {
             tick++;
             const on = st && st.playback && ACTIVE.indexOf(st.playback.state) >= 0;
-            if (shown() || (on && tick % 2 === 0)) poll().catch(() => {});
+            if (shown() || (on && tick % 2 === 0)) poll().then(syncSubs).catch(() => {});
             sync();
         }, 1000);
         if (ui.onVisible) ui.onVisible(() => sync());

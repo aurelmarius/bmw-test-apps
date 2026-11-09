@@ -18,6 +18,7 @@
  *
  * Control: one JSON object per line: {"cmd":"status"}, {"cmd":"signin-open"}, {"cmd":"signin-close"},
  * {"cmd":"signout"}, {"cmd":"playstate","command":"PlayPause"|"Stop"}, {"cmd":"exit"}; the reply is the status.
+ * {"cmd":"subs"}: the film's text subtitles instead ({ key, cues: [{ s, e, t }] }), which the app draws.
  */
 const fs = require('fs');
 const os = require('os');
@@ -31,7 +32,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.2.4';
+const VERSION = '0.2.5';
 const PAGE_PORT = 8490;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -82,6 +83,9 @@ function createService(opts) {
         play: null, playstate: null, command: null, lastSignIn: null, error: null, playback: null,
     };
 
+    // the film's text subtitles, for the app to draw ({"cmd":"subs"}: not in every status, a film has thousands)
+    let subs = { key: null, cues: [] };
+
     /* ---------- the player (root: its frame file; it runs as the tool's uid) ---------- */
     const player = createPlayer({ bin: o.playerBin, uid: o.uid, env: o.playerEnv, videoPath: o.videoPath, log,
         onEvent: (id, ev) => toChild({ op: 'player', id, ev }) });
@@ -125,6 +129,7 @@ function createService(opts) {
         else if (m.ev === 'playstate') st.playstate = m.data;
         else if (m.ev === 'command') st.command = m.data;
         else if (m.ev === 'playback') st.playback = m.status;
+        else if (m.ev === 'subs') subs = { key: m.key, cues: m.cues || [] };
         else if (m.ev === 'player-start') player.start(m.id);
         else if (m.ev === 'player-ctl') player.ctl(m.id, m.line);
         else if (m.ev === 'player-stop') player.stop(m.id);
@@ -256,6 +261,8 @@ function createService(opts) {
                 st.play = st.playstate = st.command = st.playback = null;
                 st.client = { state: 'signed-out' };
             }
+        } else if (cmd === 'subs') {
+            return { key: subs.key, cues: subs.cues };
         } else if (cmd === 'playstate' && m.command) {
             toChild({ op: 'playstate', command: String(m.command) });
         } else if (cmd === 'exit') { setTimeout(() => stop(0), 100); }

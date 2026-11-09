@@ -16,6 +16,10 @@
  *   view.update({ rx, pageVisible, driving });   // each second and on every change
  *   view.wantAgain();                            // the user asked for the picture
  *   view.state()                                 // { shown, why }
+ *   view.tick()                                  // Emby: o.overlay() changed? drawn again (the subtitles)
+ *
+ * Emby's copy of AirPlay Test's mirror_view.js: o.overlay() -> { key, draw(rec, placement, hinting) } draws over
+ * the picture (the subtitles), o.idleText / o.hiddenText word the reasons for the player.
  */
 const VID = 1;
 const KEEPALIVE_MS = 800;   // mgu-render hides an app silent for 3 s
@@ -54,22 +58,33 @@ function createMirrorView(o) {
     });
     gpu.connect();
 
-    let shownAt = 0, hinted = false;
+    let shownAt = 0, hinted = false, overKey = null;
     function frame() {
         const pl = gpu.placement;
         if (!pl) return;
         // the first seconds: how to get back, over the picture
         const hint = now() - shownAt < HINT_MS;
-        if (!rec || hint !== hinted) {
+        // Emby: what the app draws over the picture (the subtitles), recorded again when it changes
+        const ov = o.overlay ? o.overlay() : null;
+        const ok = ov ? ov.key : null;
+        if (!rec || hint !== hinted || ok !== overKey) {
             rec = new o.Recorder(pl.w, pl.h).clear(0x000000ff).video(VID, 0, 0, pl.w, pl.h, 0);
+            if (ov && ov.draw) ov.draw(rec, pl, hint);
             if (hint) {
                 rec.roundRect(pl.w / 2 - 330, pl.h - 96, 660, 60, 30, 0x000000b0);
                 rec.text(o.hintText || 'Press a button on the iDrive controller to return', pl.w / 2, pl.h - 56, 26, 0xffffffff, { align: 'center', font: 'bold', literal: true });
             }
             hinted = hint;
+            overKey = ok;
         }
         gpu.frame(rec);
         lastFrame = now();
+    }
+    /** Emby: the overlay may have changed (a subtitle line came or went): a new frame now, only then */
+    function tick() {
+        if (!shown || !o.overlay) return;
+        const ov = o.overlay();
+        if ((ov ? ov.key : null) !== overKey) frame();
     }
 
     function apply(want) {
@@ -117,7 +132,7 @@ function createMirrorView(o) {
     function state() { return { shown, why }; }
     function close() { apply(false); try { gpu.close(); } catch (e) { /* closed */ } }
 
-    return { update, wantAgain, state, close, gpu };
+    return { update, wantAgain, state, close, tick, gpu };
 }
 
 module.exports = { createMirrorView, VID };

@@ -67,10 +67,15 @@ function fakeEmby(opts) {
                 seen.pbinfo.push({ query, body: JSON.parse(body || '{}') });
                 const ps = 'ps-' + (++sessions);
                 return json(200, { PlaySessionId: ps, MediaSources: [{ Id: 'ms2', SupportsTranscoding: true, TranscodeReasons: ['VideoCodecNotSupported'],
+                    DefaultSubtitleStreamIndex: -1, MediaStreams: [
+                        { Type: 'Subtitle', Index: 2, Codec: 'subrip', Language: 'rum', DisplayTitle: 'Romanian (SUBRIP)', DeliveryMethod: 'External',
+                            DeliveryUrl: '/Videos/film2/ms2/Subtitles/2/0/Stream.subrip?api_key=' + TOKEN },
+                        { Type: 'Subtitle', Index: 3, Codec: 'PGSSUB', Language: 'eng', DeliveryMethod: 'Encode' }],
                     TranscodingUrl: '/videos/film2/stream.ts?MediaSourceId=ms2&PlaySessionId=' + ps + '&api_key=' + TOKEN + '&StartTimeTicks=0&VideoCodec=h264' }] });
             }
             if (p === '/videos/film2/stream.ts') {
                 seen.streams.push({ query, token: req.headers['x-emby-token'] });
+                if (o.streamFails) { res.writeHead(500, { 'Content-Type': 'text/plain' }); return res.end('Error'); }
                 // a heavy transcode: the head of the answer comes late
                 return setTimeout(() => {
                     res.writeHead(200, { 'Content-Type': 'video/mp2t' });
@@ -81,6 +86,11 @@ function fakeEmby(opts) {
             if (p === '/System/Logs') return json(200, [{ Name: 'embyserver.txt', DateModified: '2026-11-09T12:00:00Z' },
                 { Name: 'ffmpeg-transcode-old.txt', DateModified: '2026-11-09T11:00:00Z' }, { Name: 'ffmpeg-transcode-new.txt', DateModified: '2026-11-09T12:37:41Z' }]);
             if (p === '/System/Logs/ffmpeg-transcode-new.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ffmpeg version 6\nStream #0:0: Video: hevc (Main 10), dovi\n[hevc] Error parsing NAL\nConversion failed!\n'); }
+            if (p === '/Videos/film2/ms2/Subtitles/2/0/Stream.srt') {
+                seen.subs = (seen.subs || 0) + 1;
+                res.writeHead(200, { 'Content-Type': 'text/plain' });
+                return res.end('1\r\n00:00:01,000 --> 00:00:03,000\r\n<i>Vreau să-ți spun</i>\r\n\r\n2\r\n00:00:12,000 --> 00:00:14,500\r\nAdio.\r\n');
+            }
             if (p.indexOf('/Sessions/Playing') === 0) { seen.reports.push({ path: p, body: JSON.parse(body || '{}') }); return json(204); }
             if (p === '/Videos/ActiveEncodings' && req.method === 'DELETE') { seen.encStops.push(query); return json(204); }
             if (p === '/Users/u1/Items/film1') return json(200, { Id: 'film1', Name: 'Interstellar', ProductionYear: 2014, Type: 'Movie', RunTimeTicks: 101690000000,
@@ -260,7 +270,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.2.4');
+        assert.strictEqual(s.version, '0.2.5');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -325,7 +335,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
 });
 
 
-test('device profile: H.264 up to 1080p, AAC / AC-3, MPEG-TS over HTTP, subtitles burned in', () => {
+test('device profile: H.264 up to 1080p, AAC / AC-3, MPEG-TS over HTTP, text subtitles apart', () => {
     const p = playback.deviceProfile(8000000);
     assert.deepStrictEqual(p.DirectPlayProfiles, []);
     const v = p.TranscodingProfiles.filter((t) => t.Type === 'Video')[0];
@@ -333,7 +343,9 @@ test('device profile: H.264 up to 1080p, AAC / AC-3, MPEG-TS over HTTP, subtitle
     const h = p.CodecProfiles.filter((c) => c.Codec === 'h264')[0].Conditions;
     const cond = (prop) => h.filter((c) => c.Property === prop)[0].Value;
     assert.strictEqual(cond('Width'), '1920'); assert.strictEqual(cond('Height'), '1080'); assert.strictEqual(cond('VideoBitDepth'), '8');
-    assert.ok(p.SubtitleProfiles.every((x) => x.Method === 'Encode'));
+    // text subtitles apart (the app draws them), picture ones burned in
+    assert.ok(p.SubtitleProfiles.filter((x) => ['srt', 'subrip', 'ass', 'vtt'].indexOf(x.Format) >= 0).every((x) => x.Method === 'External'));
+    assert.ok(p.SubtitleProfiles.filter((x) => ['pgssub', 'dvdsub'].indexOf(x.Format) >= 0).every((x) => x.Method === 'Encode'));
     assert.strictEqual(playback.setParam('/v/s.ts?a=1&StartTimeTicks=0&b=2', 'StartTimeTicks', 50), '/v/s.ts?a=1&b=2&StartTimeTicks=50');
     assert.strictEqual(playback.setParam('/v/s.ts', 'x', 'a b'), '/v/s.ts?x=a%20b');
     // the log's view of a stream address: what is asked, never the token
@@ -415,6 +427,45 @@ test('playback: cast, pause, seek, volume, stop; reported to the server', async 
         await until(() => srv.seen.encStops.some((q) => q.PlaySessionId === 'ps-2'), 3000, 'encoding stopped');
         s = await statusUntil(svc.sock, (x) => x.playback.state === 'idle' && !x.player.running, 5000, 'idle');
         assert.ok(!fs.existsSync(path.join(svc.tmp, 'mgu-video-test')));
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('subtitles: text ones apart (drawn by the app), picture ones burned in; a changed text track needs no new stream', async () => {
+    const srv = await fakeEmby({ seconds: 60 });
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100' } });
+    try {
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow', SubtitleStreamIndex: 2 } });
+        let s = await statusUntil(svc.sock, (x) => x.playback && x.playback.subs && x.playback.subs.count === 2, 5000, 'subtitles loaded');
+        assert.strictEqual(s.playback.subs.lang, 'Romanian (SUBRIP)');
+        // the profile: text subtitles External, picture ones Encode
+        const prof = srv.seen.pbinfo[0].body.DeviceProfile.SubtitleProfiles;
+        assert.strictEqual(prof.filter((x) => x.Format === 'subrip')[0].Method, 'External');
+        assert.strictEqual(prof.filter((x) => x.Format === 'pgssub')[0].Method, 'Encode');
+        assert.strictEqual(srv.seen.pbinfo[0].query.SubtitleStreamIndex, '2');
+        // the app's copy: the cues, in ASCII (the kit's fonts)
+        const sub = await ask(svc.sock, 'subs');
+        assert.strictEqual(sub.key, s.playback.subs.key);
+        assert.deepStrictEqual(sub.cues, [{ s: 1, e: 3, t: 'Vreau sa-ti spun' }, { s: 12, e: 14.5, t: 'Adio.' }]);
+        s = await statusUntil(svc.sock, (x) => x.playback.posAt > 0, 3000, 'a position with its time');
+        // off from the phone: no new stream, no subtitles
+        srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetSubtitleStreamIndex', Arguments: { Index: '-1' } } });
+        s = await statusUntil(svc.sock, (x) => x.playback && !x.playback.subs, 3000, 'subtitles off');
+        assert.strictEqual((await ask(svc.sock, 'subs')).key, null);
+        assert.strictEqual(srv.seen.streams.length, 1);
+        // a picture subtitle: burned in by the server, so a new stream from the position
+        srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetSubtitleStreamIndex', Arguments: { Index: '3' } } });
+        await until(() => srv.seen.streams.length === 2, 5000, 'a new stream for a burned-in subtitle');
+        assert.strictEqual(srv.seen.pbinfo[1].query.SubtitleStreamIndex, '3');
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('playback: the server\'s transcoder failing (HTTP 500) says why', async () => {
+    const srv = await fakeEmby({ seconds: 60, streamFails: true });
+    const svc = await signedIn(srv);
+    try {
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow' } });
+        const s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'error', 5000, 'the error');
+        assert.ok(/HTTP 500 \(Conversion failed!\)/.test(s.playback.error), s.playback.error);
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 
