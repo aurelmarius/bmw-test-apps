@@ -82,7 +82,10 @@ the playlists from the iPhone and serves them on its own port (`http://localhost
 filtered to H.264, 1080p at 30 fps and 720p at 60 (`-custom AVC:1080,720;HEVC:0;VP9:0;AV1:0`); a direct http(s)
 address (Safari's video button) is played as it is. The player (`native/uxplay-mgu/player/mgu_hls.cpp`) reads it with
 FFmpeg and shows and plays it through the same GPU decoder, frame file and sound input as mirroring; the iPhone keeps
-pause, seek and its progress bar. iOS ends CarPlay while a video plays this way (found with iCarCast, 2026-11-08).
+pause, seek and its progress bar. **It works only while the iPhone is not in a CarPlay session** (in the car,
+2026-11-09, 0.9.8/0.9.9: with wireless CarPlay connected the iPhone ends the video, TEARDOWN, a few seconds after it
+starts, whatever the identity or network; with CarPlay off it plays on, 720p at ~28 fps, its sound on the speakers,
+over the car's Wi-Fi or the iPhone's hotspot). Screen mirroring is the way with CarPlay on.
 
 **Internet.** The receiver runs as nobody, which mgu-uplink does not route. The video's segments come through
 `proxy.js`, a child of the service running as uid **13102** (`component.json` `"internet": true`, `"uids": [13102]`;
