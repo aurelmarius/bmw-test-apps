@@ -10,6 +10,7 @@
  *   c.run(account)          keeps connected (reconnects), until c.stop()
  *   c.on('status', s) / c.on('play', p) / c.on('playstate', p) / c.on('command', p) / c.on('signed-out', why)
  *   c.status()
+ *   c.call(method, path, body)  the API as the signed-in user (playback.js)
  *
  * Only the access token is kept, never the password. Everything goes through `nx` (netx.js): the uplink's
  * DNS and Mozilla's certificates.
@@ -130,7 +131,7 @@ function createClient(o) {
             const first = ids[(Number(d.StartIndex) || 0)] || ids[0];
             const item = first ? await itemInfo(first) : null;
             ev.emit('play', { command: d.PlayCommand || 'PlayNow', ids, start: d.StartPositionTicks ? d.StartPositionTicks / TICKS : 0,
-                mediaSourceId: d.MediaSourceId || null, audioIndex: d.AudioStreamIndex != null ? d.AudioStreamIndex : null,
+                startIndex: Number(d.StartIndex) || 0, mediaSourceId: d.MediaSourceId || null, audioIndex: d.AudioStreamIndex != null ? d.AudioStreamIndex : null,
                 subtitleIndex: d.SubtitleStreamIndex != null ? d.SubtitleStreamIndex : null, from: d.ControllingUserId || null, item, at: now() });
         } else if (type === 'Playstate') {
             log('Playstate ' + d.Command + (d.SeekPositionTicks != null ? ' ' + Math.round(d.SeekPositionTicks / TICKS) + ' s' : ''));
@@ -228,7 +229,13 @@ function createClient(o) {
         set('signed-out');
     }
 
-    return Object.assign(ev, { signIn, run, stop, signOut, status, describe });
+    /** the server's API as the signed-in user (playback.js): rejects with code EAUTH when the token is refused */
+    function call(method, path, body) {
+        if (!account) return Promise.reject(new Error('not signed in'));
+        return api(account, method, path, body);
+    }
+
+    return Object.assign(ev, { signIn, run, stop, signOut, status, describe, call, account: () => account, device: o.device });
 }
 
 module.exports = { createClient, candidates, authHeader, describe, COMMANDS, CLIENT };

@@ -1,8 +1,10 @@
 'use strict';
 /**
  * The Emby cast service off the car: a fake Emby server (HTTP API + /embywebsocket), the service with its
- * client as a real child process, the sign-in page, a Play / Playstate from the "phone", sign-out. Also
- * the WebSocket frames and TLS against our own CA list. Runs on Node 8.9.4 too.
+ * client as a real child process, the sign-in page, a Play / Playstate from the "phone", sign-out. Playback:
+ * PlaybackInfo with our profile, the stream through the service to a player (tests/fixtures/fake_player.js; and
+ * native/emby-player itself when it is built), pause, seek, volume, stop and the reports. Also the WebSocket
+ * frames and TLS against our own CA list. Runs on Node 8.9.4 too.
  *
  *   node tests/emby_service.test.js
  */
@@ -21,6 +23,9 @@ const ws = require(path.join(DIR, 'ws'));
 const emby = require(path.join(DIR, 'emby'));
 const nft = require(path.join(DIR, 'nft'));
 const { createNet } = require(path.join(DIR, 'netx'));
+const playback = require(path.join(DIR, 'playback'));
+const FIXTURES = path.join(__dirname, 'fixtures');
+const PLAYER = path.join(__dirname, '..', 'native', 'emby-player', 'build', 'emby-player');
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -33,7 +38,8 @@ async function until(fn, ms, what) {
 /** a fake Emby server: the calls the service makes, and a way to send it WebSocket messages */
 function fakeEmby(opts) {
     const o = opts || {};
-    const seen = { calls: [], caps: null, sockets: [], logout: 0, auth: [] };
+    const seen = { calls: [], caps: null, sockets: [], logout: 0, auth: [], pbinfo: [], streams: [], reports: [], encStops: [] };
+    let sessions = 0;
     const TOKEN = 'tok-' + crypto.randomBytes(4).toString('hex');
     const handler = (req, res) => {
         let body = '';
@@ -54,6 +60,22 @@ function fakeEmby(opts) {
             if (p === '/Sessions/Capabilities/Full') { seen.caps = JSON.parse(body); return json(204); }
             if (p === '/Sessions') return json(200, [{ Id: 'sess-car', DeviceName: 'BMW iDrive' }]);
             if (p === '/Sessions/Logout') { seen.logout++; return json(204); }
+            const query = qs.parse(req.url.split('?')[1] || '');
+            if (p === '/Users/u1/Items/film2') return json(200, { Id: 'film2', Name: 'Sample', Type: 'Movie', MediaType: 'Video', RunTimeTicks: (o.seconds || 3) * 10000000,
+                MediaSources: [{ Id: 'ms2', Container: 'mkv', MediaStreams: [{ Type: 'Video', Codec: 'hevc', Width: 3840, Height: 2160 }, { Type: 'Audio', Codec: 'eac3', Channels: 6, IsDefault: true }] }] });
+            if (p === '/Items/film2/PlaybackInfo' && req.method === 'POST') {
+                seen.pbinfo.push({ query, body: JSON.parse(body || '{}') });
+                const ps = 'ps-' + (++sessions);
+                return json(200, { PlaySessionId: ps, MediaSources: [{ Id: 'ms2', SupportsTranscoding: true, TranscodeReasons: ['VideoCodecNotSupported'],
+                    TranscodingUrl: '/videos/film2/stream.ts?MediaSourceId=ms2&PlaySessionId=' + ps + '&api_key=' + TOKEN + '&StartTimeTicks=0&VideoCodec=h264' }] });
+            }
+            if (p === '/videos/film2/stream.ts') {
+                seen.streams.push({ query, token: req.headers['x-emby-token'] });
+                res.writeHead(200, { 'Content-Type': 'video/mp2t' });
+                return res.end(o.media || Buffer.alloc(188 * 200, 0x47));
+            }
+            if (p.indexOf('/Sessions/Playing') === 0) { seen.reports.push({ path: p, body: JSON.parse(body || '{}') }); return json(204); }
+            if (p === '/Videos/ActiveEncodings' && req.method === 'DELETE') { seen.encStops.push(query); return json(204); }
             if (p === '/Users/u1/Items/film1') return json(200, { Id: 'film1', Name: 'Interstellar', ProductionYear: 2014, Type: 'Movie', RunTimeTicks: 101690000000,
                 MediaSources: [{ Container: 'mkv', Bitrate: 12000000, MediaStreams: [
                     { Type: 'Video', Codec: 'hevc', Width: 1920, Height: 1080, Profile: 'Main 10', VideoRange: 'SDR' },
@@ -119,12 +141,15 @@ function get(url) {
 }
 
 /** the service in a scratch folder, its client a real child process (no uid change, no nft, system DNS) */
-function makeService(tmp, port) {
+function makeService(tmp, port, extra) {
     const { createService } = require(path.join(DIR, 'service'));
     const lease = path.join(tmp, 'lease.json');
     fs.writeFileSync(lease, JSON.stringify({ interface: 'vethuplink', ip: '10.0.0.2', dns: ['127.0.0.1'] }));
-    const svc = createService({ stateDir: path.join(tmp, 'state'), nft: null, uid: null, pagePort: port, pageIfaces: ['lo'], leasePath: lease, exit: false,
-        childEnv: { EMBY_SYSTEM_DNS: '1' } });
+    const x = extra || {};
+    // the fake player is a node script: node's folder on PATH (the service gives the player /usr/bin:/bin)
+    const playerEnv = Object.assign({ PATH: path.dirname(process.execPath) + ':/usr/bin:/bin' }, x.playerEnv || {});
+    const svc = createService(Object.assign({ stateDir: path.join(tmp, 'state'), nft: null, uid: null, pagePort: port, pageIfaces: ['lo'], leasePath: lease, exit: false,
+        childEnv: { EMBY_SYSTEM_DNS: '1' }, playerBin: path.join(FIXTURES, 'fake_player.js'), videoPath: path.join(tmp, 'mgu-video-test') }, x, { playerEnv }));
     const sock = path.join(tmp, 'ctl.sock');
     const server = require('net').createServer();
     svc.serve(server);
@@ -228,7 +253,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.1.0');
+        assert.strictEqual(s.version, '0.2.0');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -290,6 +315,138 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
         assert.ok(!fs.existsSync(accFile));
         again.svc.stop(); again.server.close();
     } finally { srv.close(); try { svc.stop(); server.close(); } catch (e) { /* stopped */ } }
+});
+
+
+test('device profile: H.264 up to 1080p, AAC / AC-3, MPEG-TS over HTTP, subtitles burned in', () => {
+    const p = playback.deviceProfile(8000000);
+    assert.deepStrictEqual(p.DirectPlayProfiles, []);
+    const v = p.TranscodingProfiles.filter((t) => t.Type === 'Video')[0];
+    assert.strictEqual(v.Container, 'ts'); assert.strictEqual(v.VideoCodec, 'h264'); assert.strictEqual(v.AudioCodec, 'aac,ac3'); assert.strictEqual(v.Protocol, 'http');
+    const h = p.CodecProfiles.filter((c) => c.Codec === 'h264')[0].Conditions;
+    const cond = (prop) => h.filter((c) => c.Property === prop)[0].Value;
+    assert.strictEqual(cond('Width'), '1920'); assert.strictEqual(cond('Height'), '1080'); assert.strictEqual(cond('VideoBitDepth'), '8');
+    assert.ok(p.SubtitleProfiles.every((x) => x.Method === 'Encode'));
+    assert.strictEqual(playback.setParam('/v/s.ts?a=1&StartTimeTicks=0&b=2', 'StartTimeTicks', 50), '/v/s.ts?a=1&b=2&StartTimeTicks=50');
+    assert.strictEqual(playback.setParam('/v/s.ts', 'x', 'a b'), '/v/s.ts?x=a%20b');
+});
+
+/** a service already signed in to srv (account.json written before it starts) */
+async function signedIn(srv, extra) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emby-pb-'));
+    fs.mkdirSync(path.join(tmp, 'state'));
+    fs.writeFileSync(path.join(tmp, 'state', 'account.json'), JSON.stringify({ server: srv.url, userId: 'u1', token: srv.TOKEN, userName: 'aurel', serverName: 'Home Emby' }));
+    const svc = await makeService(tmp, await freePort(), typeof extra === 'function' ? extra(tmp) : extra);
+    let s;
+    for (let i = 0; i < 100; i++) { s = await ask(svc.sock, 'status'); if (s.client.state === 'connected') break; await wait(50); }
+    assert.strictEqual(s.client.state, 'connected');
+    return Object.assign(svc, { tmp });
+}
+async function statusUntil(sock, fn, ms, what) {
+    let s = null;
+    await until(() => { ask(sock, 'status').then((x) => { s = x; }).catch(() => {}); return s && fn(s) ? s : null; }, ms || 5000, what);
+    return s;
+}
+
+test('playback: cast, pause, seek, volume, stop; reported to the server', async () => {
+    const srv = await fakeEmby({ seconds: 60 });
+    const plog = path.join(os.tmpdir(), 'emby-fake-player-' + process.pid + '.log');
+    try { fs.unlinkSync(plog); } catch (e) { /* none */ }
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_LOG: plog, FAKE_PLAYER_SECONDS: '100' } });
+    const reports = (p) => srv.seen.reports.filter((r) => r.path === p);
+    try {
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], StartPositionTicks: 100000000, PlayCommand: 'PlayNow' } });
+        await until(() => reports('/Sessions/Playing').length, 5000, 'Sessions/Playing');
+        // PlaybackInfo: our profile, from 10 s
+        const pi = srv.seen.pbinfo[0];
+        assert.strictEqual(pi.query.StartTimeTicks, '100000000');
+        assert.strictEqual(pi.query.UserId, 'u1');
+        assert.strictEqual(pi.body.DeviceProfile.Name, 'BMW iDrive');
+        // the stream from 10 s, with our token
+        assert.strictEqual(srv.seen.streams[0].query.StartTimeTicks, '100000000');
+        assert.strictEqual(srv.seen.streams[0].token, srv.TOKEN);
+        const started = reports('/Sessions/Playing')[0].body;
+        assert.strictEqual(started.ItemId, 'film2');
+        assert.strictEqual(started.PlaySessionId, 'ps-1');
+        assert.strictEqual(started.MediaSourceId, 'ms2');
+        assert.strictEqual(started.PlayMethod, 'Transcode');
+        assert.strictEqual(started.CanSeek, true);
+        let s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'playing' && x.player.running, 5000, 'playing');
+        assert.strictEqual(s.playback.item.title, 'Sample');
+        assert.ok(s.playback.pos >= 10, 'position from the start: ' + s.playback.pos);
+        assert.strictEqual(s.playback.playMethod, 'Transcode');
+        // the stream's bytes reached the player
+        await until(() => fs.existsSync(plog) && /"bytes":37600/.test(fs.readFileSync(plog, 'utf8')), 5000, 'the player got the stream');
+        // pause from the phone: the player stops, the server is told
+        srv.send({ MessageType: 'Playstate', Data: { Command: 'Pause' } });
+        await until(() => reports('/Sessions/Playing/Progress').some((r) => r.body.EventName === 'pause' && r.body.IsPaused), 5000, 'pause reported');
+        await until(() => /"ctl":"pause"/.test(fs.readFileSync(plog, 'utf8')), 3000, 'pause to the player');
+        s = await statusUntil(svc.sock, (x) => x.playback.paused && x.playback.state === 'paused', 3000, 'paused');
+        srv.send({ MessageType: 'Playstate', Data: { Command: 'Unpause' } });
+        await until(() => reports('/Sessions/Playing/Progress').some((r) => r.body.EventName === 'unpause'), 5000, 'unpause reported');
+        // volume
+        srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetVolume', Arguments: { Volume: '40' } } });
+        await until(() => /"ctl":"volume 0.4"/.test(fs.readFileSync(plog, 'utf8')), 3000, 'volume to the player');
+        await until(() => reports('/Sessions/Playing/Progress').some((r) => r.body.EventName === 'volumechange' && r.body.VolumeLevel === 40), 3000, 'volume reported');
+        // seek to 30 s: the old transcode stopped, a new stream from 30 s, a new player
+        const firstPid = (await ask(svc.sock, 'status')).player.pid;
+        srv.send({ MessageType: 'Playstate', Data: { Command: 'Seek', SeekPositionTicks: 300000000 } });
+        await until(() => srv.seen.streams.length === 2, 5000, 'the stream again');
+        assert.strictEqual(srv.seen.streams[1].query.StartTimeTicks, '300000000');
+        assert.strictEqual(srv.seen.encStops[0].PlaySessionId, 'ps-1');
+        s = await statusUntil(svc.sock, (x) => x.player.running && x.player.pid !== firstPid && x.playback.pos >= 30, 5000, 'the new player');
+        // stop from the phone: reported, the transcode stopped, the player and its frame file gone
+        srv.send({ MessageType: 'Playstate', Data: { Command: 'Stop' } });
+        await until(() => reports('/Sessions/Playing/Stopped').length, 5000, 'Stopped reported');
+        const stopped = reports('/Sessions/Playing/Stopped')[0].body;
+        assert.strictEqual(stopped.PlaySessionId, 'ps-2');
+        assert.ok(stopped.PositionTicks >= 300000000, String(stopped.PositionTicks));
+        await until(() => srv.seen.encStops.some((q) => q.PlaySessionId === 'ps-2'), 3000, 'encoding stopped');
+        s = await statusUntil(svc.sock, (x) => x.playback.state === 'idle' && !x.player.running, 5000, 'idle');
+        assert.ok(!fs.existsSync(path.join(svc.tmp, 'mgu-video-test')));
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('playback: the end of a film plays the next in the queue, then stops', async () => {
+    const srv = await fakeEmby({ seconds: 3 });
+    const svc = await signedIn(srv);
+    const reports = (p) => srv.seen.reports.filter((r) => r.path === p);
+    try {
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2', 'film2'], PlayCommand: 'PlayNow' } });
+        await until(() => reports('/Sessions/Playing').length === 2, 8000, 'the second item started');
+        await until(() => reports('/Sessions/Playing/Stopped').length === 2, 8000, 'both stopped');
+        assert.strictEqual(reports('/Sessions/Playing')[1].body.PlaylistIndex, 1);
+        const s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'idle', 5000, 'idle');
+        assert.strictEqual(s.player.running, false);
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('playback with emby-player itself (MPEG-TS -> H.264 timed, AAC -> WAV)', async () => {
+    if (!fs.existsSync(PLAYER)) return 'skipped (native/emby-player not built: sh native/emby-player/build.sh)';
+    if (!fs.existsSync('/lib/ld-linux-x86-64.so.2')) return 'skipped (no /lib/ld-linux-x86-64.so.2, the unit\'s loader path, on this PC)';
+    const srv = await fakeEmby({ seconds: 3, media: fs.readFileSync(path.join(FIXTURES, 'emby_sample.ts')) });
+    let wav;
+    const svc = await signedIn(srv, (tmp) => {
+        wav = path.join(tmp, 'out.wav');
+        return { playerBin: PLAYER, playerEnv: { MGU_VIDEO_OFF: '1', MGU_AUDIO: 'wav:' + wav, LD_LIBRARY_PATH: path.join(path.dirname(PLAYER), 'stub') } };
+    });
+    const reports = (p) => srv.seen.reports.filter((r) => r.path === p);
+    try {
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow' } });
+        let s = await statusUntil(svc.sock, (x) => x.player && x.player.open && x.player.audio, 5000, 'the player opened the stream');
+        assert.deepStrictEqual(s.player.open.video, { codec: 'h264', w: 192, h: 108 });
+        assert.strictEqual(s.player.open.audio.codec, 'aac');
+        assert.strictEqual(s.player.audio.ok, true);
+        await until(() => reports('/Sessions/Playing/Stopped').length, 10000, 'played to the end');
+        const stopped = reports('/Sessions/Playing/Stopped')[0].body;
+        assert.ok(stopped.PositionTicks >= 25000000, 'played about 3 s: ' + stopped.PositionTicks);
+        s = await statusUntil(svc.sock, (x) => x.playback.state === 'idle' && !x.player.running, 5000, 'idle');
+        assert.ok(s.player.end && s.player.end.shown >= 40, 'pictures timed: ' + JSON.stringify(s.player.end));
+        const head = fs.readFileSync(wav);
+        assert.strictEqual(head.toString('ascii', 0, 4), 'RIFF');
+        const seconds = head.readUInt32LE(40) / (48000 * 4);
+        assert.ok(seconds > 2.5 && seconds < 3.3, 'sound played: ' + seconds + ' s');
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 
 test('a revoked token: signed out, with the reason', async () => {

@@ -3,27 +3,40 @@
  * Emby - the head unit as a cast target for the Emby phone app.
  *
  * The screen of the Emby cast service (native/aurelm-emby, a root tool with its client on mgu-uplink):
- *   "Sign in"   opens the sign-in page on the car Wi-Fi for 10 minutes; its QR code shows here. The phone
- *               (on the car Wi-Fi for wireless CarPlay) scans it, and the owner signs in with their Emby
- *               account once. Only the access token is kept.
- *   "Sign out"  tells the server, forgets the token.
+ *   "Sign in"       opens the sign-in page on the car Wi-Fi for 10 minutes; its QR code shows here. The phone
+ *                   (on the car Wi-Fi for wireless CarPlay) scans it, and the owner signs in with their Emby
+ *                   account once. Only the access token is kept.
+ *   "Sign out"      tells the server, forgets the token.
+ *   "Show picture"  the film over the screen again, after the controller hid it
+ *   "Stop"          ends the film (as Stop in the phone's remote)
  * Signed in, the service stays connected to the Emby server, and the head unit shows as "BMW iDrive" in the
- * Emby app's cast menu. Step 1: what the phone sends (the film, its streams, pause / seek / stop) shows here;
- * playback comes next.
+ * Emby app's cast menu. A film cast to it plays (step 2): the service's player decodes it on the GPU into
+ * mgu-render's frame file; this app shows it over the whole screen while the car is parked (mirror_view.js,
+ * AirPlay Test's) and routes its sound to the speakers (car_audio.js, AirPlay Test's with two more checks: both
+ * apps play into source 287 and never take it from each other). Pause, seek, stop and volume come from the phone.
  *
  * Talks to the service over /run/aurelm-emby.sock (a JSON object per line).
  */
 const net = require('net');
+const fs = require('fs');
+const path = require('path');
 const mgu = require('./kit/mgu');
 const { withAlpha } = require('./kit/canvas');
 const G = require('./kit/gauges');
+const record = require('./kit/record');
+const Parked = require('./kit/parked');
 const qrcode = require('./qrcode');
+const { RenderClient } = require('./mgu_render_client');
+const { createMirrorView } = require('./mirror_view');
+const { createCarAudio } = require('./car_audio');
 
 const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.1.0';
+const SERVICE_VERSION = '0.2.0';
+// what plays (the service's playback state): the picture and the speakers are wanted
+const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#52b54b', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -85,12 +98,42 @@ function steps(s) {
             : cs === 'connecting' || cs === 'starting' ? 'connecting...' : (c.error || cs || '') + (c.reconnects ? ' (' + c.reconnects + ' reconnects)' : '') });
     rows.push({ label: 'Cast target', state: cs === 'connected' ? 'ok' : 'off',
         detail: cs === 'connected' ? 'in the Emby app: cast button > "' + s.device + '"' : 'once connected' });
-    rows.push({ label: 'Last cast', state: s.play ? 'ok' : 'off', detail: s.play ? castText(s.play) + ' (' + ago(s.play.at, s.now) + ')' : 'none yet' });
+    const pb = s.playback;
+    if (pb && (ACTIVE.indexOf(pb.state) >= 0 || pb.state === 'error')) playRows(s, rows);
+    else rows.push({ label: 'Last cast', state: s.play ? 'ok' : 'off', detail: s.play ? castText(s.play) + ' (' + ago(s.play.at, s.now) + ')' : 'none yet' });
     const ctl = [s.playstate && s.playstate.at ? { t: s.playstate.at, text: s.playstate.command + (s.playstate.seek != null ? ' to ' + hms(s.playstate.seek) : '') } : null,
         s.command && s.command.at ? { t: s.command.at, text: s.command.name + (s.command.args && s.command.args.Volume != null ? ' ' + s.command.args.Volume : '') } : null]
         .filter(Boolean).sort((a, b) => b.t - a.t)[0];
     rows.push({ label: 'Remote', state: ctl ? 'ok' : 'off', detail: ctl ? ctl.text + ' (' + ago(ctl.t, s.now) + ')' : 'pause, seek and stop from the phone show here' });
     return rows;
+}
+
+/** a film playing: what, where, the picture, the sound */
+function playRows(s, rows) {
+    const pb = s.playback, pl = s.player || {}, tk = pl.tick || {};
+    const it = pb.item || {};
+    const where = hms(pb.pos) + (pb.dur ? ' / ' + hms(pb.dur) : '');
+    const STATE = { loading: 'starting', playing: 'playing', paused: 'paused', buffering: 'buffering (the internet is slow)' };
+    rows.push({ label: 'Playing', state: pb.state === 'error' ? 'bad' : pb.state === 'playing' || pb.state === 'paused' ? 'ok' : 'wait',
+        detail: (it.title || '?') + ' - ' + (pb.state === 'error' ? pb.error : STATE[pb.state] + ', ' + where) +
+            (pb.playMethod ? ' (' + (pb.playMethod === 'Transcode' ? 'the server converts it' : 'as it is') + ')' : '') });
+    const d = pl.decoder, open = pl.open && pl.open.video;
+    const v = s.mirror || {};
+    rows.push({ label: 'Picture', state: !open ? (pb.state === 'error' ? 'off' : 'wait') : d && !d.ok ? 'bad' : v.shown ? 'ok' : 'wait',
+        detail: !open ? (pl.open ? 'no picture in the stream' : 'waiting for the stream')
+            : (d && !d.ok ? 'GPU decoder: ' + d.error : 'H.264 ' + open.w + 'x' + open.h + ', ' + (tk.shown || 0) + ' shown' + (tk.late ? ', ' + tk.late + ' late' : '') +
+                (v.why ? '; ' + v.why : '')) });
+    const a = pl.audio, ca = s.carAudio || {};
+    let snd;
+    if (!a) snd = { state: 'wait', detail: 'waiting for the stream' };
+    else if (!a.ok) snd = { state: 'bad', detail: a.error };
+    else {
+        const n = String(a.codec).toUpperCase() + ' ' + a.channels + 'ch' + (tk.aplayed ? ', ' + tk.aplayed + ' played' : '') + (tk.aunread ? ', ' + tk.aunread + ' unread' : '');
+        if (ca.taken) snd = { state: 'bad', detail: n + '; the speakers are in use by AirPlay Test: stop it there' };
+        else if (ca.error) snd = { state: 'bad', detail: n + '; route: ' + ca.error };
+        else snd = { state: ca.connected ? 'ok' : 'wait', detail: n + (ca.connected ? ', on the speakers' : ', connecting the speakers') + (pb.muted ? ', muted' : pb.volume < 100 ? ', volume ' + pb.volume + '%' : '') };
+    }
+    rows.push(Object.assign({ label: 'Sound' }, snd));
 }
 
 /** the QR code's dark modules for `text`: { n, dark(r, c) } */
@@ -122,9 +165,9 @@ mgu.run({
                 }
             } finally { polling = false; }
         }
-        async function command(cmd, label) {
+        async function command(cmd, label, extra) {
             busy = label;
-            const r = await ask(cmd);
+            const r = await ask(cmd, extra);
             busy = null;
             if (r) st = r;
             log.info('emby: ' + cmd + ' -> ' + (r ? (r.client && r.client.state) : 'no service'));
@@ -132,6 +175,30 @@ mgu.run({
         }
         ui.onClick('BTN_SIGNIN', () => command('signin-open', 'Opening the sign-in page...'));
         ui.onClick('BTN_SIGNOUT', () => command('signout', 'Signing out...'));
+        ui.onClick('BTN_SHOW', () => { mirror.wantAgain(); sync(); return render(); });
+        ui.onClick('BTN_STOP', () => command('playstate', 'Stopping...', { command: 'Stop' }));
+
+        /* ---------- the film: the picture over the screen (parked only), the sound on the speakers ---------- */
+        const parked = Parked.watch(ctx, log, { strict: true });
+        const mirror = createMirrorView({ RenderClient, Recorder: record.Recorder, kit: record, appId: ctx.spec.id, log,
+            hintText: 'Press a button on the iDrive controller to return',
+            statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
+        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
+        /** the player as the mirror view knows a receiver: running, its decoder, pictures shown */
+        function rxOf(s) {
+            const pb = s && s.playback, pl = s && s.player;
+            if (!pb || ACTIVE.indexOf(pb.state) < 0 || !pl || !pl.running) return null;
+            const d = pl.decoder;
+            return { running: true, videoRunning: true, stream: { shown: pl.tick ? pl.tick.shown : 0 },
+                decoder: d ? { ok: d.ok, error: d.error, path: d.path || pl.videoPath, w: d.w, h: d.h } : null };
+        }
+        function sync() {
+            const pb = st && st.playback;
+            mirror.update({ rx: rxOf(st), pageVisible: shown(), driving: parked.moving() });
+            // the speakers while a film is on (paused too: the route is not taken and given back at each pause)
+            carAudio.want(!!(pb && ACTIVE.indexOf(pb.state) >= 0 && st.player && st.player.audio && st.player.audio.ok));
+        }
+        if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => { mirror.close(); carAudio.want(false); });
 
         function render() {
             const t = ctx.theme();
@@ -143,11 +210,13 @@ mgu.run({
         }
 
         function draw(cv, t, page) {
+            if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); }
             const rows = steps(st);
             const COL = { ok: GREEN, wait: AMBER, bad: RED, off: withAlpha('#ffffff', 0.3) };
             const textW = page ? 860 : 1180;
+            const rowH = rows.length > 7 ? 40 : 52;   // a film's rows fit above the log
             rows.forEach((r, i) => {
-                const y = 96 + i * 52;
+                const y = 96 + i * rowH;
                 cv.circle(44, y - 8, 10, COL[r.state]);
                 cv.text(r.label, 68, y, 24, t.text, { font: 'bold', literal: true });
                 cv.text(clip(cv, r.detail || '', 22, textW, 'label'), 250, y, 22, r.state === 'off' ? t.dim : t.text, { literal: true });
@@ -177,13 +246,20 @@ mgu.run({
             cv.text(clip(cv, page.url, 16, box + 40, 'label'), x0 + box / 2, oy + size + 60, 16, t.dim, { align: 'center', literal: true });
         }
 
-        // only while the page shows: in the background the app leaves the service alone
+        // while the page shows; in the background only while a film is on (its sound route, its picture hidden)
         function shown() { return !ui.isVisible || ui.isVisible('MAIN'); }
-        setInterval(() => { if (shown()) poll().catch(() => {}); }, 1000);
+        let tick = 0;
+        setInterval(() => {
+            tick++;
+            const on = st && st.playback && ACTIVE.indexOf(st.playback.state) >= 0;
+            if (shown() || (on && tick % 2 === 0)) poll().catch(() => {});
+            sync();
+        }, 1000);
+        if (ui.onVisible) ui.onVisible(() => sync());
         await poll();
         ctx.loop('MAIN', 2, render);
         render().then(() => log.info('Emby first frame done')).catch((e) => log.warn('first render: ' + e));
     },
 });
 
-module.exports = { steps, castText, qr, ask };
+module.exports = { steps, castText, qr, ask, ACTIVE };

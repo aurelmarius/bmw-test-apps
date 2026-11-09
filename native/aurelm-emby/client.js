@@ -5,11 +5,19 @@
  * parent over IPC, and everything it learns goes back the same way.
  *
  *   parent -> { op: 'run', account } | { op: 'signin', id, server, user, password } | { op: 'signout' } | { op: 'stop' }
+ *             | { op: 'player', id, ev } (the player's events) | { op: 'playback-stop' } | { op: 'playstate', command }
  *   child  -> { ev: 'status', status } | { ev: 'signin', id, ok, account | error } | { ev: 'play' | 'playstate' |
  *             'command', data } | { ev: 'signed-out', why } | { ev: 'log', line }
+ *             | { ev: 'playback', status } | { ev: 'player-start', id } | { ev: 'player-ctl', id, line } | { ev: 'player-stop', id }
+ *
+ * The film's stream goes to the parent on fd 4 (the parent hands it to emby-player's stdin), in frames: a stream
+ * id (u32 LE), a length (u32 LE; 0xffffffff: that stream ended), the bytes. A stream left (a seek) can still have
+ * bytes in the pipe: the parent drops what is not the current stream's.
  */
+const net = require('net');
 const { createNet } = require('./netx');
 const { createClient } = require('./emby');
+const { createPlayback } = require('./playback');
 
 const send = (m) => { try { if (process.connected) process.send(m); } catch (e) { /* the parent is gone */ } };
 const log = (line) => send({ ev: 'log', line });
@@ -18,17 +26,46 @@ const nx = createNet({ leasePath: process.env.EMBY_LEASE || undefined, systemDns
 const device = { id: process.env.EMBY_DEVICE_ID || 'aurelm-emby-unknown', name: process.env.EMBY_DEVICE_NAME || 'BMW iDrive' };
 const c = createClient({ nx, device, version: process.env.EMBY_VERSION || '0.0.0', log });
 
+/* ---------- the stream to the parent (fd 4) ---------- */
+let pipe = null;
+try { pipe = new net.Socket({ fd: 4, readable: false, writable: true }); pipe.on('error', (e) => log('stream pipe: ' + e.message)); }
+catch (e) { log('no stream pipe: ' + e.message); }
+function frame(id, len) { const h = Buffer.alloc(8); h.writeUInt32LE(id >>> 0, 0); h.writeUInt32LE(len >>> 0, 4); return h; }
+const sink = {
+    start(id) { send({ ev: 'player-start', id }); },
+    data(id, buf) { if (!pipe) return true; pipe.write(frame(id, buf.length)); return pipe.write(buf); },
+    end(id) { if (pipe) pipe.write(frame(id, 0xffffffff)); },
+    drain(id, fn) { if (pipe) pipe.once('drain', fn); else fn(); },
+    ctl(id, line) { send({ ev: 'player-ctl', id, line }); },
+    stop(id) { send({ ev: 'player-stop', id }); },
+};
+
+const pb = createPlayback({
+    api: (m, p, b) => c.call(m, p, b), nx, account: () => c.account(), device, log, sink, describe: c.describe,
+    bitrate: Number(process.env.EMBY_BITRATE) || undefined,
+});
+let lastSent = '';
+function playbackStatus() {
+    const s = pb.status();
+    const j = JSON.stringify(s);
+    if (j !== lastSent) { lastSent = j; send({ ev: 'playback', status: s }); }
+}
+setInterval(playbackStatus, 1000);
+
 c.on('status', (status) => send({ ev: 'status', status }));
-c.on('play', (data) => send({ ev: 'play', data }));
-c.on('playstate', (data) => send({ ev: 'playstate', data }));
-c.on('command', (data) => send({ ev: 'command', data }));
-c.on('signed-out', (why) => send({ ev: 'signed-out', why }));
+c.on('play', (data) => { send({ ev: 'play', data }); pb.play(data); playbackStatus(); });
+c.on('playstate', (data) => { send({ ev: 'playstate', data }); pb.playstate(data); playbackStatus(); });
+c.on('command', (data) => { send({ ev: 'command', data }); pb.command(data); playbackStatus(); });
+c.on('signed-out', (why) => { pb.stop(); send({ ev: 'signed-out', why }); });
 
 process.on('message', (m) => {
     if (!m || typeof m !== 'object') return;
     if (m.op === 'run') c.run(m.account);
-    else if (m.op === 'stop') c.stop();
-    else if (m.op === 'signout') c.signOut().then(() => send({ ev: 'signed-out', why: 'signed out' }));
+    else if (m.op === 'stop') { pb.stop(); c.stop(); }
+    else if (m.op === 'player') { pb.onPlayer(m.id, m.ev); if (m.ev && m.ev.ev !== 'tick') playbackStatus(); }
+    else if (m.op === 'playback-stop') { pb.stop(); playbackStatus(); }
+    else if (m.op === 'playstate') { pb.playstate({ command: m.command }); playbackStatus(); }
+    else if (m.op === 'signout') { pb.stop(); c.signOut().then(() => send({ ev: 'signed-out', why: 'signed out' })); }
     else if (m.op === 'signin') {
         c.signIn(m.server, m.user, m.password)
             .then((account) => send({ ev: 'signin', id: m.id, ok: true, account }))
@@ -36,5 +73,5 @@ process.on('message', (m) => {
     }
 });
 // the parent went: so do we
-process.on('disconnect', () => { c.stop(); process.exit(0); });
+process.on('disconnect', () => { pb.stop(); c.stop(); process.exit(0); });
 send({ ev: 'ready', uid: process.getuid ? process.getuid() : null });

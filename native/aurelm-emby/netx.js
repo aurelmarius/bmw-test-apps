@@ -10,6 +10,7 @@
  *   const nx = createNet({ leasePath, caPath });
  *   nx.socket({ host, port, tls })   -> net.Socket / tls.TLSSocket ('connect' / 'secureConnect')
  *   nx.request({ method, url, headers, body, timeoutMs }) -> Promise<{ status, headers, body (Buffer) }>
+ *   nx.stream({ url, headers, timeoutMs })                 -> Promise<{ status, headers, res, abort }> (a film)
  *   nx.online()                       -> the lease, or null
  */
 const fs = require('fs');
@@ -101,7 +102,42 @@ function createNet(o) {
         });
     }
 
-    return { socket, request, online, lookup };
+    /**
+     * A long download (a film's stream): resolves with { status, headers, res, abort } once the answer's head
+     * came; the body is res's to read (paused while the reader is behind: TCP holds the server back). A
+     * redirect is followed (3 at most). timeoutMs: the head's wait (the body has none: a paused film holds it back).
+     */
+    function stream(r, hops) {
+        return new Promise((resolve, reject) => {
+            const u = url.parse(r.url);
+            const isTls = u.protocol === 'https:';
+            let done = false;
+            const fail = (e) => { if (!done) { done = true; reject(e); } };
+            const req = http.request({
+                method: 'GET', host: u.hostname, port: Number(u.port) || (isTls ? 443 : 80), path: u.path, headers: r.headers || {},
+                createConnection: () => socket({ host: u.hostname, port: Number(u.port) || (isTls ? 443 : 80), tls: isTls }),
+            }, (res) => {
+                const loc = res.headers.location;
+                if (res.statusCode >= 300 && res.statusCode < 400 && loc && (hops || 0) < 3) {
+                    res.resume(); done = true;
+                    return stream(Object.assign({}, r, { url: url.resolve(r.url, loc) }), (hops || 0) + 1).then(resolve, reject);
+                }
+                done = true;
+                // the head came: from now on a silence is the reader's to judge (a paused film holds the body back)
+                req.setTimeout(0);
+                resolve({ status: res.statusCode, headers: res.headers, res, abort: () => { try { req.abort(); } catch (e) { /* gone */ } } });
+            });
+            req.setTimeout(r.timeoutMs || 30000, () => {
+                const e = Object.assign(new Error('the server did not answer in time'), { code: 'ETIMEDOUT' });
+                if (!done) fail(e);
+                req.abort();
+            });
+            req.on('error', fail);
+            req.end();
+        });
+    }
+
+    return { socket, request, stream, online, lookup };
 }
 
 module.exports = { createNet, LEASE };

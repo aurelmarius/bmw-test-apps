@@ -1,10 +1,10 @@
 {
   "id": "aurelm-emby",
   "kind": "tool",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "GPL-3.0-or-later",
   "title": "Emby cast service",
-  "description": "For the app Emby: the head unit as a cast target in the Emby phone app (Emby's remote control, as Kodi's Emby add-on). Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code); keeps only the access token. Its internet goes through mgu-uplink, as uid 13101 only.",
+  "description": "For the app Emby: the head unit as a cast target in the Emby phone app (Emby's remote control, as Kodi's Emby add-on), and the film's player: the server sends H.264 up to 1080p with AAC or AC-3, decoded on the GPU into mgu-render's frame file (the app shows it while parked) and played into SmartXbar's CarLife input. Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code); keeps only the access token. Its internet goes through mgu-uplink, as uid 13101 only; the player runs as uid 13101 too.",
   "requires": {
     "mgu-deploy": "0.7.0",
     "mgu-uplink": "0.7.0"
@@ -29,6 +29,10 @@
     { "path": "check.js", "from": "check.js", "mode": "0644" },
     { "path": "cleanup.js", "from": "cleanup.js", "mode": "0644" },
     { "path": "cacert.pem", "from": "cacert.pem", "mode": "0644" },
+    { "path": "playback.js", "from": "playback.js", "mode": "0644" },
+    { "path": "player.js", "from": "player.js", "mode": "0644" },
+    { "path": "emby-player", "from": "../emby-player/build/emby-player", "mode": "0755" },
+    { "path": "FFMPEG-LICENSE", "from": "../emby-player/build/FFMPEG-LICENSE", "mode": "0644" },
     { "path": "README.md", "from": "README.md", "mode": "0644" }
   ],
   "check": [
@@ -37,6 +41,9 @@
   "deactivate": [
     "node",
     "cleanup.js"
+  ],
+  "crashNames": [
+    "emby-player"
   ],
   "units": [
     { "name": "aurelm-emby.socket", "from": "systemd/aurelm-emby.socket" },

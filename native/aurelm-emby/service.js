@@ -7,7 +7,9 @@
  * ends 10 minutes after the last request.
  *
  *   client.js     the Emby client, a child running as the tool's internet uid (mgu-uplink routes it, never
- *                 root): the server's WebSocket, the cast commands
+ *                 root): the server's WebSocket, the cast commands, what plays (playback.js) and its stream
+ *   emby-player   the film (player.js): started here as root for its frame file, it runs as the tool's uid with
+ *                 the groups video and mgu_alsa; the stream comes from the client through this process
  *   sign-in page  while the app asks for it (10 minutes): an HTTP page on the car Wi-Fi (the phone, which is
  *                 on it for wireless CarPlay, opens it from the QR code), and one accept rule per chain for
  *                 its port on the car Wi-Fi's interfaces (nft.js); both go when it closes
@@ -15,7 +17,7 @@
  *                 user, access token; 0600; no password)
  *
  * Control: one JSON object per line: {"cmd":"status"}, {"cmd":"signin-open"}, {"cmd":"signin-close"},
- * {"cmd":"signout"}, {"cmd":"exit"}; the reply is the status.
+ * {"cmd":"signout"}, {"cmd":"playstate","command":"PlayPause"|"Stop"}, {"cmd":"exit"}; the reply is the status.
  */
 const fs = require('fs');
 const os = require('os');
@@ -27,8 +29,9 @@ const qs = require('querystring');
 const { fork } = require('child_process');
 const nftm = require('./nft');
 const pagem = require('./page');
+const { createPlayer } = require('./player');
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const PAGE_PORT = 8490;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -45,6 +48,9 @@ function createService(opts) {
         leasePath: process.env.EMBY_LEASE || '/run/mgu-uplink/lease.json',
         now: Date.now,
         childEnv: {},
+        playerBin: process.env.EMBY_PLAYER || path.join(__dirname, 'emby-player'),
+        playerEnv: {},
+        videoPath: undefined,
     }, opts || {});
     const now = o.now;
     const lines = [];
@@ -73,8 +79,12 @@ function createService(opts) {
 
     const st = {
         version: VERSION, client: { state: account ? 'starting' : 'signed-out' }, page: { open: false },
-        play: null, playstate: null, command: null, lastSignIn: null, error: null,
+        play: null, playstate: null, command: null, lastSignIn: null, error: null, playback: null,
     };
+
+    /* ---------- the player (root: its frame file; it runs as the tool's uid) ---------- */
+    const player = createPlayer({ bin: o.playerBin, uid: o.uid, env: o.playerEnv, videoPath: o.videoPath, log,
+        onEvent: (id, ev) => toChild({ op: 'player', id, ev }) });
 
     /* ---------- the client (internet uid) ---------- */
     let child = null, childStarts = 0, signinWait = {};
@@ -83,18 +93,22 @@ function createService(opts) {
         childStarts++;
         const env = Object.assign({ PATH: process.env.PATH || '/usr/bin:/bin', EMBY_DEVICE_ID: device.id, EMBY_DEVICE_NAME: device.name,
             EMBY_VERSION: VERSION, EMBY_LEASE: o.leasePath }, o.childEnv);
-        const fopts = { env, stdio: ['ignore', 'inherit', 'inherit', 'ipc'] };
+        // fd 4: the film's stream, from the client to the player (player.js)
+        const fopts = { env, stdio: ['ignore', 'inherit', 'inherit', 'ipc', 'pipe'] };
         if (o.uid !== null) { fopts.uid = o.uid; fopts.gid = o.uid; }
         let c;
         try { c = fork(path.join(__dirname, 'client.js'), [], fopts); }
         catch (e) { st.error = 'the Emby client did not start: ' + e.message; log(st.error); return; }
         child = c;
+        if (c.stdio[4]) player.attach(c.stdio[4]);
         c.on('message', onChild);
         c.on('error', (e) => log('client: ' + e.message));
         c.on('exit', (code, sig) => {
             if (child !== c) return;
             child = null;
             Object.keys(signinWait).forEach((id) => { signinWait[id]({ ok: false, error: 'the Emby client ended' }); delete signinWait[id]; });
+            player.stopAll();
+            st.playback = null;
             if (stopping) return;
             log('client ended (' + (sig || code) + ')' + (childStarts < 20 ? ', starting it again in 5 s' : ''));
             st.client = { state: 'error', error: 'the Emby client ended' };
@@ -110,6 +124,10 @@ function createService(opts) {
         else if (m.ev === 'play') { st.play = m.data; st.playstate = null; }
         else if (m.ev === 'playstate') st.playstate = m.data;
         else if (m.ev === 'command') st.command = m.data;
+        else if (m.ev === 'playback') st.playback = m.status;
+        else if (m.ev === 'player-start') player.start(m.id);
+        else if (m.ev === 'player-ctl') player.ctl(m.id, m.line);
+        else if (m.ev === 'player-stop') player.stop(m.id);
         else if (m.ev === 'signed-out') {
             if (account) log('signed out: ' + m.why);
             account = null;
@@ -218,7 +236,7 @@ function createService(opts) {
     }
     function status() {
         return Object.assign({}, st, {
-            now: now(), device: device.name, uplink: uplink(),
+            now: now(), device: device.name, uplink: uplink(), player: player.state(),
             account: account ? { server: account.server, userName: account.userName, serverName: account.serverName, serverVersion: account.serverVersion } : null,
             page: Object.assign({}, st.page, st.page.open ? { url: pageUrl(), left: Math.max(0, Math.round((st.page.until - now()) / 1000)) } : {}),
             log: lines.slice(-14),
@@ -235,9 +253,11 @@ function createService(opts) {
                 toChild({ op: 'signout' });
                 account = null;
                 try { fs.unlinkSync(file('account.json')); } catch (e) { /* none */ }
-                st.play = st.playstate = st.command = null;
+                st.play = st.playstate = st.command = st.playback = null;
                 st.client = { state: 'signed-out' };
             }
+        } else if (cmd === 'playstate' && m.command) {
+            toChild({ op: 'playstate', command: String(m.command) });
         } else if (cmd === 'exit') { setTimeout(() => stop(0), 100); }
         return status();
     }
@@ -274,6 +294,7 @@ function createService(opts) {
         stopping = true;
         clearInterval(idleTimer);
         closePage();
+        player.killSync();
         if (child) { try { child.kill('SIGTERM'); } catch (e) { /* gone */ } }
         if (o.exit !== false) setTimeout(() => process.exit(code || 0), 200);
     }

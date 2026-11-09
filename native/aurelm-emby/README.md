@@ -8,16 +8,34 @@ arrives as `Play` (item ids, start position), pause / seek / stop as `Playstate`
 `GeneralCommand`. The phone only sends the command, through the server: it does not connect to the head
 unit, and wireless CarPlay stays as it is.
 
-**Step 1 (0.1.x):** the connection and the commands; the app shows what was sent (the film, its video
-and audio streams, the start position). Playback (the stream from the server, the GPU decoder and the
-car's speakers of AirPlay Test) comes next.
+**Step 1 (0.1.x):** the connection and the commands. **Step 2 (0.2.x): playback.** A film cast to the head
+unit plays. The picture shows on the centre screen while the car is parked, and the sound goes to the car's
+speakers. Pause, seek, stop, volume, the audio and subtitle tracks and the queue all come from the phone, which
+shows the position as for any Emby player.
+
+## Playback
+
+| Step | Where |
+|---|---|
+| `Play` (item ids, start, tracks) | `playback.js`, in the client (uid 13101) |
+| `Items/{id}/PlaybackInfo` with our profile | the server keeps what fits as it is and transcodes the rest to **H.264** up to 1920x1080 (8 bits, progressive, square pixels) with **AAC or AC-3** (up to 6 channels), always as **MPEG-TS** over HTTP(S), from `StartTimeTicks`. Chosen subtitles are burned into the picture. Bit rate 8 Mbit/s at most. |
+| the stream | fetched by the client through `netx.js` (the uplink's DNS, our CA list). It goes to the service on the client's fd 4, in frames (stream id, length), and to `emby-player`'s stdin (`player.js`), with the pipes' backpressure: a paused film holds the server's socket. |
+| the player | `native/emby-player` (see its README): started as root for its frame file, then uid 13101 with the groups `video` and `mgu_alsa`. The GPU decodes into `/dev/shm/mgu-video-aurelm-emby`, and the sound goes into `plug:smartx:CarLifeMedia_CF_48_STEREO`. |
+| on the screen | the app (`apps/aurelm_emby`): AirPlay Test's `mirror_view.js` over the whole screen, **only while parked** (`parked.js` strict). A button of the iDrive controller hides it, and "Show picture" brings it back. |
+| on the speakers | the app routes source 287 to the speakers (`car_audio.js`) while a film is on, paused included. 287 is shared with AirPlay Test: each app disconnects only the connection whose number it saved, neither connects over the other's, and the source is marked unavailable only when 287 is empty. A number saved before a restart of the head unit is forgotten, never disconnected. |
+| reports | `Sessions/Playing` at the start, `/Progress` every 10 s and at pause, unpause and volume, `/Stopped` at the end. The transcode is stopped (`DELETE Videos/ActiveEncodings`) when its stream is left. |
+
+A seek, another audio or subtitle track, or a lost connection (3 tries from the position) is a new stream and a
+new player. The end of a film plays the next one in the queue. The app must have been opened once since the head
+unit started, because the sound's route and the picture are the app's.
 
 ## How it runs
 
 | Part | Runs as | Does |
 |---|---|---|
 | `service.js` | root | the app's control socket, the sign-in page, the state; starts `client.js` |
-| `client.js` (`emby.js`, `ws.js`, `netx.js`) | uid 13101 | the Emby client: HTTPS API and WebSocket to the server |
+| `client.js` (`emby.js`, `ws.js`, `netx.js`, `playback.js`) | uid 13101 | the Emby client: HTTPS API and WebSocket to the server; what plays, its stream, the reports |
+| `emby-player` (`player.js` starts it) | root, then uid 13101 | the film: MPEG-TS in, the picture on the GPU, the sound into SmartXbar |
 
 **Internet.** mgu-uplink routes only the uids a tool lists (`component.json` `"internet": true`,
 `"uids": [13101]`; the deploy tool writes `/var/opt/mgu-uplink/uids.d/aurelm-emby`), never root. So the
@@ -47,6 +65,8 @@ accepts (signed out on the server, user removed) signs it out, and the app says 
 | `/var/opt/aurelm-emby/` (versions, `state/`: `device.json`, `account.json` with the token, 0600) | the deploy tool's uninstall |
 | `aurelm-emby.socket`, `.service`, the `sockets.target` link, the recmgr name, `uplink uids.d/aurelm-emby` | the deploy tool's uninstall |
 | `/run/aurelm-emby.sock` | the socket's stop (`RemoveOnStop=yes`) |
+| `/dev/shm/mgu-video-aurelm-emby` (the player's frame file) | the player's end (`player.js`); `cleanup.js` (the service's stop, a crash, an uninstall); a reboot |
+| the route of source 287 to the speakers | the app, when the film ends; its own connection left by a crash, at the app's next start (the same boot); a reboot |
 | the session on the Emby server | "Sign out" in the app (`Sessions/Logout`); otherwise the server's Devices page |
 
 ## Head-unit safety
@@ -55,11 +75,16 @@ As AirPlay Test's service (`native/aurelm-airplay-probe/README.md`): `LimitCORE=
 (no core dump to the crash handler), every `nft` through `sh -c 'ulimit -c 1; exec nft ...'`, recmgr
 lists `aurelm-emby`, a start limit (10 in 10 minutes), Node 8.9.4 JavaScript only, nothing written
 outside `/var/opt/aurelm-emby`, the control socket in the Emby app's own group (`sockgroup.js`), never
-`tm_oap_app`. Bounded: nice 10, idle I/O, 50% of a core, 128 MiB, 32 tasks.
+`tm_oap_app`. Bounded: nice 10, idle I/O, 2 cores at most (the player: AirPlay Test's receiver stuttered at 50%),
+256 MiB, 48 tasks. `emby-player` runs with the same limits (it is the service's child) and is listed in
+`crashNames`.
 
 ## Control
 
 One JSON object per line on `/run/aurelm-emby.sock`: `{"cmd":"status"}`, `{"cmd":"signin-open"}`,
-`{"cmd":"signin-close"}`, `{"cmd":"signout"}`, `{"cmd":"exit"}`; the reply is the status.
+`{"cmd":"signin-close"}`, `{"cmd":"signout"}`, `{"cmd":"playstate","command":"Stop"}` (also `PlayPause`),
+`{"cmd":"exit"}`; the reply is the status (with `playback` and `player`).
 
-Tests: `node tests/emby_service.test.js` (a fake Emby server; also on Node 8.9.4).
+Tests: `node tests/emby_service.test.js` (a fake Emby server: sign-in, cast, PlaybackInfo, the stream through the
+service to a stand-in player and to `emby-player` itself when it is built, pause, seek, volume, stop, the queue)
+and `node tests/emby_car_audio.test.js` (the speakers' route against a fake audio manager); also on Node 8.9.4.

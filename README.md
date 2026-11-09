@@ -48,15 +48,19 @@ The app and its root service announce a test receiver, **BMW iDrive test**, on t
 ### 🎬 Emby (`aurelm_emby`) + Emby cast service (`aurelm-emby`)
 *The head unit as a cast target for the Emby phone app, as Emby's TV apps and Kodi's Emby add-on are.*
 
-**Status:** step 1, the connection and the commands. Playback comes next.
+**Status:** step 2, playback (0.2.0). Step 1 (the connection and the commands) worked in the car. Not tested in the car yet: the picture on the GPU, the sound, the reports.
 
 The service signs in once with your Emby account and stays connected to your Emby server, so **BMW iDrive** shows in the Emby app's cast menu. The phone only sends the command through the server: it does not connect to the head unit, and wireless CarPlay stays connected. The server must be reachable from the internet; the head unit gets there through **mgu-uplink**, as its own uid only.
 
 1. Install **Emby**: the Store installs the **Emby cast service** first. **Restart the head unit once** after installing.
 2. Open **Emby** on the iDrive and press **Sign in**: a QR code shows. Scan it with the iPhone (connected to the car with wireless CarPlay), enter the server's address, the user and the password. Only the access token is kept, never the password.
-3. In the Emby app on the iPhone: play a film, tap the cast button, choose **BMW iDrive**. The iDrive page shows the film, its video and audio streams, and the pause / seek / stop commands.
+3. **Open the Emby app on the iDrive once** (it routes the sound to the speakers and shows the picture). In the Emby app on the iPhone: play a film, tap the cast button, choose **BMW iDrive**.
+4. The film plays **over the whole centre screen while the car is parked**, with its sound on the car's speakers. Driving, the picture hides and the sound goes on. A button of the iDrive controller hides the picture, and **Show picture** brings it back. Pause, seek, volume, the audio and subtitle tracks and the next episode all come from the phone, which shows the position. **Stop** ends the film from the iDrive too.
+5. The server sends what fits as it is (H.264 up to 1080p with AAC or AC-3) and converts the rest (HEVC, 4K, HDR, DTS, E-AC-3, chosen subtitles), at 8 Mbit/s at most. If something does not work, the page says where it stopped (**Playing**, **Picture**, **Sound**): take a photo of it.
 
-Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md).
+AirPlay Test and Emby share the car's speakers' input: the one playing keeps it, and the other says so and waits.
+
+Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md), the player: [`native/emby-player/README.md`](native/emby-player/README.md).
 
 ## 🚀 Installation
 
