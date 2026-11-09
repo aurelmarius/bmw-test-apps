@@ -35,7 +35,7 @@ namespace {
 std::mutex g_mu;
 woc::Decoder *g_dec = nullptr;
 ytdec::Mgvf g_mgvf;
-bool g_open = false, g_failed = false, g_reported = false;
+bool g_open = false, g_failed = false, g_reported = false, g_file = false;
 unsigned long long g_shown = 0, g_errors = 0;
 uint32_t g_w = 1920, g_h = 720;
 std::string g_path = "/dev/shm/mgu-video-aurelm-airplay", g_err;
@@ -51,12 +51,16 @@ bool open_locked() {
     unsigned w = 0, h = 0;
     if (sz && sscanf(sz, "%ux%u", &w, &h) == 2 && w >= 16 && h >= 16 && w <= 2048 && h <= 2048) g_w = w & ~1u, g_h = h & ~1u;
     std::string err, warn;
-    if (!g_mgvf.open(g_path.c_str(), g_w, g_h, 3, &err, &warn)) { g_failed = true; g_err = "frame file: " + err; return false; }
+    if (!g_file) {
+        if (!g_mgvf.open(g_path.c_str(), g_w, g_h, 3, &err, &warn)) { g_failed = true; g_err = "frame file: " + err; return false; }
+        g_file = true;
+    }
     if (!g_dec) g_dec = new woc::Decoder();
     if (!g_dec->init("/dev/dri/renderD128", g_w, g_h, false, &err)) {
         g_failed = true;
         g_err = "decoder: " + err;
         g_mgvf.close();
+        g_file = false;
         return false;
     }
     g_open = true;
@@ -64,8 +68,10 @@ bool open_locked() {
 }
 }  // namespace
 
-extern "C" int mgu_video_frame(const unsigned char *data, int len, unsigned long long *shown, unsigned long long *errors) {
-    std::lock_guard<std::mutex> l(g_mu);
+/* one access unit; with `wait`, each decoded picture is held until wait(pts_ms) says (stage 4: a played stream's
+ * pictures at their time; wait returns 0 to show it, 1 to drop it, too late) */
+static int frame_locked(const unsigned char *data, int len, long long pts_ms, int (*wait)(long long, void *), void *arg,
+                        unsigned long long *shown, unsigned long long *errors) {
     int ret = 0;
     if (!open_locked()) {
         ret = g_reported ? 0 : -1;   /* -1 once: the caller reports mgu_video_error() */
@@ -74,16 +80,36 @@ extern "C" int mgu_video_frame(const unsigned char *data, int len, unsigned long
         std::string err;
         const bool ok = g_dec->feed(data, (size_t) len, [&](const woc::VideoFrame &f) {
             if (!f.y) return;
+            if (wait && wait(f.pts_ms, arg) != 0) return;
             ytdec::nv12_to_i420(f.y, f.uv, f.pitch, f.w, f.h, g_mgvf.begin());
             g_mgvf.commit();
             g_shown++;
-        }, &err, true, true, -1);
+        }, &err, true, true, wait ? (int64_t) pts_ms : -1);
         if (!ok) { g_errors++; if (g_errors <= 3 || g_errors % 100 == 0) fprintf(stderr, "mgu_video: %s\n", err.c_str()); }
         if (!g_reported) { g_reported = true; ret = 1; }   /* 1 once: opened */
     }
     if (shown) *shown = g_shown;
     if (errors) *errors = g_errors;
     return ret;
+}
+
+extern "C" int mgu_video_frame(const unsigned char *data, int len, unsigned long long *shown, unsigned long long *errors) {
+    std::lock_guard<std::mutex> l(g_mu);
+    return frame_locked(data, len, -1, nullptr, nullptr, shown, errors);
+}
+
+extern "C" int mgu_video_frame_timed(const unsigned char *data, int len, long long pts_ms, int (*wait)(long long, void *), void *arg,
+                                     unsigned long long *shown, unsigned long long *errors) {
+    std::lock_guard<std::mutex> l(g_mu);
+    return frame_locked(data, len, pts_ms, wait, arg, shown, errors);
+}
+
+/* a seek: the decoder starts again at the next SPS; the frame file and its last picture stay */
+extern "C" void mgu_video_reset(void) {
+    std::lock_guard<std::mutex> l(g_mu);
+    if (g_open && g_dec) g_dec->shutdown();
+    g_open = false;
+    g_failed = false;
 }
 
 /* the stream ended: the decoder is let go (a new stream starts at its first SPS); the file keeps the last
@@ -95,6 +121,7 @@ extern "C" void mgu_video_stop(void) {
     g_failed = false;
     g_reported = false;
     g_mgvf.close();
+    g_file = false;
 }
 
 /* at exit: no frame file left behind */
@@ -103,6 +130,7 @@ extern "C" void mgu_video_close(void) {
     if (g_dec) { g_dec->shutdown(); delete g_dec; g_dec = nullptr; }
     g_open = false;
     g_mgvf.close();
+    g_file = false;
     unlink(g_path.c_str());
 }
 

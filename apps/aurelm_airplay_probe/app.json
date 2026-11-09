@@ -1,8 +1,8 @@
 {
   "id": "aurelm_airplay_probe",
   "title": "AirPlay Test",
-  "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers. Also the network test. Needs the AirPlay test service.",
-  "version": "0.8.4",
+  "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers; videos sent with the AirPlay button (YouTube) played by the head unit itself. Also the network test. Needs the AirPlay test service.",
+  "version": "0.9.0",
   "vendor": "custom",
   "loggingId": "OA9X",
   "iconGlyph": "AP",
@@ -26,7 +26,7 @@
     }
   },
   "requires": {
-    "aurelm-airplay-probe": "0.8.2"
+    "aurelm-airplay-probe": "0.9.0"
   },
   "screens": [
     {
@@ -57,6 +57,12 @@
     {
       "key": "endOnLeave",
       "label": "End the iPhone's mirroring when leaving the app (CarPlay is free at once)",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "videoButton",
+      "label": "AirPlay video button (YouTube): the head unit plays the video itself (iOS ends CarPlay meanwhile)",
       "type": "bool",
       "default": true
     },

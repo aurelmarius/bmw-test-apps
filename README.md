@@ -43,6 +43,8 @@ The app and its root service announce a test receiver, **BMW iDrive test**, on t
 
 ---
 
+**AirPlay video button (0.9).** With the setting **AirPlay video button** (on by default), a video sent with the AirPlay button in YouTube is played by the head unit itself, from the internet (mgu-uplink): the picture through the same GPU decoder, the sound through the same speakers' route, pause and seek from the iPhone. iOS ends CarPlay while a video plays this way. Should mirroring during CarPlay stop working with the setting on, turn it off.
+
 ### 🎬 Emby (`aurelm_emby`) + Emby cast service (`aurelm-emby`)
 *The head unit as a cast target for the Emby phone app, as Emby's TV apps and Kodi's Emby add-on are.*
 

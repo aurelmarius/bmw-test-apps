@@ -425,6 +425,101 @@ test('receiver: the real uxplay-mgu runs, listens on 7301 and ends with the test
     } finally { await probe.stop('finally'); }
 });
 
+/* ---- stage 4: AirPlay's video button (the iPhone hands over an address), and the proxy ---- */
+function fakeVideoReceiver(dir) {
+    // what uxplay-mgu prints for YouTube through the video button: its arguments and environment, then the player's events
+    const f = path.join(dir, 'fake-uxplay-hls');
+    fs.writeFileSync(f, '#!' + process.execPath + '\n' + [
+        "const out = (j) => process.stdout.write('MGU ' + JSON.stringify(j) + '\\n');",
+        "console.log('args ' + process.argv.slice(2).join(' '));",
+        "console.log('env LANGUAGE=' + process.env.LANGUAGE + ' http_proxy=' + process.env.http_proxy + ' no_proxy=' + process.env.no_proxy + ' ca=' + process.env.MGU_CA_FILE);",
+        "setTimeout(() => out({ ev: 'client', model: 'iPhone18,2', name: 'Test iPhone' }), 100);",
+        "setTimeout(() => out({ ev: 'hls', url: 'http://localhost:7300/master.m3u8', start: 12.5 }), 150);",
+        "setTimeout(() => out({ ev: 'hlsopen', w: 1920, h: 1080, vcodec: 'h264', acodec: 'aac', rate: 44100, ch: 2, dur: 212.4, variants: 4, format: 'hls' }), 200);",
+        "setTimeout(() => { out({ ev: 'sound', ok: true, device: 'plug:smartx:CarLifeMedia_CF_48_STEREO', ct: 0 }); out({ ev: 'start' }); }, 220);",
+        "setTimeout(() => out({ ev: 'decoder', ok: true, path: process.env.MGU_VIDEO_PATH, w: 1920, h: 720 }), 260);",
+        "setTimeout(() => out({ ev: 'hlspos', pos: 13.7, dur: 212.4, paused: true, buffering: false }), 300);",
+        "setTimeout(() => out({ ev: 'hlsseek', to: 60, ok: true }), 320);",
+        "setTimeout(() => out({ ev: 'stats', frames: 90, fps: 30, kbps: 3800, idr: 2, sps: 2, audio: 120, shown: 88, decerr: 0 }), 340);",
+        "process.on('SIGTERM', () => { out({ ev: 'hlsend', why: 'stopped' }); out({ ev: 'soundstop' }); out({ ev: 'stop', frames: 0 }); process.exit(0); });",
+        "setInterval(() => {}, 1000);",
+    ].join('\n'));
+    fs.chmodSync(f, 0o755);
+    return f;
+}
+
+test('receiver with the video button: -hls and the H.264 filter, the proxy for its internet, the video reported', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rxhls-'));
+    fs.chmodSync(tmp, 0o755);
+    const port = await freePort();
+    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxBin: fakeVideoReceiver(tmp), rxUid: null, rxVideoPath: path.join(tmp, 'v'),
+        proxyUid: null, proxyPort: port });
+    try {
+        let s = await probe.start(1, 'receiver', true);
+        assert.strictEqual(s.rx.hlsOn, true);
+        await new Promise((r) => setTimeout(r, 900));
+        s = probe.status();
+        const args = s.rx.lines.find((l) => / args /.test(l));
+        assert.ok(/ -hls -custom AVC:1080,720;HEVC:0;VP9:0;AV1:0$/.test(args), args);
+        const env = s.rx.lines.find((l) => / env /.test(l));
+        assert.ok(new RegExp('LANGUAGE=zxx http_proxy=http://127\\.0\\.0\\.1:' + port + ' no_proxy=localhost,127\\.0\\.0\\.1 ca=.*aurelm-airplay-probe/cacert\\.pem$').test(env), env);
+        // the proxy runs (a child, as the internet uid on the car)
+        assert.strictEqual(s.rx.proxy.state, 'on');
+        await new Promise((res, rej) => { const c = net.connect(port, '127.0.0.1', () => { c.destroy(); res(); }); c.on('error', rej); });
+        // the video's progress
+        assert.strictEqual(s.rx.hls.url, 'http://localhost:7300/master.m3u8');
+        assert.deepStrictEqual([s.rx.hls.open.w, s.rx.hls.open.h, s.rx.hls.open.acodec, s.rx.hls.dur], [1920, 1080, 'aac', 212.4]);
+        assert.deepStrictEqual([s.rx.hls.pos, s.rx.hls.paused, s.rx.hls.seeks], [13.7, true, 1]);
+        assert.strictEqual(s.rx.videoRunning, true);
+        assert.strictEqual(s.rx.soundRunning, true);
+        assert.strictEqual(s.rx.stream.shown, 88);
+        assert.strictEqual(s.verdict.code, 'rx-hls');
+        assert.ok(/PASS: the head unit plays the video the iPhone sent \(1920x1080\)/.test(s.verdict.text), s.verdict.text);
+        // the setting switched off: the receiver starts again without it, and the proxy goes
+        s = await probe.start(1, 'receiver', false);
+        assert.strictEqual(s.rx.hlsOn, false);
+        assert.strictEqual(s.rx.proxy, null);
+        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((res) => { const c = net.connect(port, '127.0.0.1', () => { c.destroy(); res('open'); }); c.on('error', () => res('closed')); }).then((v) => assert.strictEqual(v, 'closed'));
+        const args2 = probe.status().rx.lines.find((l) => / args /.test(l));
+        assert.ok(args2 && args2.indexOf('-hls') < 0, args2);
+    } finally { await probe.stop('finally'); }
+});
+
+test('proxy: CONNECT tunnels to the allowed ports only, plain http passed on, names through the uplink', async () => {
+    const { createProxy } = require(path.join(__dirname, '..', 'native', 'aurelm-airplay-probe', 'proxy'));
+    const http = require('http');
+    // a "server on the internet": echoes over raw tcp, and answers http
+    const echo = net.createServer((c) => c.pipe(c)).listen(0, '127.0.0.1');
+    const web = http.createServer((req, res) => res.end('hello ' + req.url + ' ' + req.headers.host)).listen(0, '127.0.0.1');
+    await new Promise((r) => setTimeout(r, 50));
+    const ep = echo.address().port, wp = web.address().port;
+    const p = createProxy({ port: 0, ports: [ep, wp], hosts: 'video.example=127.0.0.1', leasePath: '/nonexistent' });
+    const pp = await p.listen();
+    const connect = (target) => new Promise((res) => {
+        const c = net.connect(pp, '127.0.0.1', () => c.write('CONNECT ' + target + ' HTTP/1.1\r\nHost: ' + target + '\r\n\r\n'));
+        let buf = '';
+        c.on('data', (d) => {
+            buf += d;
+            if (/^HTTP\/1\.1 200/.test(buf) && buf.indexOf('\r\n\r\n') > 0 && buf.indexOf('ping') < 0) c.write('ping');
+            if (buf.indexOf('ping') > 0 || /^HTTP\/1\.1 [45]/.test(buf)) { c.destroy(); res(buf); }
+        });
+        c.on('error', () => res(buf));
+    });
+    try {
+        assert.ok(/^HTTP\/1\.1 200[\s\S]*ping$/.test(await connect('video.example:' + ep)));
+        assert.ok(/^HTTP\/1\.1 403/.test(await connect('video.example:22')));
+        // a name the uplink would resolve, but it is offline here
+        assert.ok(/^HTTP\/1\.1 502/.test(await connect('elsewhere.example:' + ep)));
+        const body = await new Promise((res, rej) => http.get({ host: '127.0.0.1', port: pp, path: 'http://video.example:' + wp + '/seg1.ts' }, (r) => { let t = ''; r.on('data', (d) => { t += d; }); r.on('end', () => res(t)); }).on('error', rej));
+        assert.strictEqual(body, 'hello /seg1.ts video.example:' + wp);
+        const st = p.stats();
+        assert.strictEqual(st.connects, 2);
+        assert.strictEqual(st.requests, 1);
+        assert.ok(/EOFFLINE/.test(st.lastError), st.lastError);
+    } finally { p.close(); echo.close(); web.close(); }
+});
+
 (async () => {
     let failed = 0;
     for (const t of tests) {

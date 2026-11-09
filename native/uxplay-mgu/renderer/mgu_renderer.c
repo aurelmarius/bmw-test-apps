@@ -19,8 +19,15 @@
  *
  * Stage 2: every access unit also goes to the GPU decoder (video/src/mgu_video.cpp), which writes the pictures
  * to mgu-render's frame file; stats then carry "shown" (pictures written) and "decerr" (failed access units).
+ *
+ * Stage 4: a video the iPhone hands over (AirPlay's video button: YouTube's HLS, served by UxPlay on localhost, or
+ * a direct address) is played by player/mgu_hls.cpp in place of GStreamer's playbin: UxPlay starts it with the
+ * address (video_renderer_init's uri, then video_renderer_start), the iPhone's pause / seek / progress bar come
+ * through video_renderer_pause / _resume / _seek and video_get_playback_info. Its events: hls, hlsopen, hlspos,
+ * hlsseek, hlsend, and start / stop / decoder / sound / soundstop / stats as above.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 #include <stdint.h>
@@ -34,6 +41,7 @@
 #include "../renderers/mux_renderer.h"
 #include "mgu_video.h"
 #include "mgu_audio.h"
+#include "mgu_hls.h"
 #include <unistd.h>
 #include <grp.h>
 #include <pwd.h>
@@ -114,6 +122,11 @@ static void stats_locked(double t) {
     st.win_start = t;
 }
 
+/* the player's events, as ours */
+static void emit_json(const char *json) { emit("%s", json); }
+static char *hls_uri = NULL;     /* the address of the video to play (stage 4), NULL for screen mirroring */
+static float hls_start = 0.0f;
+
 /* ---------------- video ---------------- */
 
 bool gstreamer_init() { return true; }
@@ -126,12 +139,15 @@ void video_renderer_init(logger_t *logger, const char *server_name, videoflip_t 
     (void) logger; (void) server_name; (void) videoflip; (void) parser; (void) rtp_pipeline; (void) decoder; (void) converter;
     (void) videosink; (void) videosink_options; (void) initial_fullscreen; (void) video_sync; (void) h265_support;
     (void) coverart_support; (void) playbin_version;
-    if (uri) emit("{\"ev\":\"hls\"}");
+    mgu_hls_set_emit(emit_json);
+    free(hls_uri);
+    hls_uri = uri ? strdup(uri) : NULL;
     static bool once = false;
     if (!once) { once = true; atexit(mgu_video_close); }   /* no frame file left behind */
 }
 
 void video_renderer_start() {
+    if (hls_uri) { mgu_hls_start(hls_uri, hls_start); hls_start = 0.0f; return; }   /* stage 4: the player says start */
     pthread_mutex_lock(&mu);
     st.running = true;
     st.win_start = now_s();
@@ -141,6 +157,7 @@ void video_renderer_start() {
 }
 
 void video_renderer_stop() {
+    mgu_hls_stop();   /* a video playing (stage 4): ended, its sound and pictures with it */
     pthread_mutex_lock(&mu);
     bool was = st.running;
     st.running = false;
@@ -157,14 +174,14 @@ void video_renderer_set_device_model(const char *model, const char *name) {
 }
 
 void video_renderer_set_track_metadata(const char *title, const char *artist, const char *album) { (void) title; (void) artist; (void) album; }
-void video_renderer_pause() {}
+void video_renderer_pause() { mgu_hls_pause(1); }
 void video_renderer_hls_ready() {}
-void video_renderer_seek(float position) { (void) position; }
-void video_renderer_set_start(float position) { (void) position; }
-void video_renderer_resume() {}
+void video_renderer_seek(float position) { mgu_hls_seek(position); }
+void video_renderer_set_start(float position) { hls_start = position; }
+void video_renderer_resume() { mgu_hls_pause(0); }
 int video_renderer_cycle() { return 0; }
-bool video_renderer_is_paused() { return false; }
-bool video_renderer_eos_watch() { return false; }
+bool video_renderer_is_paused() { float r = 1; mgu_hls_info(NULL, NULL, NULL, NULL, &r, NULL, NULL); return r == 0.0f; }
+bool video_renderer_eos_watch() { return mgu_hls_eos() != 0; }
 
 uint64_t video_renderer_render_buffer(unsigned char *data, int *data_len, int *nal_count, uint64_t *ntp_time) {
     (void) nal_count; (void) ntp_time;
@@ -210,14 +227,11 @@ bool waiting_for_x11_window() { return false; }
 
 bool video_get_playback_info(double *duration, double *position, double *seek_start, double *seek_duration, float *rate,
                              bool *buffer_empty, bool *buffer_full) {
-    if (duration) *duration = 0;
-    if (position) *position = 0;
-    if (seek_start) *seek_start = 0;
-    if (seek_duration) *seek_duration = 0;
-    if (rate) *rate = 0;
-    if (buffer_empty) *buffer_empty = true;
-    if (buffer_full) *buffer_full = false;
-    return false;
+    int be = 1, bf = 0;
+    const int on = mgu_hls_info(duration, position, seek_start, seek_duration, rate, &be, &bf);
+    if (buffer_empty) *buffer_empty = be != 0;
+    if (buffer_full) *buffer_full = bf != 0;
+    return on != 0;
 }
 
 int video_renderer_choose_codec_and_size(bool video_is_jpeg, bool video_is_h265, video_geometry_t *g) {
@@ -227,7 +241,7 @@ int video_renderer_choose_codec_and_size(bool video_is_jpeg, bool video_is_h265,
     return 0;
 }
 
-void video_renderer_hls_set_volume(double volume) { (void) volume; }
+void video_renderer_hls_set_volume(double volume) { mgu_hls_volume(volume); }
 void video_renderer_set_window_handle(uintptr_t handle) { (void) handle; }
 
 /* ---------------- audio ---------------- */

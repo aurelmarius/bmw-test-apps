@@ -8,6 +8,11 @@ extern "C" {
 /* one access unit; returns 1 the first time the decoder opened, -1 the first time it could not
  * (mgu_video_error() says why), else 0. shown/errors: totals so far. */
 int mgu_video_frame(const unsigned char *data, int len, unsigned long long *shown, unsigned long long *errors);
+/* stage 4: as mgu_video_frame, the access unit's pts given; each picture waits for wait(pts_ms, arg): 0 shown, 1 dropped */
+int mgu_video_frame_timed(const unsigned char *data, int len, long long pts_ms, int (*wait)(long long, void *), void *arg,
+                          unsigned long long *shown, unsigned long long *errors);
+/* a seek: the decoder starts again at the next SPS, the frame file stays */
+void mgu_video_reset(void);
 void mgu_video_stop(void);
 void mgu_video_close(void);
 const char *mgu_video_error(void);

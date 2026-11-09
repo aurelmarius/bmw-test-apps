@@ -33,8 +33,9 @@ const ap = require('./airplay');
 const nft = require('./nft');
 const rxm = require('./receiver');
 const sockgroup = require('./sockgroup');
+const { fork } = require('child_process');
 
-const VERSION = '0.8.2';
+const VERSION = '0.9.0';
 const MDNS_GROUP = '224.0.0.251';
 const QUERY_NAMES = ['_airplay._tcp.local', '_raop._tcp.local', '_companion-link._tcp.local', '_apple-mobdev2._tcp.local'];
 
@@ -109,6 +110,16 @@ function portHolders(port, proto) {
 function rxVerdict(s) {
     const r = s.rx || {};
     const v = r.video, c = r.client, fresh = r.stream && r.stream.fps > 0;
+    // stage 4: a video sent with the AirPlay button, played by the head unit
+    const h = r.hls;
+    if (h && h.ended && h.ended.why === 'error') return { code: 'rx-hls-failed', text: 'The video sent with the AirPlay button could not be played: ' + h.ended.error };
+    if (h && h.open && r.decoder && !r.decoder.ok) return { code: 'rx-decoder-failed', text: 'The video plays, but the GPU decoder failed: ' + r.decoder.error };
+    if (h && h.open) {
+        const o = h.open;
+        return { code: 'rx-hls', text: 'PASS: the head unit plays the video the iPhone sent' + (o.w ? ' (' + o.w + 'x' + o.h + ')' : '') +
+            (h.ended ? ', ' + (h.ended.why === 'end' ? 'to its end' : 'stopped') : '') };
+    }
+    if (h) return { code: 'rx-hls-opening', text: 'The iPhone sent a video: opening it from the internet' };
     if (v && r.stream && r.stream.frames > 0 && r.decoder && !r.decoder.ok) {
         return { code: 'rx-decoder-failed', text: 'The picture reaches the head unit, but the GPU decoder failed: ' + r.decoder.error };
     }
@@ -152,7 +163,9 @@ function verdict(s) {
  */
 function createProbe(opts) {
     const o = Object.assign({ ports: [7300, 7350, 7400, 47000], mdnsPort: 5353, nft: 'nft', only: null, ignoreSelf: true, name: 'BMW iDrive test',
-        rxBin: path.join(__dirname, 'uxplay-mgu'), rxName: 'BMW iDrive', rxUid: 65534 }, opts || {});
+        rxBin: path.join(__dirname, 'uxplay-mgu'), rxName: 'BMW iDrive', rxUid: 65534,
+        // stage 4: the proxy the receiver's player reaches the internet through (proxy.js), as the uid mgu-uplink routes
+        proxyUid: 13102, proxyPort: 7390, proxyEnv: {} }, opts || {});
     const now = o.now || Date.now;
     const lines = [];
     const log = (s) => {
@@ -168,6 +181,43 @@ function createProbe(opts) {
         log, now, onChange: () => { if (o.onChange) o.onChange(); } });
     let sock = null, servers = [], timers = [], endT = null, sendQ = Promise.resolve();
 
+    /* ----- stage 4: the proxy (a child as the internet uid) while the receiver takes videos ----- */
+    let proxy = null;
+    const px = { state: 'off', error: null, stats: null, starts: 0 };
+    function startProxy() {
+        if (proxy || o.proxyPort == null) return;
+        px.starts++;
+        const env = Object.assign({ PATH: '/usr/bin:/bin', PROXY_PORT: String(o.proxyPort) }, o.proxyEnv || {});
+        const fo = { env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] };
+        if (o.proxyUid != null && process.getuid && process.getuid() === 0) { fo.uid = o.proxyUid; fo.gid = o.proxyUid; }
+        let c;
+        try { c = fork(path.join(__dirname, 'proxy.js'), [], fo); } catch (e) { px.state = 'failed'; px.error = e.message; log('proxy: ' + e.message); return; }
+        proxy = c;
+        px.state = 'starting'; px.error = null;
+        c.on('message', (m) => {
+            if (!m) return;
+            if (m.ev === 'ready') { px.state = 'on'; log('proxy: on 127.0.0.1:' + m.port + ' as uid ' + m.uid); }
+            else if (m.ev === 'stats') px.stats = m.stats;
+            else if (m.ev === 'log') log(m.line);
+            else if (m.ev === 'error') { px.state = 'failed'; px.error = m.error; log('proxy: ' + m.error); }
+        });
+        c.on('error', (e) => log('proxy: ' + e.message));
+        c.on('exit', (code, sig) => {
+            if (proxy !== c) return;
+            proxy = null;
+            if (!st.active || !st.hls) { px.state = 'off'; return; }
+            px.state = 'failed'; px.error = px.error || 'ended (' + (sig || code) + ')';
+            log('proxy: ended (' + (sig || code) + ')' + (px.starts < 5 ? ', starting it again' : ''));
+            if (px.starts < 5) setTimeout(() => { if (st.active && st.hls) startProxy(); }, 3000);
+        });
+    }
+    function stopProxy() {
+        const c = proxy;
+        proxy = null;
+        px.state = 'off';
+        if (c) { try { c.kill('SIGTERM'); } catch (e) { /* gone */ } }
+    }
+
     function loadIdentity() {
         const f = o.stateDir && path.join(o.stateDir, 'identity.json');
         if (f) {
@@ -180,7 +230,7 @@ function createProbe(opts) {
 
     function freshState() {
         return {
-            active: false, mode: 'probe', startedAt: null, endsAt: null, ifaces: [],
+            active: false, mode: 'probe', hls: false, startedAt: null, endsAt: null, ifaces: [],
             mdns: { mode: 'off', error: null, holders: [], packets: 0, queries: 0, airplayQueries: 0, answered: 0, announced: 0, lastAirplayQuery: null, peers: [] },
             tcp: { port: null, listening: [], busy: [], error: null, connections: 0, last: null, requests: [] },
             fw: { state: 'off', error: null, chains: [], removed: 0 },
@@ -197,7 +247,8 @@ function createProbe(opts) {
             const r = rx.state();
             s.rx = { name: o.rxName, running: r.running, pid: r.pid, starts: r.starts, error: r.error, exit: r.exit, ip: r.ip, iface: r.iface,
                 client: r.client, video: r.video, videoRunning: r.videoRunning, audio: r.audio, stream: r.stream, ports: rxm.PORTS, lines: r.lines.slice(-15),
-                decoder: r.decoder, videoPath: o.rxVideoPath || rxm.VIDEO_PATH, sound: r.sound, soundRunning: r.soundRunning, cpu: r.cpu };
+                decoder: r.decoder, videoPath: o.rxVideoPath || rxm.VIDEO_PATH, sound: r.sound, soundRunning: r.soundRunning, cpu: r.cpu,
+                hlsOn: st.hls, hls: r.hls, proxy: st.hls ? { state: px.state, error: px.error, stats: px.stats } : null };
         }
         s.verdict = verdict(s);
         return s;
@@ -401,13 +452,14 @@ function createProbe(opts) {
         const order = ['car-wifi', 'iphone-hotspot', 'uplink', 'wifi'];
         for (let k = 0; k < order.length; k++) {
             const i = u.find((x) => x.kind === order[k]);
-            if (i) return { name: o.rxName, deviceid: id.deviceid, ip: i.ip, iface: i.name };
+            if (i) return { name: o.rxName, deviceid: id.deviceid, ip: i.ip, iface: i.name, hls: st.hls, proxyPort: o.proxyPort };
         }
         // an interface given by name (PROBE_IFACES, the tests): whatever its kind
-        return u.length ? { name: o.rxName, deviceid: id.deviceid, ip: u[0].ip, iface: u[0].name } : null;
+        return u.length ? { name: o.rxName, deviceid: id.deviceid, ip: u[0].ip, iface: u[0].name, hls: st.hls, proxyPort: o.proxyPort } : null;
     }
     async function startReceiver() {
         firewall();
+        if (st.hls) startProxy();
         const t = rxTarget();
         if (t) rx.start(t); else log('receiver: no Wi-Fi interface to announce on');
         every(3000, rescan);
@@ -418,16 +470,20 @@ function createProbe(opts) {
     /* ----- the test ----- */
     function every(ms, f) { const t = setInterval(() => { try { f(); } catch (e) { log(e.message); } }, ms); if (t.unref) t.unref(); timers.push(t); }
 
-    async function start(minutes, mode) {
+    async function start(minutes, mode, hls) {
         const m = Math.max(1, Math.min(60, Number(minutes) || 15));
         const md = mode === 'receiver' ? 'receiver' : 'probe';
+        const wantHls = md === 'receiver' && !!hls;
         if (st.active && st.mode !== md) await stop('switching to the ' + (md === 'receiver' ? 'receiver' : 'network') + ' test');
+        // the video button switched on or off in the app: the receiver starts again with it
+        if (st.active && md === 'receiver' && st.hls !== wantHls) await stop('the video button setting changed');
         if (st.active) { st.endsAt = now() + m * 60000; resetEnd(); log('test extended to ' + m + ' min'); return status(); }
         Object.assign(st, freshState());
         st.mode = md;
+        st.hls = wantHls;
         st.active = true; st.startedAt = now(); st.endsAt = now() + m * 60000;
         if (md === 'receiver') {
-            log('receiver test started (' + m + ' min), "' + o.rxName + '" ' + id.deviceid);
+            log('receiver test started (' + m + ' min), "' + o.rxName + '" ' + id.deviceid + (st.hls ? ', with the video button' : ''));
             if (o.nft) { const n = nft.remove({ nft: o.nft }); if (n) log('firewall: removed ' + n + ' old rules'); }
             st.ifaces = interfaces(o.only);
             log('interfaces: ' + (usedIfaces().map((i) => i.name + '=' + i.ip + ' (' + i.kind + ')').join(', ') || 'none'));
@@ -468,6 +524,7 @@ function createProbe(opts) {
         timers.forEach((t) => { clearInterval(t); clearTimeout(t); });
         timers = [];
         if (st.mode === 'receiver') await rx.stop();
+        stopProxy();
         try { await announce(true); } catch (e) { /* goodbye is best effort */ }
         await sendQ;
         if (sock) { try { sock.close(); } catch (e) { /* closed */ } sock = null; }
@@ -493,7 +550,7 @@ function createProbe(opts) {
         if (st.active && t) rx.start(t);
         return status();
     }
-    function cleanupSync() { rx.killSync(); if (o.nft) { try { nft.remove({ nft: o.nft }); } catch (e) { /* best effort */ } } }
+    function cleanupSync() { rx.killSync(); stopProxy(); if (o.nft) { try { nft.remove({ nft: o.nft }); } catch (e) { /* best effort */ } } }
 
     return { start, stop, status, endSession, cleanupSync, identity: id };
 }
@@ -524,7 +581,7 @@ function serveControl(probe, sockPath, log, onRequest, onExit) {
                     onExit();
                     return;
                 }
-                const p = m.cmd === 'end-session' ? probe.endSession(m.why) : m.cmd === 'start' ? probe.start(m.minutes, m.mode) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
+                const p = m.cmd === 'end-session' ? probe.endSession(m.why) : m.cmd === 'start' ? probe.start(m.minutes, m.mode, m.hls) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
                 Promise.resolve(p).then((s) => { try { c.write(JSON.stringify(s) + '\n'); } catch (e) { /* gone */ } }, (e) => { try { c.write(JSON.stringify({ error: String(e.message || e) }) + '\n'); } catch (x) { /* gone */ } });
             }
         });

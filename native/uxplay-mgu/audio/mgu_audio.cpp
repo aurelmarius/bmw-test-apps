@@ -48,7 +48,8 @@ struct Alsa {
 } A;
 bool g_alsa_loaded = false;
 const int kPlayback = 0, kS16LE = 2, kRwInterleaved = 3, kNonblock = 1;
-const unsigned kRate = 44100, kCh = 2;
+const unsigned kCh = 2;
+unsigned g_rate = 44100;   /* the device's rate: 44100 (the iPhone's), or the stream's (stage 4, HLS) */
 
 std::mutex g_m;
 AVCodecContext *g_ctx = nullptr;
@@ -81,7 +82,7 @@ bool alsa_load() {
 }
 
 void wav_header(uint32_t data) {
-    const uint32_t rate = kRate, br = rate * 2 * kCh, riff = 36 + data, fmt = 16;
+    const uint32_t rate = g_rate, br = rate * 2 * kCh, riff = 36 + data, fmt = 16;
     const uint16_t pcm = 1, ch = kCh, ba = 2 * kCh, bits = 16;
     fseek(g_wav, 0, SEEK_SET);
     fwrite("RIFF", 1, 4, g_wav); fwrite(&riff, 4, 1, g_wav); fwrite("WAVEfmt ", 1, 8, g_wav);
@@ -117,7 +118,7 @@ bool open_decoder(int ct) {
     const AVCodec *codec = avcodec_find_decoder(id);
     if (!codec) { g_err = "no decoder"; return false; }
     g_ctx = avcodec_alloc_context3(codec);
-    g_ctx->sample_rate = kRate;
+    g_ctx->sample_rate = (int) g_rate;
     av_channel_layout_default(&g_ctx->ch_layout, kCh);
     g_ctx->extradata = (uint8_t *) av_mallocz(cdlen + AV_INPUT_BUFFER_PADDING_SIZE);
     memcpy(g_ctx->extradata, cd, cdlen);
@@ -174,7 +175,7 @@ void play_out() {
     if (g_kind != ALSA || !g_pcm) return;
     long d = 0;
     if (A.delay(g_pcm, &d) == 0) {
-        g_st.device_ms = d * 1000.0 / kRate;
+        g_st.device_ms = d * 1000.0 / g_rate;
         if (g_st.device_ms > drop_above_ms()) { g_st.dropped_late++; return; }
     }
     long w = A.writei(g_pcm, g_out.data(), n);
@@ -182,15 +183,8 @@ void play_out() {
     else if (w < 0) { g_st.xruns++; A.recover(g_pcm, (int) w, 1); }
 }
 
-}  // namespace
-
-extern "C" int mgu_audio_start(int ct) {
-    std::lock_guard<std::mutex> l(g_m);
-    close_all();
-    g_err.clear();
-    parse_target();
-    if (!open_decoder(ct)) { g_st.open = -1; return -1; }
-    g_ct = ct;
+/* the output (ALSA, wav or null) for g_rate; g_err and -1 when it cannot */
+int open_output() {
     if (g_kind == WAV) {
         g_wav = fopen(g_target.c_str(), "wb");
         if (!g_wav) { g_err = "cannot create " + g_target; g_st.open = -1; return -1; }
@@ -204,7 +198,7 @@ extern "C" int mgu_audio_start(int ct) {
             g_st.open = -1;
             return -1;
         }
-        rc = A.set_params(g_pcm, kS16LE, kRwInterleaved, kCh, kRate, 1, buffer_us());
+        rc = A.set_params(g_pcm, kS16LE, kRwInterleaved, kCh, g_rate, 1, buffer_us());
         if (rc < 0) {
             g_err = std::string("snd_pcm_set_params: ") + A.strerror(rc);
             A.close(g_pcm); g_pcm = nullptr;
@@ -214,6 +208,43 @@ extern "C" int mgu_audio_start(int ct) {
     }
     g_st.open = 1;
     return 0;
+}
+
+}  // namespace
+
+extern "C" int mgu_audio_start(int ct) {
+    std::lock_guard<std::mutex> l(g_m);
+    close_all();
+    g_err.clear();
+    parse_target();
+    g_rate = 44100;
+    if (!open_decoder(ct)) { g_st.open = -1; return -1; }
+    g_ct = ct;
+    return open_output();
+}
+
+/* stage 4 (HLS): a stream's own codec (libavcodec id), rate, channels and codec data (may be empty: ADTS) */
+extern "C" int mgu_audio_start_codec(int codec_id, int rate, int channels, const unsigned char *extradata, int extradata_len) {
+    std::lock_guard<std::mutex> l(g_m);
+    close_all();
+    g_err.clear();
+    parse_target();
+    g_rate = rate >= 8000 && rate <= 96000 ? (unsigned) rate : 48000;
+    const AVCodec *codec = avcodec_find_decoder((enum AVCodecID) codec_id);
+    if (!codec) { g_err = "no decoder for the stream's audio (" + std::string(avcodec_get_name((enum AVCodecID) codec_id)) + ")"; g_st.open = -1; return -1; }
+    g_ctx = avcodec_alloc_context3(codec);
+    g_ctx->sample_rate = (int) g_rate;
+    av_channel_layout_default(&g_ctx->ch_layout, channels > 0 ? channels : 2);
+    if (extradata && extradata_len > 0) {
+        g_ctx->extradata = (uint8_t *) av_mallocz((size_t) extradata_len + AV_INPUT_BUFFER_PADDING_SIZE);
+        memcpy(g_ctx->extradata, extradata, (size_t) extradata_len);
+        g_ctx->extradata_size = extradata_len;
+    }
+    if (avcodec_open2(g_ctx, codec, nullptr) < 0) { g_err = "avcodec_open2 failed"; avcodec_free_context(&g_ctx); g_st.open = -1; return -1; }
+    g_pkt = av_packet_alloc();
+    g_frame = av_frame_alloc();
+    g_ct = 100;
+    return open_output();
 }
 
 extern "C" void mgu_audio_packet(const unsigned char *data, int len) {

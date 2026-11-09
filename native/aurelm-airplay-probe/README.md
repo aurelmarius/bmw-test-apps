@@ -74,6 +74,32 @@ groups video and mgu_alsa (it drops root itself: Node cannot give a child supple
 287 to the speakers (`MediaSink_Front`, 1024) through the audio manager while the receiver has an iPhone with sound and
 the app is up (`car_audio.js`), and back when it is not; a leftover connection is cleared at start.
 
+## Videos sent with the AirPlay button (stage 4)
+
+With the app's setting **AirPlay video button** (on), the receiver also takes AirPlay's video button (`-hls`): the
+iPhone does not send its screen but the video's address, and the head unit plays it itself. For YouTube, UxPlay fetches
+the playlists from the iPhone and serves them on its own port (`http://localhost:7300/master.m3u8`), its variants
+filtered to H.264, 1080p at 30 fps and 720p at 60 (`-custom AVC:1080,720;HEVC:0;VP9:0;AV1:0`); a direct http(s)
+address (Safari's video button) is played as it is. The player (`native/uxplay-mgu/player/mgu_hls.cpp`) reads it with
+FFmpeg and shows and plays it through the same GPU decoder, frame file and sound input as mirroring; the iPhone keeps
+pause, seek and its progress bar. iOS ends CarPlay while a video plays this way (found with iCarCast, 2026-11-08).
+
+**Internet.** The receiver runs as nobody, which mgu-uplink does not route. The video's segments come through
+`proxy.js`, a child of the service running as uid **13102** (`component.json` `"internet": true`, `"uids": [13102]`;
+the deploy tool writes `/var/opt/mgu-uplink/uids.d/aurelm-airplay-probe`): on 127.0.0.1:7390 only, `CONNECT` to ports
+443 and 80 and plain http requests, names resolved through the uplink's DNS (`/run/mgu-uplink/lease.json`). TLS goes
+through the tunnel end to end: the player checks each server's certificate and name against `cacert.pem` (Mozilla's
+list, from certifi `b71b898`; the unit has no public one). The proxy runs only while a receiver with the video button
+does.
+
+**UxPlay's language.** With `-hls` UxPlay aborts at start without a language in its environment; the service sets
+`LANGUAGE=zxx` (no linguistic content) always. It matches no audio track, so UxPlay keeps the one the iPhone's playlist
+marks default: YouTube's own choice.
+
+**The video button's TXT bits.** `-hls` adds AirPlay's "video" and "HLS" feature bits to the announcement. Mirroring
+during CarPlay depended on the model and version (stage 1); should these bits change that, the setting turns them off
+(and the receiver runs as in 0.8).
+
 ## Removal leaves nothing
 
 | What | Gone by |
@@ -84,6 +110,8 @@ the app is up (`car_audio.js`), and back when it is not; a leftover connection i
 | `/run/aurelm-airplay-probe.sock` | the socket's stop (`RemoveOnStop=yes`) |
 | `/dev/shm/mgu-video-aurelm-airplay` | the receiver's exit; the service after a crash; `cleanup.js` (stop, uninstall); a reboot |
 | the announcement on the network | a goodbye (TTL 0) when the test ends |
+| the proxy (stage 4) | the end of the receiver test; it exits with the service (its IPC channel closes) |
+| `/var/opt/mgu-uplink/uids.d/aurelm-airplay-probe` (uid 13102's internet) | the deploy tool's uninstall |
 
 Nothing is written under `/` (the read-only root file system), no stock file or unit is touched, no
 drop-in goes on a unit of the car's.
@@ -108,7 +136,7 @@ What the Store's tools learned the hard way (mgu-store, waze-on-cluster), and ho
   `/var/opt/public/oap`, mode 0660; root only (0600) while the app is not installed. The group is read
   when the socket starts: after a fresh install, restart the head unit once.
 - **No boot ordering:** nothing waits for it, it waits for nothing of the car's; it does not run at boot.
-- **Bounded:** nice 10, idle I/O, 200% CPU (2 of the 4 cores), 256 MiB, 48 tasks.
+- **Bounded:** nice 10, idle I/O, 200% CPU (2 of the 4 cores), 256 MiB, 48 tasks (the proxy and the receiver included).
 - **CarPlay:** during a test the service shares udp 5353 with the car's own mDNS responder
   (`SO_REUSEADDR`). Multicast reaches both; a unicast mDNS packet may reach only one of them. Run the
   test with CarPlay already connected, and stop it when done.
@@ -122,11 +150,13 @@ What the Store's tools learned the hard way (mgu-store, waze-on-cluster), and ho
 | `nft.js` | the firewall rules |
 | `check.js` | the deploy tool's check: the service answers on its socket |
 | `receiver.js` | the receiver test: runs `uxplay-mgu`, reads its reports |
+| `proxy.js`, `cacert.pem` | stage 4: the receiver's way to the internet (uid 13102), the CA list its player checks TLS against |
 | `uxplay-mgu`, `UXPLAY-LICENSE` | the receiver (built by `native/uxplay-mgu/build.sh`) and UxPlay's license |
 | `cleanup.js` | `ExecStopPost` and `deactivate`: removes every rule of the test, never fails |
 | `sockgroup.js` | the control socket's group: the app's own, never `tm_oap_app` |
 
-Control: one JSON object per line on the socket, `{"cmd":"status"}`, `{"cmd":"start","minutes":15}`,
+Control: one JSON object per line on the socket, `{"cmd":"status"}`, `{"cmd":"start","minutes":15}` (`"mode":"receiver"`,
+`"hls":true` for the receiver with the video button),
 `{"cmd":"stop"}`, `{"cmd":"exit"}`; the reply is the status. The last test's status is kept in
 `/var/opt/aurelm-airplay-probe/state/last-report.json` (every 30 s while it runs, and at its end).
 

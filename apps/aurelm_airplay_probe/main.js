@@ -8,7 +8,10 @@
  *   "Start receiver"  the receiver: UxPlay's protocol ("BMW iDrive") takes the iPhone's screen mirroring; its GPU
  *                     decoder writes the pictures, shown over the whole screen while the car is parked
  *                     (mirror_view.js). The iDrive controller's buttons hide it; "Start receiver" shows it again.
- * On the iPhone: Control Center > Screen Mirroring.
+ *                   With the setting "AirPlay video button" (on), the receiver also takes a video sent with the AirPlay
+ *                   button (YouTube): the head unit plays it itself, from the internet (mgu-uplink), shown and heard
+ *                   the same way; the iPhone keeps its controls (pause, seek). iOS ends CarPlay meanwhile.
+ * On the iPhone: Control Center > Screen Mirroring, or the AirPlay button in the video.
  *
  * Talks to the service over /run/aurelm-airplay-probe.sock (a JSON object per line).
  */
@@ -28,7 +31,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.8.2';
+const SERVICE_VERSION = '0.9.0';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -76,6 +79,24 @@ const ago = (t, now) => { const s = Math.max(0, Math.round((now - t) / 1000)); r
  * Exported for the tests and the screenshots.
  */
 /** the receiver test's steps (stage 1: does the mirrored picture reach the head unit?) */
+const hms = (x) => { x = Math.max(0, Math.round(x || 0)); const h = Math.floor(x / 3600), m = Math.floor(x / 60) % 60, sec = x % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(sec).padStart(2, '0'); };
+const mb = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round((b || 0) / 1024) + ' KB';
+
+/** stage 4: a video sent with the AirPlay button, played by the head unit (in place of the mirroring rows) */
+function videoSteps(r, st, off) {
+    const h = r.hls, px = r.proxy || {}, ps = px.stats || {};
+    const o = h.open, e = h.ended;
+    const playing = !e && o;
+    const state = e ? (e.why === 'error' ? 'failed: ' + e.error : e.why === 'end' ? 'ended' : 'stopped') : !o ? 'opening...' : h.buffering ? 'loading...' : h.paused ? 'paused' : 'playing';
+    return [
+        { label: 'Internet', state: px.state === 'on' ? (ps.errors && !ps.bytesIn ? 'bad' : 'ok') : px.state === 'failed' ? 'bad' : off ? 'off' : 'wait',
+            detail: px.state === 'on' ? mb(ps.bytesIn) + ' downloaded' + (ps.lastError ? ', last error: ' + ps.lastError : '') : px.error || px.state || '' },
+        { label: 'Video', state: e && e.why === 'error' ? 'bad' : playing ? 'ok' : e ? 'off' : 'wait',
+            detail: (o ? (o.vcodec ? o.vcodec.toUpperCase() + (o.w ? ' ' + o.w + 'x' + o.h : '') : 'no picture') + (o.acodec ? ' + ' + o.acodec.toUpperCase() : '') + ', ' : '') +
+                state + (o ? ', ' + hms(h.pos) + (h.dur ? ' / ' + hms(h.dur) : '') : '') + (st.fps > 0 ? ', ' + st.fps + ' fps' : '') },
+    ];
+}
+
 function rxSteps(s) {
     const r = s.rx || {}, fw = s.fw || {}, st = r.stream || {};
     const used = (s.ifaces || []).filter((i) => i.used);
@@ -89,17 +110,19 @@ function rxSteps(s) {
             detail: fw.state === 'open' ? (fw.chains || []).length + ' chains open for tcp/udp ' + (r.ports || []).join(', ') + ', udp 5353' : fw.state === 'failed' ? fw.error : fw.state || '' },
         { label: 'Receiver', state: r.running ? 'ok' : r.error ? 'bad' : off ? 'off' : 'wait',
             detail: r.running ? '"' + r.name + '" on ' + r.iface + ' ' + r.ip + (r.starts > 1 ? ', started ' + r.starts + ' times' : '') : r.error || (r.exit ? 'ended' : '') },
-        { label: 'iPhone connected', state: r.client ? 'ok' : off ? 'off' : 'wait',
-            detail: r.client ? (r.client.name || '?') + ' (' + (r.client.model || '?') + ')' : 'Screen Mirroring > ' + (r.name || 'BMW iDrive') },
+        { label: 'iPhone connected', state: r.client || r.hls ? 'ok' : off ? 'off' : 'wait',
+            detail: r.client ? (r.client.name || '?') + ' (' + (r.client.model || '?') + ')' : r.hls ? 'video sent with the AirPlay button' : 'Screen Mirroring > ' + (r.name || 'BMW iDrive') + (r.hlsOn ? ', or the AirPlay button in a video' : '') },
+    ].concat(r.hls ? videoSteps(r, st, off) : [
         { label: 'Picture', state: gotVideo ? 'ok' : r.client && r.audio ? 'bad' : off ? 'off' : 'wait',
             detail: r.video ? r.video.codec + ' ' + r.video.w + 'x' + r.video.h + (st.frames ? ', ' + st.frames + ' frames, ' + st.idr + ' keyframes' : '') : r.client && r.audio ? 'none: the iPhone sends sound only' : 'not yet' },
         { label: 'Stream', state: st.fps > 0 ? 'ok' : gotVideo ? 'off' : off ? 'off' : 'wait',
             detail: st.fps > 0 ? st.fps + ' fps, ' + Math.round(st.kbps) + ' kbit/s' + (r.cpu ? ', CPU ' + r.cpu.pct + '%' + (r.cpu.throttled ? ', held back ' + r.cpu.throttled + 'x' : '') : '') : gotVideo ? 'stopped' : r.audio ? 'sound only, ' + st.audio + ' packets' : 'not yet' },
+    ], [
         { label: 'GPU decoder', state: r.decoder ? (r.decoder.ok ? (st.shown > 0 ? 'ok' : 'wait') : 'bad') : off ? 'off' : 'wait',
             detail: r.decoder ? (r.decoder.ok ? st.shown + ' pictures' + (st.decerr ? ', ' + st.decerr + ' failed' : '') + ' into ' + r.decoder.w + 'x' + r.decoder.h : r.decoder.error) : 'opens with the first picture' },
         { label: 'On screen', state: s.mirror && s.mirror.shown ? 'ok' : off ? 'off' : 'wait', detail: (s.mirror && s.mirror.why) || '' },
         soundStep(r, st, s.carAudio, off),
-    ];
+    ]);
 }
 
 /** the sound: the receiver's decoder and device, then the route to the speakers */
@@ -140,7 +163,7 @@ function steps(s) {
 }
 
 const VERDICT_COLOR = { connected: GREEN, asked: AMBER, 'heard-phone': AMBER, waiting: AMBER, idle: null,
-    'rx-video': GREEN, 'rx-connected': AMBER, 'rx-waiting': AMBER };
+    'rx-video': GREEN, 'rx-connected': AMBER, 'rx-waiting': AMBER, 'rx-hls': GREEN, 'rx-hls-opening': AMBER };
 
 mgu.run({
     async start(ctx) {
@@ -171,7 +194,7 @@ mgu.run({
             return render();
         }
         ui.onClick('BTN_START', () => command('start', 'Starting...'));
-        ui.onClick('BTN_RX', () => { mirror.wantAgain(); return command('start', 'Starting the receiver...', { mode: 'receiver' }); });
+        ui.onClick('BTN_RX', () => { mirror.wantAgain(); return command('start', 'Starting the receiver...', { mode: 'receiver', hls: ctx.settings.get('videoButton') !== false }); });
 
         /* ---------- stage 2: the picture over the screen, parked only ---------- */
         const parked = Parked.watch(ctx, log, { strict: true });

@@ -22,6 +22,12 @@ const VIDEO_SIZE = '1920x720';
 // stage 3: SmartXbar's input for CarLife (unused in Europe), which Moonride plays into; plug converts 44.1 to 48 kHz
 const AUDIO_DEVICE = 'plug:smartx:CarLifeMedia_CF_48_STEREO';
 const RX_GROUPS = ['video', 'mgu_alsa'];
+// stage 4: a video the iPhone hands over (AirPlay's video button), played by the receiver's own player. Its variants
+// limited to H.264 (the GPU's), 1080p at 30 fps, 720p at 60 (UxPlay's -custom filter on YouTube's master playlist)
+const HLS_PROFILE = 'AVC:1080,720;HEVC:0;VP9:0;AV1:0';
+// UxPlay keeps the audio track of this language, or else the one the iPhone's playlist marks default: a code that
+// matches no track (zxx: no linguistic content) leaves the choice to the phone (YouTube's own). UxPlay needs one set.
+const HLS_LANGUAGE = 'zxx';
 
 /** CPU seconds a process has used (utime + stime, /proc/<pid>/stat), or null */
 function cpuSeconds(pid) {
@@ -63,7 +69,7 @@ const NOISE = /seconds since last client feedback|^\s*$|httpd didn't get respons
 function freshState() {
     return {
         running: false, pid: null, starts: 0, exit: null, error: null, ip: null, iface: null,
-        client: null, video: null, videoRunning: false, audio: null, decoder: null, sound: null, soundRunning: false, cpu: null,
+        client: null, video: null, videoRunning: false, audio: null, decoder: null, sound: null, soundRunning: false, cpu: null, hls: null,
         stream: { frames: 0, fps: 0, kbps: 0, idr: 0, sps: 0, audio: 0, shown: 0, decerr: 0, adec: 0, alate: 0, afull: 0, aerr: 0, axrun: 0, adev: -1, at: 0 },
         lines: [],
     };
@@ -119,6 +125,26 @@ function createReceiver(opts) {
             st.decoder = j.ok ? { ok: true, path: j.path, w: j.w, h: j.h, at: now() } : { ok: false, error: j.error, at: now() };
             if (o.log) o.log('receiver: GPU decoder ' + (j.ok ? 'open, ' + j.w + 'x' + j.h + ' into ' + j.path : 'failed: ' + j.error));
             break;
+        case 'hls':
+            st.hls = { url: j.url, start: j.start || 0, at: now(), open: null, pos: j.start || 0, dur: 0, paused: false, buffering: false, ended: null, seeks: 0 };
+            if (o.log) o.log('receiver: video from the iPhone: ' + j.url + (j.start ? ' from ' + Math.round(j.start) + ' s' : ''));
+            break;
+        case 'hlsopen':
+            if (st.hls) st.hls.open = { w: j.w, h: j.h, vcodec: j.vcodec, acodec: j.acodec, rate: j.rate, ch: j.ch, variants: j.variants, format: j.format };
+            if (st.hls) st.hls.dur = j.dur || 0;
+            if (o.log) o.log('receiver: video ' + (j.vcodec || 'no picture') + (j.w ? ' ' + j.w + 'x' + j.h : '') + ', sound ' + (j.acodec || 'none') + (j.rate ? ' ' + j.rate + ' Hz' : '') + ', ' + Math.round(j.dur || 0) + ' s');
+            break;
+        case 'hlspos':
+            if (st.hls) Object.assign(st.hls, { pos: j.pos, dur: j.dur || st.hls.dur, paused: !!j.paused, buffering: !!j.buffering });
+            return;   // each second: no onChange
+        case 'hlsseek':
+            if (st.hls) st.hls.seeks++;
+            if (o.log) o.log('receiver: seek to ' + Math.round(j.to) + ' s' + (j.ok ? '' : ' failed'));
+            break;
+        case 'hlsend':
+            if (st.hls) st.hls.ended = { why: j.why, error: j.error || null, at: now() };
+            if (o.log) o.log('receiver: video ' + (j.why === 'end' ? 'ended' : j.why === 'stopped' ? 'stopped' : 'failed: ' + j.error));
+            break;
         case 'soundstop':
             // the iPhone's session is over (its last connection closed), stopped from the phone or not
             st.soundRunning = false;
@@ -166,12 +192,20 @@ function createReceiver(opts) {
         const home = o.home || '/tmp';
         try { fs.mkdirSync(home); } catch (e) { /* there */ }
         try { fs.chownSync(home, o.uid, o.gid); } catch (e) { /* not root (tests) */ }
-        const env = Object.assign({ HOME: home, PATH: '/usr/bin:/bin', UXPLAY_MDNS_IPV4: w.ip, UXPLAY_MDNS_NO_IPV6: '1',
+        // LANGUAGE: UxPlay aborts without a language when it takes videos (-hls); set always
+        const env = Object.assign({ HOME: home, PATH: '/usr/bin:/bin', LANGUAGE: HLS_LANGUAGE, UXPLAY_MDNS_IPV4: w.ip, UXPLAY_MDNS_NO_IPV6: '1',
             MGU_VIDEO_PATH: o.videoPath || VIDEO_PATH, MGU_VIDEO_SIZE: VIDEO_SIZE,
             // stage 3: the sound into SmartXbar's CarLife input (Moonride's), the app routes it to the speakers
             MGU_AUDIO: 'alsa:' + AUDIO_DEVICE, MGU_ALSA_US: '64000' }, o.env || {});
         // -s: the size the iPhone mirrors for, the centre screen's (landscape fills it; portrait has bars either side)
         const args = ['-n', w.name, '-nh', '-p', String(BASE_PORT), '-m', w.deviceid.toLowerCase(), '-s', '1920x720@60'];
+        // stage 4: AirPlay's video button too (the iPhone hands over the video's address; YouTube's HLS); its segments
+        // come through the service's proxy (the uid mgu-uplink routes), TLS checked against the tool's CA list
+        if (w.hls) {
+            args.push('-hls', '-custom', HLS_PROFILE);
+            Object.assign(env, { LANGUAGE: HLS_LANGUAGE, http_proxy: 'http://127.0.0.1:' + (w.proxyPort || 7390), no_proxy: 'localhost,127.0.0.1',
+                MGU_CA_FILE: o.caFile || path.join(__dirname, 'cacert.pem') }, o.env || {});
+        }
         const spawnOpts = { env, cwd: home, stdio: ['ignore', 'pipe', 'pipe'] };
         // As nobody when the service is root (the car), in the groups video (the GPU's render node) and mgu_alsa (the
         // sound devices, as Moonride). Node gives a spawned process no supplementary groups, so the receiver is started
@@ -249,4 +283,4 @@ function createReceiver(opts) {
     return { start, stop, killSync, state: () => st };
 }
 
-module.exports = { createReceiver, PORTS, BASE_PORT, VIDEO_PATH, AUDIO_DEVICE };
+module.exports = { createReceiver, PORTS, BASE_PORT, VIDEO_PATH, AUDIO_DEVICE, HLS_PROFILE };

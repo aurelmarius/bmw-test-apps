@@ -21,7 +21,7 @@ plist_sha=67be9ee3169366589c92dc7c22809b90f51911dd9de22520c39c9a64fb047c9c
 mkdir -p "$work/dl"
 [ -f "$work/dl/$plist.tar.bz2" ] || curl -sSfL -o "$work/dl/$plist.tar.bz2" "https://github.com/libimobiledevice/libplist/releases/download/2.6.0/$plist.tar.bz2"
 echo "$plist_sha  $work/dl/$plist.tar.bz2" | sha256sum -c -
-# FFmpeg (stage 3: libavcodec's aac and alac decoders only), its release tag n6.1.2 at a pinned commit
+# FFmpeg (stage 3: libavcodec's audio decoders; stage 4: libavformat's hls/mpegts/mp4 over https), release tag n6.1.2
 ff_rev=b1a4534186ca51b0457579fc05a5739eb2cc45cd
 if [ "$(git -C "$work/ffmpeg-src" rev-parse HEAD 2>/dev/null)" != "$ff_rev" ]; then
     rm -rf "$work/ffmpeg-src"
@@ -37,12 +37,23 @@ docker run --rm -v "$here:/w" -w /w ubuntu:18.04 sh -c '
         rm -rf build/plist-src && mkdir -p build/plist-src && tar -xjf build/dl/libplist-2.6.0.tar.bz2 -C build/plist-src --strip-components 1
         (cd build/plist-src && ./configure -q --prefix=/w/build/plist --enable-static --disable-shared --without-cython --without-tests >/dev/null && make -s -j"$(nproc)" >/dev/null && make -s install >/dev/null)
     fi
-    if [ ! -f build/ffmpeg/lib/libavcodec.a ]; then
-        rm -rf build/ffmpeg-bld && cp -r build/ffmpeg-src build/ffmpeg-bld
-        (cd build/ffmpeg-bld && ./configure --prefix=/w/build/ffmpeg --disable-everything --disable-programs --disable-doc \
-            --disable-avformat --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample --disable-postproc \
-            --disable-network --disable-x86asm --disable-autodetect --disable-iconv --enable-decoder=aac --enable-decoder=alac \
-            --enable-static --disable-shared --enable-pic >/dev/null && make -s -j"$(nproc)" >/dev/null 2>&1 && make -s install >/dev/null)
+    # stage 3: the aac and alac decoders; stage 4: the player (hls, mpegts, mp4 over http/https, TLS by OpenSSL)
+    ffconf="--prefix=/w/build/ffmpeg --disable-everything --disable-programs --disable-doc \
+        --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample --disable-postproc \
+        --disable-x86asm --disable-autodetect --disable-iconv --enable-pthreads \
+        --enable-decoder=aac --enable-decoder=aac_latm --enable-decoder=alac --enable-decoder=mp3 \
+        --enable-network --enable-openssl --enable-protocol=http --enable-protocol=https --enable-protocol=tls \
+        --enable-protocol=tcp --enable-protocol=httpproxy --enable-protocol=crypto --enable-protocol=file \
+        --enable-demuxer=hls --enable-demuxer=mpegts --enable-demuxer=mov --enable-demuxer=aac --enable-demuxer=mp3 \
+        --enable-parser=h264 --enable-parser=aac --enable-parser=aac_latm --enable-parser=mpegaudio \
+        --enable-bsf=h264_mp4toannexb --enable-static --disable-shared --enable-pic"
+    if [ "$(cat build/ffmpeg/.conf 2>/dev/null)" != "$ffconf" ]; then
+        rm -rf build/ffmpeg build/ffmpeg-bld && cp -r build/ffmpeg-src build/ffmpeg-bld
+        # TLS: the certificate checked by default against MGU_CA_FILE (FFmpeg checks nothing unless asked, and never the
+        # name): the hls demuxer opens each segment without our options
+        python3 ffmpeg-tls.py build/ffmpeg-bld
+        (cd build/ffmpeg-bld && ./configure $ffconf >/dev/null && make -s -j"$(nproc)" >/dev/null 2>&1 && make -s install >/dev/null)
+        echo "$ffconf" > build/ffmpeg/.conf
     fi
     make -s SRC=build/src OUT=build/out PLIST=/w/build/plist FFMPEG=/w/build/ffmpeg -j"$(nproc)"
     chown -R '"$(id -u):$(id -g)"' build
