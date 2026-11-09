@@ -2,7 +2,7 @@
   "id": "aurelm_airplay_probe",
   "title": "AirPlay Test",
   "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers; videos sent with the AirPlay button (YouTube) played by the head unit itself. Also the network test. Needs the AirPlay test service.",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "vendor": "custom",
   "loggingId": "OA9X",
   "iconGlyph": "AP",
@@ -26,7 +26,7 @@
     }
   },
   "requires": {
-    "aurelm-airplay-probe": "0.9.3"
+    "aurelm-airplay-probe": "0.9.4"
   },
   "screens": [
     {

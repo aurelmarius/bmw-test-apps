@@ -225,13 +225,24 @@ unsigned int video_renderer_listen(void *loop, int id) { (void) loop; (void) id;
 void video_renderer_destroy() { video_renderer_stop(); mgu_video_close(); }
 bool waiting_for_x11_window() { return false; }
 
+/* As GStreamer UxPlay's: always "still playing" (true), the position -1 (not known: UxPlay answers nothing) until the
+ * player has one. The end of a video goes through the EOS watch (video_renderer_eos_watch), never through here: the
+ * iPhone asks for the progress right after /rate, before the main loop has started the player (in the car, 0.9.3:
+ * answered "finished", UxPlay shut the video down before it began). */
 bool video_get_playback_info(double *duration, double *position, double *seek_start, double *seek_duration, float *rate,
                              bool *buffer_empty, bool *buffer_full) {
+    double d = 0, p = 0, ss = 0, sd = 0;
+    float r = 0;
     int be = 1, bf = 0;
-    const int on = mgu_hls_info(duration, position, seek_start, seek_duration, rate, &be, &bf);
+    const int on = mgu_hls_info(&d, &p, &ss, &sd, &r, &be, &bf);
+    if (duration) *duration = on ? d : 0.0;
+    if (position) *position = on && d > 0 ? p : -1.0;
+    if (seek_start) *seek_start = on ? ss : 0.0;
+    if (seek_duration) *seek_duration = on ? sd : 0.0;
+    if (rate) *rate = on ? r : 0.0f;
     if (buffer_empty) *buffer_empty = be != 0;
     if (buffer_full) *buffer_full = bf != 0;
-    return on != 0;
+    return true;
 }
 
 int video_renderer_choose_codec_and_size(bool video_is_jpeg, bool video_is_h265, video_geometry_t *g) {
