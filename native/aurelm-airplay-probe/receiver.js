@@ -68,7 +68,8 @@ function groupGid(group) {
 const PORTS = [BASE_PORT, BASE_PORT + 1, BASE_PORT + 2];   // uxplay -p 7300: tcp and udp 7300, 7301, 7302
 const MAX_RESTARTS = 3;
 // lines not worth keeping: UxPlay logs these every second while a client is quiet
-const NOISE = /seconds since last client feedback|^\s*$|httpd didn't get response|url = \/feedback,/;
+// and the connection bookkeeping (each connection's accept, addresses, close): the requests and errors stay visible
+const NOISE = /seconds since last client feedback|^\s*$|httpd didn't get response|url = \/feedback,|^Accepted IPv4 client|^Local\s*:|^Remote\s*:|^Connection closed on socket|upgraded to PTTH|getProperty\?playback(Access|Error)Log/;
 
 function freshState() {
     return {
@@ -94,7 +95,7 @@ function createReceiver(opts) {
         const rq = /httpd request received on socket \d+, connection \d+, method = (\S+), url = (\S+)/.exec(line);
         if (rq) line = 'iPhone: ' + rq[1] + ' ' + rq[2].replace(/^rtsp:\/\/[^/]+/, '').slice(0, 80);
         st.lines.push(new Date(now()).toISOString().slice(11, 19) + ' ' + line.slice(0, 200));
-        if (st.lines.length > 40) st.lines.shift();
+        if (st.lines.length > 80) st.lines.shift();
     }
 
     /** one "MGU {json}" line from the renderer */
