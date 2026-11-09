@@ -57,7 +57,7 @@ function fakeEmby(opts) {
             }
             if (req.headers['x-emby-token'] !== TOKEN || o.revoked) return json(401);
             if (p === '/System/Info') return json(200, { ServerName: 'Home Emby', Version: '4.9.1.80' });
-            if (p === '/Sessions/Capabilities/Full') { seen.caps = JSON.parse(body); return json(204); }
+            if (p === '/Sessions/Capabilities/Full') { seen.caps = JSON.parse(body); seen.capsCount = (seen.capsCount || 0) + 1; return json(204); }
             if (p === '/Sessions') return json(200, [{ Id: 'sess-car', DeviceName: 'BMW iDrive' }]);
             if (p === '/Sessions/Logout') { seen.logout++; return json(204); }
             const query = qs.parse(req.url.split('?')[1] || '');
@@ -260,7 +260,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.2.3');
+        assert.strictEqual(s.version, '0.2.4');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -498,6 +498,24 @@ test('emby-player: a sound that shows up after the opening is still played', () 
     assert.ok(audio && audio.ok, JSON.stringify(evs));
     const end = evs.filter((e) => e.ev === 'end')[0];
     assert.ok(end && end.aplayed > 50, 'sound played: ' + JSON.stringify(end));
+});
+
+test('the cast settings again every few minutes: the session stays in the cast menu', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emby-ref-'));
+    const srv = await fakeEmby();
+    const nx = createNet({ systemDns: true, leasePath: (() => { const l = path.join(tmp, 'l.json'); fs.writeFileSync(l, '{"ip":"1.2.3.4"}'); return l; })() });
+    const cl = emby.createClient({ nx, device: { id: 'd1', name: 'BMW iDrive' }, version: '0.2.4', refreshMs: 300 });
+    try {
+        const acc = await cl.signIn(srv.url, 'aurel', 'secret');
+        cl.run(acc);
+        await until(() => (srv.seen.capsCount || 0) >= 3, 5000, 'capabilities posted again');
+        assert.strictEqual(cl.status().state, 'connected');
+        assert.ok(cl.status().announcedAt > 0);
+        cl.stop();
+        const n = srv.seen.capsCount;
+        await wait(700);
+        assert.strictEqual(srv.seen.capsCount, n, 'none after stop');
+    } finally { srv.close(); }
 });
 
 test('a revoked token: signed out, with the reason', async () => {

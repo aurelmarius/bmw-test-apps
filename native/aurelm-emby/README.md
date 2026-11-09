@@ -54,7 +54,7 @@ rules go after the sign-in, after 10 minutes, or when the service stops.
 
 **Lifetime.** Socket activation: the app's first connection starts the service, never the boot. Signed
 in, it stays until the unit sleeps (so the phone can cast to it) and reconnects by itself (5 s, doubling
-to a minute); signed out, it ends 10 minutes after the last request. A token the server no longer
+to a minute); the cast settings go again every 4 minutes, as the cast menu lists only the sessions active lately (an HTTP request marks a session active, the WebSocket does not); signed out, it ends 10 minutes after the last request. A token the server no longer
 accepts (signed out on the server, user removed) signs it out, and the app says so.
 
 ## Removal leaves nothing

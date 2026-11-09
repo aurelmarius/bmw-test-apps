@@ -64,7 +64,7 @@ function createClient(o) {
     const now = o.now || Date.now;
     const nx = o.nx;
     const version = o.version || '0.0.0';
-    let account = null, sock = null, running = false, retry = null, keep = null, backoff = 5000;
+    let account = null, sock = null, running = false, retry = null, keep = null, refresh = null, backoff = 5000;
     const st = { state: 'signed-out', error: null, server: null, sessionId: null, connectedAt: null, since: now(), reconnects: 0, lastMessage: null };
 
     function set(state, error) {
@@ -169,7 +169,7 @@ function createClient(o) {
         s.on('close', (code, why) => {
             if (sock !== s) return;
             sock = null;
-            clearInterval(keep);
+            clearInterval(keep); clearInterval(refresh);
             if (!running) return;
             st.reconnects++;
             set('error', 'the connection to the server ended (' + why + ')');
@@ -179,21 +179,39 @@ function createClient(o) {
             backoff = 5000;
             schedule(60);
             try {
-                await api(account, 'POST', 'Sessions/Capabilities/Full', {
-                    PlayableMediaTypes: ['Video', 'Audio'], QueueableMediaTypes: ['Video', 'Audio'], SupportedCommands: COMMANDS,
-                    SupportsMediaControl: true, SupportsRemoteControl: true, SupportsSync: false,
-                });
-                const sessions = await api(account, 'GET', 'Sessions?DeviceId=' + encodeURIComponent(o.device.id));
-                st.sessionId = (sessions && sessions[0] && sessions[0].Id) || null;
+                await announce();
                 st.connectedAt = now();
                 set('connected');
                 log('connected to ' + ((st.server && st.server.name) || account.server) + ', session ' + st.sessionId);
+                // the cast menu lists the sessions active lately (Emby's apps ask for the last ~16 minutes), and only
+                // an HTTP request marks a session active, not the WebSocket: 0.2.3 dropped out of the menu 10 minutes
+                // after connecting. So the cast settings again every 4 minutes (they also come back after a server restart).
+                clearInterval(refresh);
+                refresh = setInterval(() => {
+                    if (sock !== s || !s.isOpen()) return;
+                    announce().catch((e) => {
+                        if (e.code === 'EAUTH') { signedOut('the server no longer accepts the sign-in: sign in again'); return; }
+                        log('cast settings again: ' + e.message);
+                    });
+                }, o.refreshMs || 240000);
             } catch (e) {
                 if (e.code === 'EAUTH') { signedOut('the server no longer accepts the sign-in: sign in again'); return; }
                 log('capabilities: ' + e.message);
                 set('error', 'connected, but the server refused the cast settings: ' + e.message);
             }
         });
+    }
+    /** the cast settings (remote control, our commands) and our session's id */
+    async function announce() {
+        await api(account, 'POST', 'Sessions/Capabilities/Full', {
+            PlayableMediaTypes: ['Video', 'Audio'], QueueableMediaTypes: ['Video', 'Audio'], SupportedCommands: COMMANDS,
+            SupportsMediaControl: true, SupportsRemoteControl: true, SupportsSync: false,
+        });
+        const sessions = await api(account, 'GET', 'Sessions?DeviceId=' + encodeURIComponent(o.device.id));
+        const id = (sessions && sessions[0] && sessions[0].Id) || null;
+        if (st.sessionId && id && id !== st.sessionId) log('the server gave us a new session: ' + id);
+        st.sessionId = id;
+        st.announcedAt = now();
     }
     function later() {
         if (!running) return;
@@ -216,7 +234,7 @@ function createClient(o) {
     }
     function stop() {
         running = false;
-        clearTimeout(retry); clearInterval(keep);
+        clearTimeout(retry); clearInterval(keep); clearInterval(refresh);
         if (sock) { const s = sock; sock = null; s.close(); }
         st.sessionId = null;
     }
