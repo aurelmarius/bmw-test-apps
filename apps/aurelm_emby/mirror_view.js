@@ -89,13 +89,13 @@ function createMirrorView(o) {
     function update(s) {
         const rx = s.rx || null, dec = rx && rx.decoder;
         const pictures = !!(rx && rx.running && dec && dec.ok && rx.stream && rx.stream.shown > 0 && rx.videoRunning);
-        if (!rx || !rx.running) why = 'the receiver is not running';
+        if (!rx || !rx.running) why = o.idleText || 'the receiver is not running';
         else if (dec && !dec.ok) why = 'the GPU decoder failed: ' + dec.error;
         else if (!pictures) why = 'waiting for the picture';
         else if (s.driving) why = 'hidden while driving';
         else if (!s.pageVisible) why = 'the app is not in front';
         else if (!ready || !gpu.placement) why = 'waiting for mgu-render';
-        else if (userHid) why = 'hidden: press "Start receiver" to show it again';
+        else if (userHid) why = o.hiddenText || 'hidden: press "Start receiver" to show it again';
         else why = 'on the screen';
         if (!pictures) userHid = false;   // a new stream shows again
         const want = pictures && !s.driving && !!s.pageVisible && ready && !!gpu.placement && !userHid;

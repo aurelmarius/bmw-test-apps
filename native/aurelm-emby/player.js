@@ -3,8 +3,10 @@
  * player.js - emby-player (native/emby-player) for the service: one process per stream (a seek is a new one).
  *
  * Started by the service, as root, so it can create the frame file owned by nobody (mgu-render takes that); it then
- * becomes the tool's uid (13101) with the groups video (the GPU's render node) and mgu_alsa (the sound devices)
- * itself, before it reads the stream (MGU_RUN_AS, MGU_GROUPS), and refuses to run as root. It has the service's
+ * becomes nobody with the groups video (the GPU's render node) and mgu_alsa (the sound devices) itself, before it
+ * reads the stream (MGU_RUN_AS, MGU_GROUPS), and refuses to run as root. Nobody, as AirPlay Test's receiver: the
+ * smartx sound plugin refused uid 13101 (0.2.0 in the car: snd_pcm_open "Operation not permitted", the picture
+ * fine), and the player needs no internet (the client fetches the stream). It has the service's
  * limits (its cgroup, LimitCORE=1: no core dump). The stream comes from the Emby client (client.js) on its fd 4,
  * in frames (stream id, length); this module hands the current stream's bytes to the player's stdin, with the
  * pipe's backpressure, and drops a stream that was left. Control goes to the player's fd 3; its "MGU {json}" lines
@@ -24,6 +26,7 @@ const VIDEO_PATH = '/dev/shm/mgu-video-aurelm-emby';
 const VIDEO_SIZE = '1920x720';
 const AUDIO_DEVICE = 'plug:smartx:CarLifeMedia_CF_48_STEREO';
 const GROUPS = ['video', 'mgu_alsa'];
+const RUN_AS = 'nobody';   // as AirPlay Test's receiver, whose sound the smartx plugin takes
 const END = 0xffffffff;
 
 function createPlayer(o) {
@@ -110,16 +113,16 @@ function createPlayer(o) {
     function spawn(c) {
         const id = c.id;
         if (!fs.existsSync(o.bin)) return failed(c, 'the player is missing: ' + o.bin);
-        const env = Object.assign({ PATH: '/usr/bin:/bin', MGU_VIDEO_PATH: videoPath, MGU_VIDEO_SIZE: VIDEO_SIZE,
+        const env = Object.assign({ HOME: '/tmp', PATH: '/usr/bin:/bin', MGU_VIDEO_PATH: videoPath, MGU_VIDEO_SIZE: VIDEO_SIZE,
             MGU_AUDIO: 'alsa:' + AUDIO_DEVICE, MGU_ALSA_US: '64000' }, o.env || {});
-        // as root (the car): the player drops to the tool's uid with the groups itself (Node gives a child no
+        // as root (the car): the player drops to nobody with the groups itself (Node gives a child no
         // supplementary groups); uid null: as this process (the tests)
         if (o.uid != null && process.getuid && process.getuid() === 0) {
-            env.MGU_RUN_AS = String(o.uid);
+            env.MGU_RUN_AS = o.runAs || RUN_AS;
             env.MGU_GROUPS = (o.groups || GROUPS).join(',');
         }
         let child;
-        try { child = cp.spawn(o.bin, [], { env, cwd: '/', stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }); }
+        try { child = cp.spawn(o.bin, [], { env, cwd: '/tmp', stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }); }
         catch (e) { return failed(c, 'the player did not start: ' + e.message); }
         c.child = child;
         Object.assign(st, { pid: child.pid, running: true });

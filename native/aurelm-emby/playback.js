@@ -68,6 +68,15 @@ function setParam(u, key, value) {
     return base + '?' + q.join('&');
 }
 
+/** a stream's address for the log: its path and what it asks the server for, without the token */
+function describeUrl(u) {
+    const i = u.indexOf('?');
+    const path = (i < 0 ? u : u.slice(0, i)).replace(/^https?:\/\/[^/]+/, '');
+    const keep = ['VideoCodec', 'AudioCodec', 'MaxWidth', 'MaxHeight', 'VideoBitrate', 'AudioBitrate', 'MaxAudioChannels', 'TranscodeReasons', 'SubtitleMethod'];
+    const q = (i < 0 ? '' : u.slice(i + 1)).split('&').filter((p) => keep.indexOf(p.split('=')[0]) >= 0);
+    return path + (q.length ? ' ' + decodeURIComponent(q.join(' ')) : '');
+}
+
 function createPlayback(o) {
     const log = o.log || (() => {});
     const now = o.now || Date.now;
@@ -80,7 +89,10 @@ function createPlayback(o) {
     let cur = null;              // the item playing: see begin()
     let volume = 100, muted = false;
     let progressTimer = null;
-    const st = { state: 'idle', error: null, at: now() };
+    const st = { state: 'idle', error: null, at: now(), phase: null, phaseAt: null };
+    /** what a starting stream waits for, for the page: 'item', 'server' (PlaybackInfo), 'stream' (the head of the
+     *  server's answer: a heavy transcode starts slowly), 'player' */
+    function phase(p) { st.phase = p; st.phaseAt = now(); }
 
     function status() {
         return Object.assign({}, st, {
@@ -90,7 +102,7 @@ function createPlayback(o) {
             audioIndex: cur ? cur.audioIndex : null, subtitleIndex: cur ? cur.subtitleIndex : null,
         });
     }
-    function set(state, error) { st.state = state; st.error = error || null; st.at = now(); }
+    function set(state, error) { st.state = state; st.error = error || null; st.at = now(); if (state !== 'loading') st.phase = null; }
     function position(c) {
         c = c || cur;
         if (!c) return 0;
@@ -167,6 +179,7 @@ function createPlayback(o) {
         if (had) closeStream(c);
         c.start = startSec; c.t = 0; c.streamId = id; c.ended = false; c.player = null;
         set('loading');
+        phase('server');
         let s;
         try {
             // the stream left (a seek): its transcode ends first, so the server starts the new one from the position
@@ -177,10 +190,16 @@ function createPlayback(o) {
             if (!had && s.playSessionId !== c.playSessionId) stopEncoding(c.playSessionId);
             Object.assign(c, { playSessionId: s.playSessionId, mediaSourceId: s.mediaSourceId, playMethod: s.playMethod, reasons: s.reasons });
             log('stream ' + id + ' (' + why + '): ' + s.playMethod + (s.reasons ? ' (' + [].concat(s.reasons).join(', ') + ')' : '') + ' from ' + Math.round(startSec) + ' s');
+            log('stream ' + id + ': ' + describeUrl(s.url));
             const acc = account();
-            const r = await o.nx.stream({ url: s.url, headers: { 'X-Emby-Token': acc.token, Accept: '*/*' }, timeoutMs: 45000 });
+            phase('stream');
+            const asked = now();
+            // a transcode the server finds heavy (4K, HDR) can take long to send its first bytes
+            const r = await o.nx.stream({ url: s.url, headers: { 'X-Emby-Token': acc.token, Accept: '*/*' }, timeoutMs: 90000 });
             if (cur !== c || c.streamId !== id) { r.abort(); return; }
-            if (r.status < 200 || r.status >= 300) { r.res.resume(); throw new Error('the stream: HTTP ' + r.status); }
+            log('stream ' + id + ': HTTP ' + r.status + ' ' + (r.headers['content-type'] || '') + ' after ' + ((now() - asked) / 1000).toFixed(1) + ' s');
+            if (r.status < 200 || r.status >= 300) { r.res.resume(); throw new Error('the server\'s stream: HTTP ' + r.status); }
+            phase('player');
             c.stream = r;
             sink.start(id);
             if (c.paused) sink.ctl(id, 'pause');
@@ -233,6 +252,7 @@ function createPlayback(o) {
             mediaSourceId: opts && opts.mediaSourceId || null, playSessionId: null, playMethod: null, stream: null, streamId: 0 };
         cur = c;
         set('loading');
+        phase('item');
         try {
             const acc = account();
             const item = await api('GET', 'Users/' + encodeURIComponent(acc.userId) + '/Items/' + encodeURIComponent(id));
@@ -311,6 +331,7 @@ function createPlayback(o) {
             c.player = Object.assign({}, c.player, { state: ev.state, shown: ev.shown, late: ev.late, decerr: ev.decerr, aplayed: ev.aplayed,
                 alate: ev.alate, aunread: ev.aunread, adev: ev.adev, buffered: ev.buffered, kbytes: ev.kbytes });
             if (st.state !== 'error') set(ev.state === 'starting' ? 'loading' : ev.state);
+            if (ev.state !== 'starting') st.phase = null;
             if (ev.state === 'playing' && c.t > 60) c.retries = 0;   // it played on: a later loss gets its retries again
         } else if (ev.ev === 'open' || ev.ev === 'decoder' || ev.ev === 'audio') {
             c.player = Object.assign({}, c.player, { [ev.ev]: ev });
@@ -349,4 +370,4 @@ function createPlayback(o) {
     return { play, playstate, command, onPlayer, stop, status, position: () => position() };
 }
 
-module.exports = { createPlayback, deviceProfile, setParam, TICKS };
+module.exports = { createPlayback, deviceProfile, setParam, describeUrl, TICKS };

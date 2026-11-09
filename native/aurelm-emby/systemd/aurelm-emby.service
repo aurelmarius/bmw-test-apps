@@ -13,7 +13,7 @@ StartLimitBurst=10
 [Service]
 # root: the sign-in page opens (and closes again) an accept rule for its port in the unit's firewall (nft), and
 # the player's frame file is made owned by nobody (mgu-render takes that). The Emby client and the player
-# (emby-player) run as the tool's uid (13101), children of this service with its limits and LimitCORE.
+# (emby-player) run as the tool's uid (13101) and as nobody, children of this service with its limits and LimitCORE.
 # No "+" commands: every command here runs with the limits below, LimitCORE=1 included.
 Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
 Environment=EMBY_STATE=/var/opt/aurelm-emby/state

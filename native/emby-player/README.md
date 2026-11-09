@@ -17,7 +17,7 @@ checks are the AirPlay receiver's, read from `native/uxplay-mgu/video` by the Ma
 changed.
 
 **Runs as.** The service starts it as root. It creates the frame file, owned by nobody (mgu-render takes that),
-then becomes `MGU_RUN_AS` (the tool's uid, 13101) with the groups in `MGU_GROUPS` (`video`: the GPU's render node;
+then becomes `MGU_RUN_AS` (nobody, as the AirPlay receiver: the smartx sound plugin refused uid 13101 in the car) with the groups in `MGU_GROUPS` (`video`: the GPU's render node;
 `mgu_alsa`: the sound devices), before it reads a byte of the stream. It refuses to run as root. It has the
 service's limits: its cgroup, nice 10, and `LimitCORE=1` (no core dump to the crash handler; the tool lists
 `emby-player` in `crashNames`).
@@ -53,9 +53,11 @@ eac3 decoders, and linked statically, as are libstdc++ and libgcc. `build.sh` re
 through the service with this binary when it is built (`MGU_VIDEO_OFF`, the sound into a WAV file).
 
 **Checked off the car:** the build and its checks; real-time playback; pause; buffering after a gap in the stream;
-AC-3 5.1 mixed down; the drop from root to uid 13101 with the frame file owned by nobody.
+AC-3 5.1 mixed down; the drop from root to another uid with the frame file owned by nobody.
 
-**Not checked yet (car only):** the GPU decoder in display order with B frames, the throughput at 1080p, and
-the sound on the smartx device.
+**Checked in the car (0.2.0):** the GPU decoder and the picture (H.264 1920x1080 from the server). As uid 13101 the
+sound did not open (`snd_pcm_open`: Operation not permitted); 0.2.1 runs the player as nobody.
+
+**Not checked yet (car only):** the sound on the smartx device as nobody.
 
 **License.** GPL-3.0-or-later. FFmpeg is LGPL-2.1-or-later; its licence ships with the tool as `FFMPEG-LICENSE`.

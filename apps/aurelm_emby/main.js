@@ -35,7 +35,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.2.0';
+const SERVICE_VERSION = '0.2.1';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
@@ -114,17 +114,29 @@ function playRows(s, rows) {
     const pb = s.playback, pl = s.player || {}, tk = pl.tick || {};
     const it = pb.item || {};
     const where = hms(pb.pos) + (pb.dur ? ' / ' + hms(pb.dur) : '');
-    const STATE = { loading: 'starting', playing: 'playing', paused: 'paused', buffering: 'buffering (the internet is slow)' };
+    const STATE = { loading: 'starting', playing: 'playing', paused: 'paused', buffering: 'buffering (the internet or the server is slow)' };
+    const PHASE = { item: 'asking for the film', server: 'asking the server how to send it', stream: 'waiting for the server\'s stream', player: 'starting the player' };
+    const waited = pb.phaseAt ? Math.max(0, Math.round((s.now - pb.phaseAt) / 1000)) : 0;
+    const what = pb.state === 'error' ? pb.error
+        : pb.state === 'loading' && PHASE[pb.phase] ? PHASE[pb.phase] + (waited >= 3 ? ' (' + waited + ' s)' : '')
+            : STATE[pb.state] + ', ' + where;
+    // the film as the server has it, when it converts it: what it had to convert
+    const sv = it.video, sa = it.audio;
+    const src = pb.playMethod === 'Transcode' && (sv || sa)
+        ? ' (the server converts ' + [sv && String(sv.codec || '').toUpperCase() + ' ' + sv.w + 'x' + sv.h + (sv.hdr && sv.hdr !== 'SDR' ? ' ' + sv.hdr : ''),
+            sa && String(sa.codec || '').toUpperCase() + ' ' + sa.channels + 'ch'].filter(Boolean).join(', ') + ')'
+        : pb.playMethod ? ' (as it is)' : '';
     rows.push({ label: 'Playing', state: pb.state === 'error' ? 'bad' : pb.state === 'playing' || pb.state === 'paused' ? 'ok' : 'wait',
-        detail: (it.title || '?') + ' - ' + (pb.state === 'error' ? pb.error : STATE[pb.state] + ', ' + where) +
-            (pb.playMethod ? ' (' + (pb.playMethod === 'Transcode' ? 'the server converts it' : 'as it is') + ')' : '') });
-    const d = pl.decoder, open = pl.open && pl.open.video;
+        detail: (it.title || '?') + ' - ' + what + src });
+    // the player's numbers are this stream's only once it started (before, they are the last film's)
+    const fresh = pb.state !== 'loading' || pb.phase === 'player' || !pb.phase;
+    const d = fresh ? pl.decoder : null, open = fresh && pl.open && pl.open.video;
     const v = s.mirror || {};
     rows.push({ label: 'Picture', state: !open ? (pb.state === 'error' ? 'off' : 'wait') : d && !d.ok ? 'bad' : v.shown ? 'ok' : 'wait',
         detail: !open ? (pl.open ? 'no picture in the stream' : 'waiting for the stream')
             : (d && !d.ok ? 'GPU decoder: ' + d.error : 'H.264 ' + open.w + 'x' + open.h + ', ' + (tk.shown || 0) + ' shown' + (tk.late ? ', ' + tk.late + ' late' : '') +
                 (v.why ? '; ' + v.why : '')) });
-    const a = pl.audio, ca = s.carAudio || {};
+    const a = fresh ? pl.audio : null, ca = s.carAudio || {};
     let snd;
     if (!a) snd = { state: 'wait', detail: 'waiting for the stream' };
     else if (!a.ok) snd = { state: 'bad', detail: a.error };
@@ -183,6 +195,7 @@ mgu.run({
         const parked = Parked.watch(ctx, log, { strict: true });
         const mirror = createMirrorView({ RenderClient, Recorder: record.Recorder, kit: record, appId: ctx.spec.id, log,
             hintText: 'Press a button on the iDrive controller to return',
+            idleText: 'the player is not running', hiddenText: 'hidden: press "Show picture" to show it again',
             statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
         const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
         // setting "Picture only while parked" (on by default): off, the picture stays while driving too (the

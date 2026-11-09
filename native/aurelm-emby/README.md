@@ -20,7 +20,7 @@ shows the position as for any Emby player.
 | `Play` (item ids, start, tracks) | `playback.js`, in the client (uid 13101) |
 | `Items/{id}/PlaybackInfo` with our profile | the server keeps what fits as it is and transcodes the rest to **H.264** up to 1920x1080 (8 bits, progressive, square pixels) with **AAC or AC-3** (up to 6 channels), always as **MPEG-TS** over HTTP(S), from `StartTimeTicks`. Chosen subtitles are burned into the picture. Bit rate 8 Mbit/s at most. |
 | the stream | fetched by the client through `netx.js` (the uplink's DNS, our CA list). It goes to the service on the client's fd 4, in frames (stream id, length), and to `emby-player`'s stdin (`player.js`), with the pipes' backpressure: a paused film holds the server's socket. |
-| the player | `native/emby-player` (see its README): started as root for its frame file, then uid 13101 with the groups `video` and `mgu_alsa`. The GPU decodes into `/dev/shm/mgu-video-aurelm-emby`, and the sound goes into `plug:smartx:CarLifeMedia_CF_48_STEREO`. |
+| the player | `native/emby-player` (see its README): started as root for its frame file, then **nobody** with the groups `video` and `mgu_alsa`, as AirPlay Test's receiver (0.2.0 ran it as 13101: the smartx sound plugin refused it, "Operation not permitted"; it needs no internet, the client fetches the stream). The GPU decodes into `/dev/shm/mgu-video-aurelm-emby`, and the sound goes into `plug:smartx:CarLifeMedia_CF_48_STEREO`. |
 | on the screen | the app (`apps/aurelm_emby`): AirPlay Test's `mirror_view.js` over the whole screen, **only while parked** (`parked.js` strict). The setting "Picture only while parked" (on by default) turned off keeps it while driving too, for passengers. A button of the iDrive controller hides it, and "Show picture" brings it back. |
 | on the speakers | the app routes source 287 to the speakers (`car_audio.js`) while a film is on, paused included. 287 is shared with AirPlay Test: each app disconnects only the connection whose number it saved, neither connects over the other's, and the source is marked unavailable only when 287 is empty. A number saved before a restart of the head unit is forgotten, never disconnected. |
 | reports | `Sessions/Playing` at the start, `/Progress` every 10 s and at pause, unpause and volume, `/Stopped` at the end. The transcode is stopped (`DELETE Videos/ActiveEncodings`) when its stream is left. |
@@ -35,7 +35,7 @@ unit started, because the sound's route and the picture are the app's.
 |---|---|---|
 | `service.js` | root | the app's control socket, the sign-in page, the state; starts `client.js` |
 | `client.js` (`emby.js`, `ws.js`, `netx.js`, `playback.js`) | uid 13101 | the Emby client: HTTPS API and WebSocket to the server; what plays, its stream, the reports |
-| `emby-player` (`player.js` starts it) | root, then uid 13101 | the film: MPEG-TS in, the picture on the GPU, the sound into SmartXbar |
+| `emby-player` (`player.js` starts it) | root, then nobody | the film: MPEG-TS in, the picture on the GPU, the sound into SmartXbar |
 
 **Internet.** mgu-uplink routes only the uids a tool lists (`component.json` `"internet": true`,
 `"uids": [13101]`; the deploy tool writes `/var/opt/mgu-uplink/uids.d/aurelm-emby`), never root. So the

@@ -71,8 +71,11 @@ function fakeEmby(opts) {
             }
             if (p === '/videos/film2/stream.ts') {
                 seen.streams.push({ query, token: req.headers['x-emby-token'] });
-                res.writeHead(200, { 'Content-Type': 'video/mp2t' });
-                return res.end(o.media || Buffer.alloc(188 * 200, 0x47));
+                // a heavy transcode: the head of the answer comes late
+                return setTimeout(() => {
+                    res.writeHead(200, { 'Content-Type': 'video/mp2t' });
+                    res.end(o.media || Buffer.alloc(188 * 200, 0x47));
+                }, o.streamDelay || 0);
             }
             if (p.indexOf('/Sessions/Playing') === 0) { seen.reports.push({ path: p, body: JSON.parse(body || '{}') }); return json(204); }
             if (p === '/Videos/ActiveEncodings' && req.method === 'DELETE') { seen.encStops.push(query); return json(204); }
@@ -253,7 +256,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.2.0');
+        assert.strictEqual(s.version, '0.2.1');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -329,6 +332,9 @@ test('device profile: H.264 up to 1080p, AAC / AC-3, MPEG-TS over HTTP, subtitle
     assert.ok(p.SubtitleProfiles.every((x) => x.Method === 'Encode'));
     assert.strictEqual(playback.setParam('/v/s.ts?a=1&StartTimeTicks=0&b=2', 'StartTimeTicks', 50), '/v/s.ts?a=1&b=2&StartTimeTicks=50');
     assert.strictEqual(playback.setParam('/v/s.ts', 'x', 'a b'), '/v/s.ts?x=a%20b');
+    // the log's view of a stream address: what is asked, never the token
+    const d = playback.describeUrl('https://media.example.com/videos/9/stream.ts?MediaSourceId=m&api_key=SECRET&VideoCodec=h264&AudioCodec=aac,ac3&TranscodeReasons=VideoCodecNotSupported');
+    assert.strictEqual(d, '/videos/9/stream.ts VideoCodec=h264 AudioCodec=aac,ac3 TranscodeReasons=VideoCodecNotSupported');
 });
 
 /** a service already signed in to srv (account.json written before it starts) */
@@ -372,6 +378,7 @@ test('playback: cast, pause, seek, volume, stop; reported to the server', async 
         assert.strictEqual(started.PlayMethod, 'Transcode');
         assert.strictEqual(started.CanSeek, true);
         let s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'playing' && x.player.running, 5000, 'playing');
+        assert.strictEqual(s.playback.phase, null);
         assert.strictEqual(s.playback.item.title, 'Sample');
         assert.ok(s.playback.pos >= 10, 'position from the start: ' + s.playback.pos);
         assert.strictEqual(s.playback.playMethod, 'Transcode');
@@ -418,6 +425,19 @@ test('playback: the end of a film plays the next in the queue, then stops', asyn
         assert.strictEqual(reports('/Sessions/Playing')[1].body.PlaylistIndex, 1);
         const s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'idle', 5000, 'idle');
         assert.strictEqual(s.player.running, false);
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('playback: a slow server\'s stream shows as waiting for it, then plays', async () => {
+    const srv = await fakeEmby({ seconds: 60, streamDelay: 2500 });
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100' } });
+    try {
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow' } });
+        let s = await statusUntil(svc.sock, (x) => x.playback && x.playback.phase === 'stream', 5000, 'waiting for the stream');
+        assert.strictEqual(s.playback.state, 'loading');
+        assert.ok(s.playback.phaseAt > 0);
+        s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'playing', 8000, 'then playing');
+        assert.strictEqual(s.playback.phase, null);
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 
