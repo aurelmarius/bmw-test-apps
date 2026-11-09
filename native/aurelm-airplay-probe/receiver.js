@@ -68,7 +68,7 @@ function groupGid(group) {
 const PORTS = [BASE_PORT, BASE_PORT + 1, BASE_PORT + 2];   // uxplay -p 7300: tcp and udp 7300, 7301, 7302
 const MAX_RESTARTS = 3;
 // lines not worth keeping: UxPlay logs these every second while a client is quiet
-const NOISE = /seconds since last client feedback|^\s*$|httpd didn't get response/;
+const NOISE = /seconds since last client feedback|^\s*$|httpd didn't get response|url = \/feedback,/;
 
 function freshState() {
     return {
