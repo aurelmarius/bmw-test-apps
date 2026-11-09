@@ -23,8 +23,9 @@ const VIDEO_SIZE = '1920x720';
 const AUDIO_DEVICE = 'plug:smartx:CarLifeMedia_CF_48_STEREO';
 const RX_GROUPS = ['video', 'mgu_alsa'];
 // stage 4: a video the iPhone hands over (AirPlay's video button), played by the receiver's own player. Its variants
-// limited to H.264 (the GPU's), 1080p at 30 fps, 720p at 60 (UxPlay's -custom filter on YouTube's master playlist)
-const HLS_PROFILE = 'AVC:1080,720;HEVC:0;VP9:0;AV1:0';
+// limited to H.264 (the GPU's), 720p (the screen is 720 high; 1080p through a hotspot stalled: UxPlay's -custom filter
+// on YouTube's master playlist)
+const HLS_PROFILE = 'AVC:720,720;HEVC:0;VP9:0;AV1:0';
 // UxPlay keeps the audio track of this language, or else the one the iPhone's playlist marks default: a code that
 // matches no track (zxx: no linguistic content) leaves the choice to the phone (YouTube's own). UxPlay needs one set.
 const HLS_LANGUAGE = 'zxx';
@@ -143,7 +144,7 @@ function createReceiver(opts) {
             if (o.log) o.log('receiver: video ' + (j.vcodec || 'no picture') + (j.w ? ' ' + j.w + 'x' + j.h : '') + ', sound ' + (j.acodec || 'none') + (j.rate ? ' ' + j.rate + ' Hz' : '') + ', ' + Math.round(j.dur || 0) + ' s');
             break;
         case 'hlspos':
-            if (st.hls) Object.assign(st.hls, { pos: j.pos, dur: j.dur || st.hls.dur, paused: !!j.paused, buffering: !!j.buffering });
+            if (st.hls) Object.assign(st.hls, { pos: j.pos, dur: j.dur || st.hls.dur, paused: !!j.paused, buffering: !!j.buffering, stalls: j.stalls || 0 });
             return;   // each second: no onChange
         case 'hlsseek':
             if (st.hls) st.hls.seeks++;

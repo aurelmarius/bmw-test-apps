@@ -461,7 +461,7 @@ test('receiver with the video button: -hls and the H.264 filter, the proxy for i
         await new Promise((r) => setTimeout(r, 900));
         s = probe.status();
         const args = s.rx.lines.find((l) => / args /.test(l));
-        assert.ok(/ -hls -custom AVC:1080,720;HEVC:0;VP9:0;AV1:0$/.test(args), args);
+        assert.ok(/ -hls -custom AVC:720,720;HEVC:0;VP9:0;AV1:0$/.test(args), args);
         const env = s.rx.lines.find((l) => / env /.test(l));
         assert.ok(new RegExp('LANGUAGE=zxx http_proxy=http://127\\.0\\.0\\.1:' + port + ' no_proxy=localhost,127\\.0\\.0\\.1 ca=.*aurelm-airplay-probe/cacert\\.pem$').test(env), env);
         // the proxy runs (a child, as the internet uid on the car)

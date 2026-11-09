@@ -31,7 +31,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.9.5';
+const SERVICE_VERSION = '0.9.6';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -93,7 +93,8 @@ function videoSteps(r, st, off) {
             detail: px.state === 'on' ? mb(ps.bytesIn) + ' downloaded' + (ps.lastError ? ', last error: ' + ps.lastError : '') : px.error || px.state || '' },
         { label: 'Video', state: e && e.why === 'error' ? 'bad' : playing ? 'ok' : e ? 'off' : 'wait',
             detail: (o ? (o.vcodec ? o.vcodec.toUpperCase() + (o.w ? ' ' + o.w + 'x' + o.h : '') : 'no picture') + (o.acodec ? ' + ' + o.acodec.toUpperCase() : '') + ', ' : '') +
-                state + (o ? ', ' + hms(h.pos) + (h.dur ? ' / ' + hms(h.dur) : '') : '') + (st.fps > 0 ? ', ' + st.fps + ' fps' : '') },
+                state + (o ? ', ' + hms(h.pos) + (h.dur ? ' / ' + hms(h.dur) : '') : '') + (st.fps > 0 ? ', ' + st.fps + ' fps' : '') +
+                (h.stalls ? ', ran dry ' + h.stalls + 'x' : '') },
     ];
 }
 

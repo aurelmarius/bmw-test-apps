@@ -140,6 +140,9 @@ struct Player {
     std::string error;
     /* stats */
     std::atomic<unsigned long long> vpk{0}, apk{0}, bytes{0}, idr{0}, sps{0}, shown{0}, decerr{0};
+    std::atomic<int> stalls{0};   /* how often the queue ran dry while playing */
+    bool warm = false;            /* the start's buffer (3 s) was read; again after a seek */
+    std::atomic<double> wait_pos{0};   /* the position before the clock starts: the start, then each seek's target */
     bool video_ok = true;
 };
 
@@ -153,13 +156,14 @@ int interrupt_cb(void *arg) { return ((Player *) arg)->stop.load() ? 1 : 0; }
 double ts(int64_t v, AVRational tb) { return v == AV_NOPTS_VALUE ? -1 : v * av_q2d(tb); }
 
 /* the video stream: H.264 (the GPU decodes it), the highest bitrate whose height (when known) is at most
- * MGU_HLS_MAXH (1080) and whose bitrate is at most MGU_HLS_MAXKBPS (8000); one audio stream; every other stream
+ * MGU_HLS_MAXH (720: the screen is 720 high) and whose bitrate is at most MGU_HLS_MAXKBPS (5000; in the car, 0.9.5,
+ * 1080p at ~8 Mbit/s through an iPhone hotspot stalled every few seconds); one audio stream; every other stream
  * discarded (the hls demuxer then never downloads it). UxPlay's master playlist is filtered to H.264 already. */
 void pick_streams(Player *p) {
     const char *e = getenv("MGU_HLS_MAXH");
-    const int maxh = e && atoi(e) > 0 ? atoi(e) : 1080;
+    const int maxh = e && atoi(e) > 0 ? atoi(e) : 720;
     e = getenv("MGU_HLS_MAXKBPS");
-    const int64_t maxbr = (e && atoi(e) > 0 ? atoi(e) : 8000) * 1000LL;
+    const int64_t maxbr = (e && atoi(e) > 0 ? atoi(e) : 5000) * 1000LL;
     int best = -1, fallback = -1;
     int64_t bbr = -1, fbr = INT64_MAX;
     for (unsigned i = 0; i < p->fmt->nb_streams; i++) {
@@ -311,7 +315,7 @@ void push(Queue &q, AVPacket *pk, double t, Player *p) {
     q.cv.wait(l, [&] {
         if (p->stop || p->seek_pending()) return true;
         const double now = p->clock.now();
-        return q.q.size() < 900 && (now < 0 || q.last < 0 || q.last - now < 6.0);
+        return q.q.size() < 4000 && (now < 0 || q.last < 0 || q.last - now < 20.0);   /* up to 20 s ahead */
     });
     if (p->stop) { av_packet_free(&pk); return; }
     q.q.push_back(pk);
@@ -330,8 +334,8 @@ void tick_pos(Player *p, double &last) {
     bool paused, held;
     { std::lock_guard<std::mutex> l(p->clock.m); paused = p->clock.paused; held = p->clock.held; }
     const double pos = pos_of(p);
-    emitf("{\"ev\":\"hlspos\",\"pos\":%.3f,\"dur\":%.3f,\"paused\":%s,\"buffering\":%s}", pos < 0 ? 0 : pos, p->duration,
-          paused ? "true" : "false", held ? "true" : "false");
+    emitf("{\"ev\":\"hlspos\",\"pos\":%.3f,\"dur\":%.3f,\"paused\":%s,\"buffering\":%s,\"stalls\":%d}", pos < 0 ? p->wait_pos.load() : pos, p->duration,
+          paused ? "true" : "false", held ? "true" : "false", p->stalls.load());
 }
 
 void demux_loop(Player *p) {
@@ -403,11 +407,14 @@ void demux_loop(Player *p) {
                 rc = avformat_seek_file(p->fmt, -1, INT64_MIN, t, t, 0);
                 p->vq.clear(); p->aq.clear();
                 p->clock.reset();
+                p->warm = false;
+                p->wait_pos = target;
                 p->seek_gen++;
                 p->vq.cv.notify_all(); p->aq.cv.notify_all();
                 emitf("{\"ev\":\"hlsseek\",\"to\":%.3f,\"ok\":%s}", target, rc >= 0 ? "true" : "false");
             }
-            /* buffering: the queue ran dry while playing (the clock holds), until 1.5 s is read again */
+            /* buffering: at the start (and after a seek) the clock waits until 3 s is read; a queue that runs dry while
+             * playing holds it until 4 s is read again (in the car, 0.9.5: holding until 1.5 s stuttered on a hotspot) */
             {
                 const double now = p->clock.now();
                 Queue &q = p->vi >= 0 ? p->vq : p->aq;
@@ -415,8 +422,11 @@ void demux_loop(Player *p) {
                 bool qeof;
                 { std::lock_guard<std::mutex> l(q.m); ahead = q.last >= 0 && now >= 0 ? q.last - now : 0; qeof = q.eof; }
                 const bool held = p->clock.is_held();
-                if (now >= 0 && !held && !qeof && ahead < 0.1) p->clock.set_held(true);
-                else if (held && (ahead > 1.5 || qeof)) p->clock.set_held(false);
+                if (now >= 0 && !p->warm) {
+                    if (ahead >= 3.0 || qeof) { if (held) p->clock.set_held(false); p->warm = true; }
+                    else if (!held) p->clock.set_held(true);
+                } else if (now >= 0 && !held && !qeof && ahead < 0.1) { p->clock.set_held(true); p->stalls++; }
+                else if (held && (ahead > 4.0 || qeof)) p->clock.set_held(false);
             }
             const double t = mono();
             if (t - last_stats >= 1.0) {
@@ -514,6 +524,7 @@ extern "C" int mgu_hls_start(const char *url, double start_s) {
     Player *p = new Player();
     p->url = url;
     p->start_s = start_s > 0 ? start_s : 0;
+    p->wait_pos = p->start_s;
     g_eos = 0;
     std::string shown = p->url.substr(0, p->url.find('?'));
     emitf("{\"ev\":\"hls\",\"url\":\"%s\",\"start\":%.3f}", clean(shown).c_str(), p->start_s);
@@ -556,7 +567,7 @@ extern "C" int mgu_hls_info(double *duration, double *position, double *seek_sta
     bool paused = false, held = false;
     if (p) {
         const double now = pos_of(p);
-        pos = now < 0 ? p->start_s : now;
+        pos = now < 0 ? p->wait_pos.load() : now;
         dur = p->duration;
         std::lock_guard<std::mutex> k(p->clock.m);
         paused = p->clock.paused; held = p->clock.held;
