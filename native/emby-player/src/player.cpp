@@ -27,6 +27,7 @@
  * MGU_VIDEO_OFF   set: no decoder (a PC: pictures are only timed and counted)
  * MGU_AUDIO       alsa:<device> (default alsa:plug:smartx:CarLifeMedia_CF_48_STEREO) | null | wav:<path> (tests)
  * MGU_ALSA_US     the ALSA buffer in us (default 64000)
+ * MGU_PROBE_KB    how much of the stream is read to find its streams (default 1024; tests)
  */
 #include <dlfcn.h>
 #include <errno.h>
@@ -653,6 +654,19 @@ void drop_root() {
 
 void on_term(int) { g_quit = true; }
 
+/* what is still to end: 3 the sound, 2 the picture, 1 the rest */
+std::atomic<int> g_left(3);
+/* told to end (quit, SIGTERM, the service gone): 2.5 s at most, then gone however far it got, with the log saying
+ * what was still running (0.2.2 in the car: a player not ended after 6 s was killed by the service) */
+void watchdog() {
+    while (!g_quit) sleep_s(0.05);
+    for (int i = 0; i < 50; i++) { if (!g_left.load()) return; sleep_s(0.05); }
+    const int l = g_left.load();
+    fprintf(stderr, "emby-player: still %s after 2.5 s: exiting now\n", l == 3 ? "closing the sound" : l == 2 ? "closing the decoder" : "ending");
+    fflush(stderr);
+    _exit(0);
+}
+
 }  // namespace
 
 int main() {
@@ -677,6 +691,7 @@ int main() {
         else if (!warn.empty()) fprintf(stderr, "emby-player: %s\n", warn.c_str());
     }
     drop_root();
+    std::thread(watchdog).detach();
     if (!ferr.empty()) event("{\"ev\":\"decoder\",\"ok\":false,\"error\":\"frame file: %s\"}", js(ferr).c_str());
     std::thread ctl;
     if (fcntl(3, F_GETFD) != -1) ctl = std::thread(control_thread);
@@ -687,9 +702,11 @@ int main() {
     const int iosz = 64 * 1024;
     AVIOContext *io = avio_alloc_context((unsigned char *) av_malloc(iosz), iosz, 0, nullptr, read_stdin, nullptr, nullptr);
     fmt->pb = io;
-    /* small: the picture starts sooner (the server's stream is a known kind) */
-    fmt->probesize = 256 * 1024;
-    fmt->max_analyze_duration = AV_TIME_BASE / 2;
+    /* 1 MiB, 1 s: the server's transcoder may write its first sound after a good part of a second of picture (0.2.2
+     * in the car: 256 KiB found no sound in a DTS -> AAC stream); a sound that shows up later still is taken below */
+    fmt->probesize = 1024 * 1024;
+    if (const char *pk = getenv("MGU_PROBE_KB")) if (atoi(pk) >= 4) fmt->probesize = atoi(pk) * 1024;   /* tests */
+    fmt->max_analyze_duration = AV_TIME_BASE;
     const AVInputFormat *ts = av_find_input_format("mpegts");
     int rc = avformat_open_input(&fmt, nullptr, ts, nullptr);
     if (rc < 0 || avformat_find_stream_info(fmt, nullptr) < 0) {
@@ -700,6 +717,11 @@ int main() {
         ctl.detach();
         g_mgvf.close();
         return 2;
+    }
+    for (unsigned i = 0; i < fmt->nb_streams; i++) {
+        const AVCodecParameters *cp = fmt->streams[i]->codecpar;
+        fprintf(stderr, "emby-player: stream %u: %s %s %dx%d %d Hz %d ch\n", i, av_get_media_type_string(cp->codec_type) ? av_get_media_type_string(cp->codec_type) : "?",
+                avcodec_get_name(cp->codec_id), cp->width, cp->height, cp->sample_rate, cp->ch_layout.nb_channels);
     }
     const int vi = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
     const int ai = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
@@ -722,7 +744,9 @@ int main() {
     }
     std::thread vt, at, tt(tick_thread);
     if (g_has_video) vt = std::thread(video_thread); else g_vq.end();
-    if (g_has_audio) at = std::thread(audio_thread); else g_aq.end();
+    /* no sound found yet: its queue stays open, a sound stream that shows up later is taken (below) */
+    if (g_has_audio) at = std::thread(audio_thread);
+    auto playable = [](AVCodecID id) { return id == AV_CODEC_ID_AAC || id == AV_CODEC_ID_AC3 || id == AV_CODEC_ID_EAC3; };
 
     AVPacket *pkt = av_packet_alloc();
     while (!g_quit) {
@@ -730,6 +754,16 @@ int main() {
         rc = av_read_frame(fmt, pkt);
         if (rc < 0) break;
         AVStream *s = fmt->streams[pkt->stream_index];
+        if (!as && s->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && playable(s->codecpar->codec_id)) {
+            as = s;
+            g_apar = as->codecpar; g_atb = as->time_base; g_has_audio = true;
+            fprintf(stderr, "emby-player: the sound came later: stream %d %s\n", pkt->stream_index, avcodec_get_name(as->codecpar->codec_id));
+            event("{\"ev\":\"open\",\"video\":%s%s%s,\"audio\":{\"codec\":\"%s\",\"rate\":%d,\"channels\":%d},\"late\":true}",
+                  vs ? "{\"codec\":\"h264\",\"w\":" : "null", vs ? std::to_string(vs->codecpar->width).c_str() : "",
+                  vs ? (",\"h\":" + std::to_string(vs->codecpar->height) + "}").c_str() : "",
+                  avcodec_get_name(as->codecpar->codec_id), as->codecpar->sample_rate, as->codecpar->ch_layout.nb_channels);
+            at = std::thread(audio_thread);
+        }
         if ((s == vs || s == as) && pkt->size > 0) {
             Packet p;
             p.data.assign(pkt->data, pkt->data + pkt->size);
@@ -749,7 +783,9 @@ int main() {
     const double q0 = mono();
     if (g_quit) fprintf(stderr, "emby-player: quitting\n");
     if (at.joinable()) at.join();
+    g_left = 2;
     if (vt.joinable()) vt.join();
+    g_left = 1;
     if (g_quit) fprintf(stderr, "emby-player: ended in %.2f s\n", mono() - q0);
     const bool ended = !g_quit;
     const double t = g_clock.started() ? g_clock.now() - first_pts() : 0;
@@ -758,6 +794,7 @@ int main() {
     tt.join();
     ctl.detach();   /* blocked in a read of fd 3: the exit ends it */
     avformat_close_input(&fmt);
+    g_left = 0;
     if (io) { av_freep(&io->buffer); avio_context_free(&io); }
     g_mgvf.close();
     return 0;

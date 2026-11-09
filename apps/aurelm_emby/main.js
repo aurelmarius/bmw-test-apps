@@ -35,7 +35,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.2.2';
+const SERVICE_VERSION = '0.2.3';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
@@ -139,7 +139,7 @@ function playRows(s, rows) {
                 (v.why ? '; ' + v.why : '')) });
     const a = fresh ? pl.audio : null, ca = s.carAudio || {};
     let snd;
-    if (!a) snd = { state: 'wait', detail: 'waiting for the stream' };
+    if (!a) snd = { state: 'wait', detail: fresh && pl.open && pl.running ? 'no sound in the stream yet' : 'waiting for the stream' };
     else if (!a.ok) snd = { state: 'bad', detail: a.error };
     else {
         const n = String(a.codec).toUpperCase() + ' ' + a.channels + 'ch' + (tk.aplayed ? ', ' + tk.aplayed + ' played' : '') + (tk.aunread ? ', ' + tk.aunread + ' unread' : '');

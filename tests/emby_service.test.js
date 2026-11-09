@@ -260,7 +260,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.2.2');
+        assert.strictEqual(s.version, '0.2.3');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -474,6 +474,30 @@ test('playback with emby-player itself (MPEG-TS -> H.264 timed, AAC -> WAV)', as
         const seconds = head.readUInt32LE(40) / (48000 * 4);
         assert.ok(seconds > 2.5 && seconds < 3.3, 'sound played: ' + seconds + ' s');
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('emby-player: a sound that shows up after the opening is still played', () => {
+    if (!fs.existsSync(PLAYER)) return 'skipped (native/emby-player not built)';
+    if (!fs.existsSync('/lib/ld-linux-x86-64.so.2')) return 'skipped (no /lib/ld-linux-x86-64.so.2 on this PC)';
+    // the sample without its sound's packets in the first 24 KiB (PID 0x101): read with a 16 KiB probe, the sound
+    // stream is there with no parameters yet, as Emby's DTS -> AAC transcode was in the car (0.2.2: "audio": null)
+    const ts = fs.readFileSync(path.join(FIXTURES, 'emby_sample.ts'));
+    const out = [];
+    for (let i = 0; i + 188 <= ts.length; i += 188) {
+        const pid = ((ts[i + 1] & 0x1f) << 8) | ts[i + 2];
+        if (i < 24 * 1024 && pid === 0x101) continue;
+        out.push(ts.slice(i, i + 188));
+    }
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emby-late-'));
+    const r = require('child_process').spawnSync(PLAYER, [], { input: Buffer.concat(out), encoding: 'utf8', timeout: 20000,
+        env: { MGU_VIDEO_OFF: '1', MGU_AUDIO: 'wav:' + path.join(tmp, 'a.wav'), MGU_PROBE_KB: '16', LD_LIBRARY_PATH: path.join(path.dirname(PLAYER), 'stub') } });
+    const evs = r.stdout.split('\n').filter((l) => l.indexOf('MGU ') === 0).map((l) => JSON.parse(l.slice(4)));
+    assert.strictEqual(evs.filter((e) => e.ev === 'open')[0].audio, null, 'no sound at the opening');
+    assert.ok(/the sound came later/.test(r.stderr), r.stderr);
+    const audio = evs.filter((e) => e.ev === 'audio')[0];
+    assert.ok(audio && audio.ok, JSON.stringify(evs));
+    const end = evs.filter((e) => e.ev === 'end')[0];
+    assert.ok(end && end.aplayed > 50, 'sound played: ' + JSON.stringify(end));
 });
 
 test('a revoked token: signed out, with the reason', async () => {

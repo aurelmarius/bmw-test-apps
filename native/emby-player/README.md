@@ -7,7 +7,7 @@ a new player.
 
 | Part | Does |
 |---|---|
-| demux | libavformat's mpegts demuxer on stdin, a video and an audio queue (6 s or 40 MiB at most: when the player is ahead, the stream waits in the pipe and so in the server's socket) |
+| demux | libavformat's mpegts demuxer on stdin (1 MiB read to find the streams; a sound stream that shows up later, as Emby's transcoder may write it, is taken when it does), a video and an audio queue (6 s or 40 MiB at most: when the player is ahead, the stream waits in the pipe and so in the server's socket) |
 | picture | `src/decoder_msdk.cpp`: our copy of Moonride's MSDK decoder (VA-API on `/dev/dri/renderD128`), changed in two ways: frames come out in **display order** (films have B frames; the AirPlay receiver's copy decodes in decoding order) and a film is **fitted whole** (black bars, never cropped). VPP fits the picture into 1920x720, and each picture goes into the frame file (`/dev/shm/mgu-video-aurelm-emby`, MGVF, 3 slots, I420) when the clock reaches it. A picture already late is decoded without VPP and without its copy. |
 | sound | libavcodec's aac, ac3 and eac3 decoders, mixed down to stereo S16 at the volume, written to ALSA `plug:smartx:CarLifeMedia_CF_48_STEREO` (libasound opened at run time, the device non-blocking, as the AirPlay receiver's). The sound is kept on the clock: late sound is dropped, early sound waits. |
 | clock | monotonic, from the first picture's timestamp. It stops while paused, and while the stream runs dry (buffering, until 1 s is queued again). |
@@ -21,6 +21,9 @@ then becomes `MGU_RUN_AS` (nobody, as the AirPlay receiver: the smartx sound plu
 `mgu_alsa`: the sound devices), before it reads a byte of the stream. It refuses to run as root. It has the
 service's limits: its cgroup, nice 10, and `LimitCORE=1` (no core dump to the crash handler; the tool lists
 `emby-player` in `crashNames`).
+
+**Ending.** Told to end (`quit`, SIGTERM, the service gone), it closes the sound device first and is gone within
+2.5 s however far it got; the log says what was still running.
 
 **Control** (fd 3, one per line): `pause`, `resume`, `volume <0..1>`, `quit`. **Events** (stdout):
 `MGU {json}` with `open` (the streams), `decoder`, `audio`, `tick` (every 500 ms: position, state, pictures
