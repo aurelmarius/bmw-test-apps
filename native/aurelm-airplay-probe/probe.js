@@ -35,7 +35,7 @@ const rxm = require('./receiver');
 const sockgroup = require('./sockgroup');
 const { fork } = require('child_process');
 
-const VERSION = '0.9.7';
+const VERSION = '0.9.8';
 const MDNS_GROUP = '224.0.0.251';
 const QUERY_NAMES = ['_airplay._tcp.local', '_raop._tcp.local', '_companion-link._tcp.local', '_apple-mobdev2._tcp.local'];
 
@@ -230,7 +230,7 @@ function createProbe(opts) {
 
     function freshState() {
         return {
-            active: false, mode: 'probe', hls: false, identity: 'carplay', startedAt: null, endsAt: null, ifaces: [],
+            active: false, mode: 'probe', hls: false, identity: 'carplay', net: 'car', startedAt: null, endsAt: null, ifaces: [],
             mdns: { mode: 'off', error: null, holders: [], packets: 0, queries: 0, airplayQueries: 0, answered: 0, announced: 0, lastAirplayQuery: null, peers: [] },
             tcp: { port: null, listening: [], busy: [], error: null, connections: 0, last: null, requests: [] },
             fw: { state: 'off', error: null, chains: [], removed: 0 },
@@ -248,7 +248,7 @@ function createProbe(opts) {
             s.rx = { name: rxName(), running: r.running, pid: r.pid, starts: r.starts, error: r.error, exit: r.exit, ip: r.ip, iface: r.iface,
                 client: r.client, video: r.video, videoRunning: r.videoRunning, audio: r.audio, stream: r.stream, ports: rxm.PORTS, lines: r.lines.slice(-25),
                 decoder: r.decoder, videoPath: o.rxVideoPath || rxm.VIDEO_PATH, sound: r.sound, soundRunning: r.soundRunning, cpu: r.cpu,
-                hlsOn: st.hls, identity: st.identity, hls: r.hls, proxy: st.hls ? { state: px.state, error: px.error, stats: px.stats } : null };
+                hlsOn: st.hls, identity: st.identity, net: st.net, hls: r.hls, proxy: st.hls ? { state: px.state, error: px.error, stats: px.stats } : null };
         }
         s.verdict = verdict(s);
         return s;
@@ -456,7 +456,9 @@ function createProbe(opts) {
     function rxName() { return st.identity === 'classic' ? o.rxName + ' Video' : o.rxName; }
     function rxTarget() {
         const u = usedIfaces();
-        const order = ['car-wifi', 'iphone-hotspot', 'uplink', 'wifi'];
+        // the app's setting "AirPlay network": the car's Wi-Fi first (wireless CarPlay's), or the iPhone's hotspot first
+        // (the unit on it through mgu-uplink: CarPlay can be off, and iOS does not end a video for it)
+        const order = st.net === 'hotspot' ? ['iphone-hotspot', 'uplink', 'car-wifi', 'wifi'] : ['car-wifi', 'iphone-hotspot', 'uplink', 'wifi'];
         for (let k = 0; k < order.length; k++) {
             const i = u.find((x) => x.kind === order[k]);
             if (i) return Object.assign({ ip: i.ip, iface: i.name }, who());
@@ -477,22 +479,24 @@ function createProbe(opts) {
     /* ----- the test ----- */
     function every(ms, f) { const t = setInterval(() => { try { f(); } catch (e) { log(e.message); } }, ms); if (t.unref) t.unref(); timers.push(t); }
 
-    async function start(minutes, mode, hls, identity) {
+    async function start(minutes, mode, hls, identity, net) {
         const m = Math.max(1, Math.min(60, Number(minutes) || 15));
         const md = mode === 'receiver' ? 'receiver' : 'probe';
         const wantHls = md === 'receiver' && !!hls;
         const wantId = identity === 'classic' ? 'classic' : 'carplay';
+        const wantNet = net === 'hotspot' ? 'hotspot' : 'car';
         if (st.active && st.mode !== md) await stop('switching to the ' + (md === 'receiver' ? 'receiver' : 'network') + ' test');
         // the video button switched on or off in the app: the receiver starts again with it
-        if (st.active && md === 'receiver' && (st.hls !== wantHls || st.identity !== wantId)) await stop('the receiver settings changed');
+        if (st.active && md === 'receiver' && (st.hls !== wantHls || st.identity !== wantId || st.net !== wantNet)) await stop('the receiver settings changed');
         if (st.active) { st.endsAt = now() + m * 60000; resetEnd(); log('test extended to ' + m + ' min'); return status(); }
         Object.assign(st, freshState());
         st.mode = md;
         st.hls = wantHls;
         st.identity = wantId;
+        st.net = wantNet;
         st.active = true; st.startedAt = now(); st.endsAt = now() + m * 60000;
         if (md === 'receiver') {
-            log('receiver test started (' + m + ' min), "' + o.rxName + '" ' + id.deviceid + (st.hls ? ', with the video button' : '') + (st.identity !== 'carplay' ? ', identity ' + st.identity : ''));
+            log('receiver test started (' + m + ' min), "' + o.rxName + '" ' + id.deviceid + (st.hls ? ', with the video button' : '') + (st.identity !== 'carplay' ? ', identity ' + st.identity : '') + (st.net !== 'car' ? ', on the iPhone hotspot first' : ''));
             if (o.nft) { const n = nft.remove({ nft: o.nft }); if (n) log('firewall: removed ' + n + ' old rules'); }
             st.ifaces = interfaces(o.only);
             log('interfaces: ' + (usedIfaces().map((i) => i.name + '=' + i.ip + ' (' + i.kind + ')').join(', ') || 'none'));
@@ -590,7 +594,7 @@ function serveControl(probe, sockPath, log, onRequest, onExit) {
                     onExit();
                     return;
                 }
-                const p = m.cmd === 'end-session' ? probe.endSession(m.why) : m.cmd === 'start' ? probe.start(m.minutes, m.mode, m.hls, m.identity) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
+                const p = m.cmd === 'end-session' ? probe.endSession(m.why) : m.cmd === 'start' ? probe.start(m.minutes, m.mode, m.hls, m.identity, m.net) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
                 Promise.resolve(p).then((s) => { try { c.write(JSON.stringify(s) + '\n'); } catch (e) { /* gone */ } }, (e) => { try { c.write(JSON.stringify({ error: String(e.message || e) }) + '\n'); } catch (x) { /* gone */ } });
             }
         });

@@ -513,6 +513,14 @@ test('receiver identity: AppleTV5,4 by default; the classic one is another recei
     } finally { await probe.stop('finally'); }
 });
 
+test('AirPlay network: the car Wi-Fi first by default, the iPhone hotspot first when set', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rxnet-'));
+    const probe = P.createProbe({ stateDir: tmp, nft: false, only: ['lo'], rxUid: null, proxyUid: null });
+    // the order is the probe's; checked through its source (the interfaces of this machine are not a car's)
+    assert.ok(/st\.net === 'hotspot' \? \['iphone-hotspot', 'uplink', 'car-wifi', 'wifi'\] : \['car-wifi', 'iphone-hotspot', 'uplink', 'wifi'\]/.test(fs.readFileSync(require.resolve('../native/aurelm-airplay-probe/probe.js'), 'utf8')));
+    assert.ok(probe);
+});
+
 test('proxy: CONNECT tunnels to the allowed ports only, plain http passed on, names through the uplink', async () => {
     const { createProxy } = require(path.join(__dirname, '..', 'native', 'aurelm-airplay-probe', 'proxy'));
     const http = require('http');

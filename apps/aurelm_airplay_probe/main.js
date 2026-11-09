@@ -31,7 +31,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.9.7';
+const SERVICE_VERSION = '0.9.8';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -195,7 +195,7 @@ mgu.run({
             return render();
         }
         ui.onClick('BTN_START', () => command('start', 'Starting...'));
-        ui.onClick('BTN_RX', () => { mirror.wantAgain(); return command('start', 'Starting the receiver...', { mode: 'receiver', hls: ctx.settings.get('videoButton') !== false, identity: ctx.settings.get('identity') || 'carplay' }); });
+        ui.onClick('BTN_RX', () => { mirror.wantAgain(); return command('start', 'Starting the receiver...', { mode: 'receiver', hls: ctx.settings.get('videoButton') !== false, identity: ctx.settings.get('identity') || 'carplay', net: ctx.settings.get('net') || 'car' }); });
 
         /* ---------- stage 2: the picture over the screen, parked only ---------- */
         const parked = Parked.watch(ctx, log, { strict: true });

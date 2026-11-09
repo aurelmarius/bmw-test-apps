@@ -2,7 +2,7 @@
   "id": "aurelm_airplay_probe",
   "title": "AirPlay Test",
   "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers; videos sent with the AirPlay button (YouTube) played by the head unit itself. Also the network test. Needs the AirPlay test service.",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "vendor": "custom",
   "loggingId": "OA9X",
   "iconGlyph": "AP",
@@ -26,7 +26,7 @@
     }
   },
   "requires": {
-    "aurelm-airplay-probe": "0.9.7"
+    "aurelm-airplay-probe": "0.9.8"
   },
   "screens": [
     {
@@ -85,6 +85,22 @@
         [
           "classic",
           "Apple TV 3,2 \"BMW iDrive Video\": UxPlay's own (try for YouTube)"
+        ]
+      ]
+    },
+    {
+      "key": "net",
+      "label": "AirPlay network",
+      "type": "choice",
+      "default": "car",
+      "options": [
+        [
+          "car",
+          "Car Wi-Fi (wireless CarPlay) first (default)"
+        ],
+        [
+          "hotspot",
+          "iPhone hotspot first (the unit on it; CarPlay may be off)"
         ]
       ]
     },
