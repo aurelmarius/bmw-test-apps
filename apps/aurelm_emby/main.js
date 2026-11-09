@@ -35,7 +35,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.2.1';
+const SERVICE_VERSION = '0.2.2';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
@@ -133,7 +133,8 @@ function playRows(s, rows) {
     const d = fresh ? pl.decoder : null, open = fresh && pl.open && pl.open.video;
     const v = s.mirror || {};
     rows.push({ label: 'Picture', state: !open ? (pb.state === 'error' ? 'off' : 'wait') : d && !d.ok ? 'bad' : v.shown ? 'ok' : 'wait',
-        detail: !open ? (pl.open ? 'no picture in the stream' : 'waiting for the stream')
+        detail: !open ? (pb.serverSays ? 'the server\'s transcoder: ' + pb.serverSays.split('\n').pop()
+            : fresh && pl.open ? 'no picture in the stream' : 'waiting for the stream')
             : (d && !d.ok ? 'GPU decoder: ' + d.error : 'H.264 ' + open.w + 'x' + open.h + ', ' + (tk.shown || 0) + ' shown' + (tk.late ? ', ' + tk.late + ' late' : '') +
                 (v.why ? '; ' + v.why : '')) });
     const a = fresh ? pl.audio : null, ca = s.carAudio || {};
@@ -209,11 +210,18 @@ mgu.run({
             return { running: true, videoRunning: true, stream: { shown: pl.tick ? pl.tick.shown : 0 },
                 decoder: d ? { ok: d.ok, error: d.error, path: d.path || pl.videoPath, w: d.w, h: d.h } : null };
         }
+        let soundUntil = 0;
         function sync() {
             const pb = st && st.playback;
             mirror.update({ rx: rxOf(st), pageVisible: shown(), driving: parkedOnly() && parked.moving() });
-            // the speakers while a film is on (paused too: the route is not taken and given back at each pause)
-            carAudio.want(!!(pb && ACTIVE.indexOf(pb.state) >= 0 && st.player && st.player.audio && st.player.audio.ok));
+            // the speakers while a film is on: paused, seeking and between two streams too (each is a new player, whose
+            // sound opens a moment later). 0.2.1 let them go and took them again at every seek, and the sound stopped
+            // coming in the car. Kept 5 s more after the film, for the next episode or a cast again.
+            const pl = st && st.player;
+            const soundFailed = !!(pl && pl.running && pl.audio && pl.audio.ok === false);
+            const on = !!(pb && ACTIVE.indexOf(pb.state) >= 0 && !soundFailed);
+            if (on) soundUntil = Date.now() + 5000;
+            carAudio.want(on || Date.now() < soundUntil);
         }
         if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => { mirror.close(); carAudio.want(false); });
 

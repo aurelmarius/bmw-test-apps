@@ -234,8 +234,14 @@ function createClient(o) {
         if (!account) return Promise.reject(new Error('not signed in'));
         return api(account, method, path, body);
     }
+    /** a GET whose answer is text (a server log): resolves { status, text } */
+    async function callText(path) {
+        if (!account) throw new Error('not signed in');
+        const r = await nx.request({ method: 'GET', url: account.server + '/' + path.replace(/^\//, ''), headers: headers(account), maxBytes: 4 * 1024 * 1024 });
+        return { status: r.status, text: r.body.toString('utf8') };
+    }
 
-    return Object.assign(ev, { signIn, run, stop, signOut, status, describe, call, account: () => account, device: o.device });
+    return Object.assign(ev, { signIn, run, stop, signOut, status, describe, call, callText, account: () => account, device: o.device });
 }
 
 module.exports = { createClient, candidates, authHeader, describe, COMMANDS, CLIENT };

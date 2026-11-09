@@ -48,7 +48,7 @@ The app and its root service announce a test receiver, **BMW iDrive test**, on t
 ### 🎬 Emby (`aurelm_emby`) + Emby cast service (`aurelm-emby`)
 *The head unit as a cast target for the Emby phone app, as Emby's TV apps and Kodi's Emby add-on are.*
 
-**Status:** step 2, playback (0.2.1). In the car, 0.2.0 showed the film on the GPU (the server's H.264 1920x1080), pause from the phone worked, but had no sound (the player ran as a uid the sound plugin refuses: 0.2.1 runs it as nobody, as AirPlay Test's receiver), and a film the server converts slowly only said "starting" (0.2.1 says what it waits for).
+**Status:** step 2, playback (0.2.2). In the car: the picture on the GPU (subtitles burned in by the server), pause and seek from the phone; the sound came with 0.2.1 but stopped after a seek (0.2.2 keeps the speakers' route for the whole film). Films in Dolby Vision do not start: the server's stream never comes (0.2.2 shows what the server's transcoder says, for an administrator account).
 
 The service signs in once with your Emby account and stays connected to your Emby server, so **BMW iDrive** shows in the Emby app's cast menu. The phone only sends the command through the server: it does not connect to the head unit, and wireless CarPlay stays connected. The server must be reachable from the internet; the head unit gets there through **mgu-uplink**, as its own uid only.
 

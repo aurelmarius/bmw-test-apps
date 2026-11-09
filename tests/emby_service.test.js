@@ -77,6 +77,10 @@ function fakeEmby(opts) {
                     res.end(o.media || Buffer.alloc(188 * 200, 0x47));
                 }, o.streamDelay || 0);
             }
+            // the server's logs (an administrator's): the newest transcode log says why the stream does not come
+            if (p === '/System/Logs') return json(200, [{ Name: 'embyserver.txt', DateModified: '2026-11-09T12:00:00Z' },
+                { Name: 'ffmpeg-transcode-old.txt', DateModified: '2026-11-09T11:00:00Z' }, { Name: 'ffmpeg-transcode-new.txt', DateModified: '2026-11-09T12:37:41Z' }]);
+            if (p === '/System/Logs/ffmpeg-transcode-new.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ffmpeg version 6\nStream #0:0: Video: hevc (Main 10), dovi\n[hevc] Error parsing NAL\nConversion failed!\n'); }
             if (p.indexOf('/Sessions/Playing') === 0) { seen.reports.push({ path: p, body: JSON.parse(body || '{}') }); return json(204); }
             if (p === '/Videos/ActiveEncodings' && req.method === 'DELETE') { seen.encStops.push(query); return json(204); }
             if (p === '/Users/u1/Items/film1') return json(200, { Id: 'film1', Name: 'Interstellar', ProductionYear: 2014, Type: 'Movie', RunTimeTicks: 101690000000,
@@ -256,7 +260,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.2.1');
+        assert.strictEqual(s.version, '0.2.2');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -430,12 +434,15 @@ test('playback: the end of a film plays the next in the queue, then stops', asyn
 
 test('playback: a slow server\'s stream shows as waiting for it, then plays', async () => {
     const srv = await fakeEmby({ seconds: 60, streamDelay: 2500 });
-    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100' } });
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100' }, childEnv: { EMBY_SYSTEM_DNS: '1', EMBY_SERVER_LOG_AFTER_MS: '500' } });
     try {
         srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow' } });
         let s = await statusUntil(svc.sock, (x) => x.playback && x.playback.phase === 'stream', 5000, 'waiting for the stream');
         assert.strictEqual(s.playback.state, 'loading');
         assert.ok(s.playback.phaseAt > 0);
+        // still waiting: the newest transcode log's error lines
+        s = await statusUntil(svc.sock, (x) => x.playback && x.playback.serverSays, 3000, 'the server\'s transcoder');
+        assert.strictEqual(s.playback.serverSays, '[hevc] Error parsing NAL\nConversion failed!');
         s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'playing', 8000, 'then playing');
         assert.strictEqual(s.playback.phase, null);
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }

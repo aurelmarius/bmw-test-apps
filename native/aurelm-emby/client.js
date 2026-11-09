@@ -41,8 +41,8 @@ const sink = {
 };
 
 const pb = createPlayback({
-    api: (m, p, b) => c.call(m, p, b), nx, account: () => c.account(), device, log, sink, describe: c.describe,
-    bitrate: Number(process.env.EMBY_BITRATE) || undefined,
+    api: (m, p, b) => c.call(m, p, b), apiText: (p) => c.callText(p), nx, account: () => c.account(), device, log, sink, describe: c.describe,
+    bitrate: Number(process.env.EMBY_BITRATE) || undefined, serverLogAfterMs: Number(process.env.EMBY_SERVER_LOG_AFTER_MS) || undefined,
 });
 let lastSent = '';
 function playbackStatus() {

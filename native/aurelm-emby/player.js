@@ -171,7 +171,8 @@ function createPlayer(o) {
         c.finish = finish;
     }
 
-    /** ends a player: quit on its control pipe, SIGTERM, SIGKILL after 3 s */
+    /** ends a player: quit on its control pipe, SIGTERM, SIGKILL after 6 s (in the car 3 s were not always enough:
+     *  a player killed with its sound device open may leave the input busy) */
     function kill(c) {
         if (cur === c) { cur = null; st.running = false; if (c.paused && src) src.resume(); }
         if (c.done) return Promise.resolve();
@@ -181,8 +182,8 @@ function createPlayer(o) {
             try { c.child.stdio[3].write('quit\n'); } catch (e) { /* gone */ }
             try { c.child.stdin.destroy(); } catch (e) { /* gone */ }
             try { c.child.kill('SIGTERM'); } catch (e) { /* gone */ }
-            const t = setTimeout(() => { try { c.child.kill('SIGKILL'); } catch (e) { /* gone */ } }, 3000);
-            const last = setTimeout(() => { if (c.finish) c.finish(null, 'SIGKILL'); }, 8000);
+            const t = setTimeout(() => { log('player ' + c.id + ': not ended after 6 s: SIGKILL'); try { c.child.kill('SIGKILL'); } catch (e) { /* gone */ } }, 6000);
+            const last = setTimeout(() => { if (c.finish) c.finish(null, 'SIGKILL'); }, 11000);
             const was = c.onEnded;
             c.onEnded = () => { clearTimeout(t); clearTimeout(last); removeVideo(); was(); };
         });

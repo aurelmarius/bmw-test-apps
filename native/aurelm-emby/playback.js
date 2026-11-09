@@ -92,10 +92,32 @@ function createPlayback(o) {
     const st = { state: 'idle', error: null, at: now(), phase: null, phaseAt: null };
     /** what a starting stream waits for, for the page: 'item', 'server' (PlaybackInfo), 'stream' (the head of the
      *  server's answer: a heavy transcode starts slowly), 'player' */
-    function phase(p) { st.phase = p; st.phaseAt = now(); }
+    function phase(p) { st.phase = p; st.phaseAt = now(); if (p !== 'stream') st.serverSays = null; }
+
+    /** the newest transcode log of the server, its error lines (or its last ones); null when there is none to read
+     *  (the logs are an administrator's: another account gets a sentence saying so) */
+    async function serverLog() {
+        let list;
+        try { list = await api('GET', 'System/Logs'); }
+        catch (e) { return e.code === 'EAUTH' ? 'its log needs an administrator account to be read from here' : null; }
+        const items = (Array.isArray(list) ? list : (list && list.Items) || []).filter((x) => x && /transcode/i.test(x.Name || ''));
+        items.sort((a, b) => Date.parse(b.DateModified || 0) - Date.parse(a.DateModified || 0));
+        if (!items[0] || !o.apiText) return null;
+        let r = null;
+        for (const p of ['System/Logs/' + encodeURIComponent(items[0].Name), 'System/Logs/Log?name=' + encodeURIComponent(items[0].Name)]) {
+            try { r = await o.apiText(p); } catch (e) { r = null; }
+            if (r && r.status === 200 && r.text) break;
+            r = null;
+        }
+        if (!r) return null;
+        const lines = r.text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        const bad = lines.filter((l) => /error|fail|invalid|unsupported|not supported|could not|cannot|impossible|no such|conversion/i.test(l));
+        return (bad.length ? bad.slice(-4) : lines.slice(-3)).map((l) => l.slice(0, 300)).join('\n');
+    }
 
     function status() {
         return Object.assign({}, st, {
+            serverSays: st.serverSays || null,
             item: cur ? cur.info : null, pos: cur ? position() : null, dur: cur && cur.info ? cur.info.seconds : null,
             paused: cur ? cur.paused : false, playMethod: cur ? cur.playMethod : null, volume, muted,
             queue: { index: q.index, length: q.ids.length }, player: cur ? cur.player : null,
@@ -194,8 +216,20 @@ function createPlayback(o) {
             const acc = account();
             phase('stream');
             const asked = now();
+            // no first bytes after 20 s: what the server's transcoder says (its newest log), in our log and on the page
+            const look = setTimeout(() => {
+                if (cur !== c || c.streamId !== id || st.phase !== 'stream') return;
+                serverLog().then((t) => {
+                    if (!t || cur !== c || c.streamId !== id) return;
+                    st.serverSays = t;
+                    t.split('\n').forEach((l) => log('server transcoder: ' + l));
+                });
+            }, o.serverLogAfterMs || 20000);
+            let r;
             // a transcode the server finds heavy (4K, HDR) can take long to send its first bytes
-            const r = await o.nx.stream({ url: s.url, headers: { 'X-Emby-Token': acc.token, Accept: '*/*' }, timeoutMs: 90000 });
+            try { r = await o.nx.stream({ url: s.url, headers: { 'X-Emby-Token': acc.token, Accept: '*/*' }, timeoutMs: 90000 }); }
+            catch (e) { if (e.code === 'ETIMEDOUT' && st.serverSays) e.message += ' (the server\'s transcoder: ' + st.serverSays.split('\n').pop() + ')'; throw e; }
+            finally { clearTimeout(look); }
             if (cur !== c || c.streamId !== id) { r.abort(); return; }
             log('stream ' + id + ': HTTP ' + r.status + ' ' + (r.headers['content-type'] || '') + ' after ' + ((now() - asked) / 1000).toFixed(1) + ' s');
             if (r.status < 200 || r.status >= 300) { r.res.resume(); throw new Error('the server\'s stream: HTTP ' + r.status); }

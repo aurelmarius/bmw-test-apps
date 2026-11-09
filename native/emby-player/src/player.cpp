@@ -296,11 +296,13 @@ void video_thread() {
         if (picture == false) lastLate = false;   /* try a picture again with the next one */
     }
     if (open) {
+        const double t0 = mono();
         if (!g_quit) dec.flush([&](const woc::VideoFrame &f) {
             const double fp = f.pts_ms < 0 ? g_clock.now() : f.pts_ms / 1000.0 - kPtsOffset + first_pts();
             show(fp, &f);
         });
         dec.shutdown();
+        fprintf(stderr, "emby-player: decoder closed (%.2f s)\n", mono() - t0);
     }
 }
 
@@ -532,7 +534,12 @@ void audio_thread() {
             else s_aunread++;
         }
     }
-    out.close();
+    {
+        /* the device first: a sound input left open would stay busy for the next player */
+        const double t0 = mono();
+        out.close();
+        if (opened) fprintf(stderr, "emby-player: sound closed (%.2f s)\n", mono() - t0);
+    }
     av_frame_free(&fr);
     av_packet_free(&pkt);
     avcodec_free_context(&ctx);
@@ -739,8 +746,11 @@ int main() {
     av_packet_free(&pkt);
     g_vq.end(); g_aq.end();
     if (g_clock.stalled()) g_clock.set_stalled(false);
-    if (vt.joinable()) vt.join();
+    const double q0 = mono();
+    if (g_quit) fprintf(stderr, "emby-player: quitting\n");
     if (at.joinable()) at.join();
+    if (vt.joinable()) vt.join();
+    if (g_quit) fprintf(stderr, "emby-player: ended in %.2f s\n", mono() - q0);
     const bool ended = !g_quit;
     const double t = g_clock.started() ? g_clock.now() - first_pts() : 0;
     if (ended) event("{\"ev\":\"end\",\"t\":%.3f,\"shown\":%llu,\"late\":%llu,\"aplayed\":%llu}", t < 0 ? 0 : t, s_shown.load(), s_late.load(), s_aplayed.load());
