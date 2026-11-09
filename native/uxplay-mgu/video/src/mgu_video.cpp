@@ -104,6 +104,12 @@ extern "C" int mgu_video_frame_timed(const unsigned char *data, int len, long lo
     return frame_locked(data, len, pts_ms, wait, arg, shown, errors);
 }
 
+/* stage 4: a played video has B frames: its pictures in display order (from the decoder's next start) */
+extern "C" void mgu_video_display_order(int on) {
+    std::lock_guard<std::mutex> l(g_mu);
+    woc::Decoder::set_display_order(on != 0);
+}
+
 /* a seek: the decoder starts again at the next SPS; the frame file and its last picture stay */
 extern "C" void mgu_video_reset(void) {
     std::lock_guard<std::mutex> l(g_mu);

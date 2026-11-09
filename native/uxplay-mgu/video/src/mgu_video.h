@@ -11,6 +11,8 @@ int mgu_video_frame(const unsigned char *data, int len, unsigned long long *show
 /* stage 4: as mgu_video_frame, the access unit's pts given; each picture waits for wait(pts_ms, arg): 0 shown, 1 dropped */
 int mgu_video_frame_timed(const unsigned char *data, int len, long long pts_ms, int (*wait)(long long, void *), void *arg,
                           unsigned long long *shown, unsigned long long *errors);
+/* stage 4: 1 a played video's pictures in display order (B frames), 0 decoding order (mirroring); from the next start */
+void mgu_video_display_order(int on);
 /* a seek: the decoder starts again at the next SPS, the frame file stays */
 void mgu_video_reset(void);
 void mgu_video_stop(void);

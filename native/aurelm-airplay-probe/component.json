@@ -1,7 +1,7 @@
 {
   "id": "aurelm-airplay-probe",
   "kind": "tool",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "license": "GPL-3.0-or-later",
   "title": "AirPlay network test service",
   "description": "For the app AirPlay Test: the network test, and the AirPlay receiver (UxPlay's protocol on the head unit): the iPhone's screen mirroring decoded on the GPU into mgu-render's frame file, shown by the app while parked, and its sound into SmartXbar's CarLife input; a video sent with the AirPlay button (YouTube) played by its own player from the internet (mgu-uplink, through a proxy running as uid 13102). Opens the firewall for its ports only while a test runs.",

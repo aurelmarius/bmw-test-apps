@@ -111,6 +111,10 @@ public:
 
     void shutdown();
 
+    /* uxplay-mgu: output in display order (B frames reordered) from the next
+     * sequence on; off (the default): decoding order, the lowest latency. */
+    static void set_display_order(bool on);
+
     /* Initialised and holding a sequence: false before the first SPS and
      * after a sequence was given up, until the next SPS. */
     bool decoding() const;

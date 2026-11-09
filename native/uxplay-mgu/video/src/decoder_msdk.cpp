@@ -30,6 +30,9 @@ const char *vaErrorStr(VAStatus error_status);
 
 namespace woc {
 
+bool g_display_order = false;   /* uxplay-mgu: see Decoder::set_display_order */
+void Decoder::set_display_order(bool on) { g_display_order = on; }
+
 namespace {
 
 const mfxU32 kSyncTimeoutMs = 1000;   /* longest wait for one frame */
@@ -258,8 +261,12 @@ bool Decoder::State::start(const AccessUnit &au)
     dec.IOPattern = MFX_IOPATTERN_OUT_OPAQUE_MEMORY;
     /* mgu-moonlight: decoding order, no reorder wait. The host sends no B
      * frames (NVENC low-latency, Sunshine), so decode order is display order
-     * and each frame comes out of the access unit that carries it. */
-    dec.mfx.DecodedOrder = 1;
+     * and each frame comes out of the access unit that carries it. The same
+     * for the iPhone's screen mirroring. A played video (uxplay-mgu stage 4,
+     * YouTube's H.264) has B frames: display order there (set_display_order),
+     * or its pictures come out of order (in the car: jerky, torn, 10 of 30 fps
+     * shown, the rest dropped as late). */
+    dec.mfx.DecodedOrder = g_display_order ? 0 : 1;
 
     const mfxFrameInfo &in = dec.mfx.FrameInfo;
     w = out_w ? out_w : in.CropW;

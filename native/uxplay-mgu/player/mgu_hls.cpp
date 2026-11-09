@@ -391,6 +391,8 @@ void demux_loop(Player *p) {
         p->seek_to = p->start_s;
     }
     p->open = true;
+    mgu_video_display_order(1);   /* B frames: display order (the decoder starts at the first SPS after this) */
+    mgu_video_reset();
     emitf("{\"ev\":\"start\"}");
     if (p->vi >= 0) p->vthr = std::thread(video_loop, p);
     if (p->ai >= 0) p->athr = std::thread(audio_loop, p);
@@ -508,6 +510,7 @@ void stop_locked() {
     mgu_audio_stop();
     if (was_open) { emitf("{\"ev\":\"soundstop\"}"); emitf("{\"ev\":\"stop\",\"frames\":0}"); }
     mgu_video_stop();
+    mgu_video_display_order(0);   /* mirroring again: decoding order, the lowest latency */
 }
 
 }  // namespace
