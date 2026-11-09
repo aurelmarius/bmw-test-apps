@@ -11,7 +11,8 @@
  *   "Stop"          ends the film (as Stop in the phone's remote)
  * Signed in, the service stays connected to the Emby server, and the head unit shows as "BMW iDrive" in the
  * Emby app's cast menu. A film cast to it plays (step 2): the service's player decodes it on the GPU into
- * mgu-render's frame file; this app shows it over the whole screen while the car is parked (mirror_view.js,
+ * mgu-render's frame file; this app shows it over the whole screen while the car is parked (setting "Picture only
+ * while parked", on by default; off, also while driving) (mirror_view.js,
  * AirPlay Test's) and routes its sound to the speakers (car_audio.js, AirPlay Test's with two more checks: both
  * apps play into source 287 and never take it from each other). Pause, seek, stop and volume come from the phone.
  *
@@ -184,6 +185,9 @@ mgu.run({
             hintText: 'Press a button on the iDrive controller to return',
             statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
         const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
+        // setting "Picture only while parked" (on by default): off, the picture stays while driving too (the
+        // passengers' choice, e.g. cartoons for the children; the driver sees the centre screen)
+        const parkedOnly = () => ctx.settings.get('parkedOnly') !== false;
         /** the player as the mirror view knows a receiver: running, its decoder, pictures shown */
         function rxOf(s) {
             const pb = s && s.playback, pl = s && s.player;
@@ -194,7 +198,7 @@ mgu.run({
         }
         function sync() {
             const pb = st && st.playback;
-            mirror.update({ rx: rxOf(st), pageVisible: shown(), driving: parked.moving() });
+            mirror.update({ rx: rxOf(st), pageVisible: shown(), driving: parkedOnly() && parked.moving() });
             // the speakers while a film is on (paused too: the route is not taken and given back at each pause)
             carAudio.want(!!(pb && ACTIVE.indexOf(pb.state) >= 0 && st.player && st.player.audio && st.player.audio.ok));
         }

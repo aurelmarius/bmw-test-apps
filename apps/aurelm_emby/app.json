@@ -59,6 +59,12 @@
   ],
   "settings": [
     {
+      "key": "parkedOnly",
+      "label": "Picture only while parked (off: also while driving; the driver sees the centre screen)",
+      "type": "bool",
+      "default": true
+    },
+    {
       "key": "theme",
       "label": "Colour theme",
       "type": "choice",
