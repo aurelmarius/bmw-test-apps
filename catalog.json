@@ -27,7 +27,7 @@
     {
       "id": "aurelm-emby",
       "kind": "tool",
-      "version": "0.2.6",
+      "version": "0.3.0",
       "title": "Emby cast service",
       "description": "For the app Emby: the head unit as a cast target in the Emby phone app (Emby's remote control, as Kodi's Emby add-on), and the film's player: the server sends H.264 up to 1080p with AAC or AC-3, decoded on the GPU into mgu-render's frame file (the app shows it while parked) and played into SmartXbar's CarLife input. Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code); keeps only the access token. Its internet goes through mgu-uplink, as uid 13101 only; the player runs as nobody (as AirPlay Test's receiver).",
       "author": "aurelmarius",
@@ -35,10 +35,10 @@
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm-emby@0.2.6.tgz",
-        "size": 905719,
-        "sha256": "4a3c8ebfa47b4ed9320cdad46ce63ba1ebb8212024f7cfa979a522e077450f17",
-        "url": "packages/aurelm-emby@0.2.6.tgz"
+        "name": "aurelm-emby@0.3.0.tgz",
+        "size": 906229,
+        "sha256": "dfc910c7b9f3c320c1dcbbc0b4e3eeba5bac13da4ba0c207cd00506b0b379268",
+        "url": "packages/aurelm-emby@0.3.0.tgz"
       },
       "requires": {
         "mgu-deploy": "0.7.0",
@@ -71,23 +71,23 @@
     {
       "id": "aurelm_emby",
       "kind": "app",
-      "version": "0.2.6",
+      "version": "0.3.0",
       "title": "Emby",
       "description": "The head unit as a cast target for the Emby phone app: sign in once from the phone (QR code), then choose \"BMW iDrive\" in Emby's cast menu. The film plays on the centre screen while parked, its sound on the car's speakers; pause, seek and stop from the phone. Needs the Emby cast service.",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_emby@0.2.6.tgz",
-        "size": 584149,
-        "sha256": "472a2b333bb68b5d0aa63e68731ce53056e4d9ce90d4e21b3c45fcf1aeb5ced1",
-        "url": "packages/aurelm_emby@0.2.6.tgz"
+        "name": "aurelm_emby@0.3.0.tgz",
+        "size": 588545,
+        "sha256": "7fdb058c98359da7223ffb2aeef718af88e6f1b05f0f33a52e2c3dd514365d79",
+        "url": "packages/aurelm_emby@0.3.0.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_emby.png",
       "iconSha256": "9682cbd70243b5b0193c54d589a11a38ee4b81eaec07326a666eed140ce39918",
       "requires": {
-        "aurelm-emby": "0.2.6"
+        "aurelm-emby": "0.3.0"
       }
     }
   ]
