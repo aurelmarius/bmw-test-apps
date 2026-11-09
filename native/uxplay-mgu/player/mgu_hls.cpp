@@ -340,6 +340,12 @@ void demux_loop(Player *p) {
     av_dict_set(&o, "rw_timeout", "15000000", 0);
     av_dict_set(&o, "reconnect", "1", 0);
     av_dict_set(&o, "reconnect_streamed", "1", 0);
+    /* a new connection for each segment: YouTube's segments come from several servers, and a connection kept through
+     * the proxy's tunnel cannot be reused for another one (in the car, 0.9.4: "Cannot reuse HTTP connection for
+     * different host", "keepalive request failed", the segments lost); a failed segment is loaded again */
+    av_dict_set(&o, "http_persistent", "0", 0);
+    av_dict_set(&o, "http_multiple", "0", 0);
+    av_dict_set(&o, "seg_max_retry", "3", 0);
     av_dict_set(&o, "user_agent", "AppleCoreMedia/1.0.0 (Apple TV; U; CPU OS 17_0 like Mac OS X; en_us)", 0);
     p->fmt = avformat_alloc_context();
     p->fmt->interrupt_callback.callback = interrupt_cb;
@@ -469,6 +475,7 @@ void demux_loop(Player *p) {
 fail:
     p->error = err;
     p->ended = true;
+    if (p->stop) return;   /* stopped (the iPhone ended it): no error, no end to report */
     emitf("{\"ev\":\"hlsend\",\"why\":\"error\",\"error\":\"%s\"}", clean(err).c_str());
     p->eos_flag = true;
     g_eos = 1;
@@ -519,6 +526,7 @@ extern "C" void mgu_hls_stop(void) {
     std::lock_guard<std::mutex> l(g_m);
     if (g_p && !g_p->ended) emitf("{\"ev\":\"hlsend\",\"why\":\"stopped\"}");
     stop_locked();
+    g_eos = 0;   /* an end reported for a video that is gone would reach UxPlay with no video */
 }
 
 extern "C" void mgu_hls_pause(int paused) {
@@ -557,7 +565,7 @@ extern "C" int mgu_hls_info(double *duration, double *position, double *seek_sta
     if (position) *position = pos;
     if (seek_start) *seek_start = 0;
     if (seek_duration) *seek_duration = dur;
-    if (rate) *rate = on && !paused && !held ? 1.0f : 0.0f;
+    if (rate) *rate = on && !paused ? 1.0f : 0.0f;   /* loading is still playing to the iPhone (GStreamer's PLAYING) */
     if (buffer_empty) *buffer_empty = held ? 1 : 0;
     if (buffer_full) *buffer_full = 0;
     return on ? 1 : 0;

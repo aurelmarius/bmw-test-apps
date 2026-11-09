@@ -123,3 +123,10 @@ edit('lib/httpd.c', [
     ('                if (logger_debug) {\n                    const char *method = http_request_get_method(connection->request);',
      '                if (1) {   /* mgu: always */\n                    const char *method = http_request_get_method(connection->request);'),
 ])
+
+# an end of video with no video (the iPhone ended it first): ignored, not an assert (in the car, 0.9.4: the receiver
+# aborted, "raop_handle_eos: Assertion `id >= 0' failed", and was started again)
+edit('lib/raop.c', [
+    ('    int id = raop->current_video;\n    assert (id >= 0);\n',
+     '    int id = raop->current_video;\n    if (id < 0) return;   /* mgu: the video was ended already */\n'),
+])
