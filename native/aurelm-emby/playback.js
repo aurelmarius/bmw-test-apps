@@ -263,8 +263,18 @@ function createPlayback(o) {
             subs: cur && cur.subs ? { key: cur.subs.key, count: cur.subs.count, lang: cur.subs.lang, error: cur.subs.error || null } : null,
             paused: cur ? cur.paused : false, parked: cur ? !!cur.parked : false, playMethod: cur ? cur.playMethod : null, volume, muted,
             queue: { index: q.index, length: q.ids.length }, player: cur ? cur.player : null,
-            audioIndex: cur ? cur.audioIndex : null, subtitleIndex: cur ? cur.subtitleIndex : null,
+            audioIndex: cur ? (cur.audioIndex != null ? cur.audioIndex : cur.audioDefault != null ? cur.audioDefault : null) : null,
+            subtitleIndex: cur ? cur.subtitleIndex : null,
+            tracks: cur ? tracks(cur) : null,
         });
+    }
+    /** the film's audio and subtitle tracks, for the app's menus (in ASCII: the kit's fonts) */
+    function tracks(c) {
+        const name = (x) => ascii(x.DisplayTitle || [x.Language, x.Codec, x.Channels ? x.Channels + 'ch' : null].filter(Boolean).join(' ') || ('Track ' + x.Index));
+        return {
+            audio: (c.audioStreams || []).map((x) => ({ i: x.Index, t: name(x) })),
+            subs: (c.subStreams || []).map((x) => ({ i: x.Index, t: name(x) + (isText(x) ? '' : ' (burned in)') })),
+        };
     }
     function set(state, error) { st.state = state; st.error = error || null; st.at = now(); if (state !== 'loading') st.phase = null; }
     function position(c) {
@@ -325,7 +335,9 @@ function createPlayback(o) {
         }
         u = setParam(u, 'StartTimeTicks', Math.round(startSec * TICKS));
         const subs = (src.MediaStreams || []).filter((x) => x.Type === 'Subtitle');
-        return { url: acc.server + (u[0] === '/' ? '' : '/') + u, playSessionId: info.PlaySessionId || null, mediaSourceId: src.Id,
+        const audios = (src.MediaStreams || []).filter((x) => x.Type === 'Audio');
+        const defAudio = src.DefaultAudioStreamIndex != null ? src.DefaultAudioStreamIndex : ((audios.filter((x) => x.IsDefault)[0] || audios[0] || {}).Index);
+        return { audios, defaultAudio: defAudio != null ? defAudio : null, url: acc.server + (u[0] === '/' ? '' : '/') + u, playSessionId: info.PlaySessionId || null, mediaSourceId: src.Id,
             playMethod: method, reasons: src.TranscodeReasons || null, subs,
             defaultSub: src.DefaultSubtitleStreamIndex != null ? src.DefaultSubtitleStreamIndex : -1 };
     }
@@ -388,7 +400,8 @@ function createPlayback(o) {
             s = await playbackInfo(c, startSec);
             if (cur !== c || c.streamId !== id) return;
             if (!had && s.playSessionId !== c.playSessionId) stopEncoding(c.playSessionId);
-            Object.assign(c, { playSessionId: s.playSessionId, mediaSourceId: s.mediaSourceId, playMethod: s.playMethod, reasons: s.reasons, subStreams: s.subs });
+            Object.assign(c, { playSessionId: s.playSessionId, mediaSourceId: s.mediaSourceId, playMethod: s.playMethod, reasons: s.reasons, subStreams: s.subs,
+                audioStreams: s.audios, audioDefault: s.defaultAudio });
             if (c.subtitleIndex == null) c.subtitleIndex = s.defaultSub;
             loadSubs(c);
             log('stream ' + id + ' (' + why + '): ' + s.playMethod + (s.reasons ? ' (' + [].concat(s.reasons).join(', ') + ')' : '') + ' from ' + Math.round(startSec) + ' s');
@@ -568,7 +581,11 @@ function createPlayback(o) {
         case 'Mute': muted = true; setVolume(volume); break;
         case 'Unmute': muted = false; setVolume(volume); break;
         case 'ToggleMute': muted = !muted; setVolume(volume); break;
-        case 'SetAudioStreamIndex': if (cur) { cur.audioIndex = Number(a.Index); seek(position()); } break;
+        case 'SetAudioStreamIndex': if (cur) {
+            const was = cur.audioIndex != null ? cur.audioIndex : cur.audioDefault;
+            cur.audioIndex = Number(a.Index);
+            if (cur.audioIndex !== was) seek(position());
+        } break;
         case 'SetSubtitleStreamIndex': if (cur) {
             const was = subStream(cur, cur.subtitleIndex);
             cur.subtitleIndex = Number(a.Index) >= 0 ? Number(a.Index) : -1;

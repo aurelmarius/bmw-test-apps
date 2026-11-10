@@ -6,6 +6,7 @@
  *
  *   parent -> { op: 'run', account } | { op: 'signin', id, server, user, password } | { op: 'signout' } | { op: 'stop' }
  *             | { op: 'player', id, ev } (the player's events) | { op: 'playback-stop' } | { op: 'playstate', command }
+ *             | { op: 'track', kind: 'audio' | 'subs', index } | { op: 'prefs', prefs }
  *   child  -> { ev: 'status', status } | { ev: 'signin', id, ok, account | error } | { ev: 'play' | 'playstate' |
  *             'command', data } | { ev: 'signed-out', why } | { ev: 'log', line }
  *             | { ev: 'playback', status } | { ev: 'player-start', id } | { ev: 'player-ctl', id, line } | { ev: 'player-stop', id }
@@ -86,6 +87,8 @@ process.on('message', (m) => {
     else if (m.op === 'stop') { pb.stop(); c.stop(); }
     else if (m.op === 'player') { pb.onPlayer(m.id, m.ev); if (m.ev && m.ev.ev !== 'tick') playbackStatus(); }
     else if (m.op === 'playback-stop') { pb.stop(); playbackStatus(); }
+    // a track chosen on the iDrive: as the phone's GeneralCommand
+    else if (m.op === 'track') { pb.command({ name: m.kind === 'audio' ? 'SetAudioStreamIndex' : 'SetSubtitleStreamIndex', args: { Index: m.index } }); playbackStatus(); }
     else if (m.op === 'prefs') { pb.setPrefs(m.prefs); playbackStatus(); }
     // Stop from the iDrive parks the film (paused for the phone, the player closed): the phone has no Stop to undo it
     else if (m.op === 'playstate') { if (m.command === 'Stop') pb.park(); else pb.playstate({ command: m.command, seek: m.seek }); playbackStatus(); }

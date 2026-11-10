@@ -75,6 +75,8 @@ function fakeEmby(opts) {
                 const ps = 'ps-' + (++sessions);
                 return json(200, { PlaySessionId: ps, MediaSources: [{ Id: 'ms2', SupportsTranscoding: true, TranscodeReasons: ['VideoCodecNotSupported'],
                     DefaultSubtitleStreamIndex: -1, MediaStreams: [
+                        { Type: 'Audio', Index: 1, Codec: 'eac3', Language: 'eng', DisplayTitle: 'English EAC3 5.1 (Default)', IsDefault: true },
+                        { Type: 'Audio', Index: 4, Codec: 'aac', Language: 'rum', DisplayTitle: 'Română AAC stereo' },
                         { Type: 'Subtitle', Index: 2, Codec: 'subrip', Language: 'rum', DisplayTitle: 'Romanian (SUBRIP)', DeliveryMethod: 'External',
                             DeliveryUrl: '/Videos/film2/ms2/Subtitles/2/0/Stream.subrip?api_key=' + TOKEN },
                         { Type: 'Subtitle', Index: 3, Codec: 'PGSSUB', Language: 'eng', DeliveryMethod: 'Encode' }],
@@ -278,7 +280,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.3.8');
+        assert.strictEqual(s.version, '0.3.9');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -532,6 +534,39 @@ test('the app\'s controls: play / pause, a seek to a position, stop', async () =
         // a Stop from the phone ends it
         srv.send({ MessageType: 'Playstate', Data: { Command: 'Stop' } });
         await until(() => reports('/Sessions/Playing/Stopped').length, 3000, 'stopped from the phone');
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('tracks from the iDrive: the lists in the status; another audio is a new stream from where it was, a text subtitle none', async () => {
+    const srv = await fakeEmby({ seconds: 600 });
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100' } });
+    try {
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], StartPositionTicks: 100000000, PlayCommand: 'PlayNow' } });
+        let s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'playing' && x.playback.tracks, 5000, 'playing');
+        assert.deepStrictEqual(s.playback.tracks, {
+            audio: [{ i: 1, t: 'English EAC3 5.1 (Default)' }, { i: 4, t: 'Romana AAC stereo' }],
+            subs: [{ i: 2, t: 'Romanian (SUBRIP)' }, { i: 3, t: 'eng PGSSUB (burned in)' }] });
+        assert.strictEqual(s.playback.audioIndex, 1, 'the default');
+        // the same audio again: nothing
+        await ask(svc.sock, 'track', { kind: 'audio', index: 1 });
+        await wait(500);
+        assert.strictEqual(srv.seen.pbinfo.length, 1);
+        await ask(svc.sock, 'track', { kind: 'audio', index: 4 });
+        await until(() => srv.seen.pbinfo.length === 2, 5000, 'a new stream with the other audio');
+        assert.strictEqual(srv.seen.pbinfo[1].query.AudioStreamIndex, '4');
+        assert.ok(Number(srv.seen.pbinfo[1].query.StartTimeTicks) >= 100000000);
+        s = await statusUntil(svc.sock, (x) => x.playback.state === 'playing' && x.playback.audioIndex === 4, 5000, 'on the other audio');
+        // a text subtitle: drawn by the app, no new stream; Off again
+        await ask(svc.sock, 'track', { kind: 'subs', index: 2 });
+        s = await statusUntil(svc.sock, (x) => x.playback.subtitleIndex === 2 && x.playback.subs, 3000, 'subtitles on');
+        await ask(svc.sock, 'track', { kind: 'subs', index: -1 });
+        s = await statusUntil(svc.sock, (x) => x.playback.subtitleIndex === -1 && !x.playback.subs, 3000, 'subtitles off');
+        assert.strictEqual(srv.seen.pbinfo.length, 2);
+        // a picture one: burned in by the server, a new stream
+        await ask(svc.sock, 'track', { kind: 'subs', index: 3 });
+        await until(() => srv.seen.pbinfo.length === 3, 5000, 'burned in');
+        assert.strictEqual(srv.seen.pbinfo[2].query.SubtitleStreamIndex, '3');
+        assert.strictEqual(srv.seen.pbinfo[2].query.AudioStreamIndex, '4', 'the chosen audio kept');
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 

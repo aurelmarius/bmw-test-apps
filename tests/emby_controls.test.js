@@ -72,11 +72,90 @@ test('the controller: the first move shows the bar; the knob moves the focus, a 
     c.ccu({ knob: 65535, press: 0, tilt: 0 });  // a counter reset (a jump): ignored
     assert.strictEqual(c.focus(), 'stop');
     c.ccu({ knob: 1, press: 0, tilt: 0 });      // across the wrap: +2
-    assert.strictEqual(c.focus(), 'aspect');
+    assert.strictEqual(c.focus(), 'audio');
     c.ccu({ knob: 1, press: 0, tilt: 7 });      // pushed down
     assert.strictEqual(c.visible(), false);
     c.ccu({ knob: 1, press: 15, tilt: 15 });    // no controller behind it
     assert.strictEqual(c.visible(), false);
+});
+
+const tinfo = Object.assign({}, info, { audioIndex: 1, subtitleIndex: -1, tracks: {
+    audio: [{ i: 1, t: 'English AC3 5.1 (Default)' }, { i: 2, t: 'Romanian AAC stereo' }, { i: 3, t: 'Director commentary' }],
+    subs: [{ i: 4, t: 'Romanian (SUBRIP)' }, { i: 5, t: 'English (PGSSUB) (burned in)' }] } });
+
+test('tracks: AUDIO opens the list on the current one; a touch on another chooses it; outside closes it', () => {
+    clock = 0;
+    const { c, acts } = make();
+    c.show();
+    c.key(tinfo);
+    const L = c.layout(PL);
+    c.touch('down', ...centre(L.buttons.find((b) => b.id === 'audio')), PL, tinfo);
+    assert.deepStrictEqual(acts, [], 'the list only');
+    const m = c.menu();
+    assert.strictEqual(m.kind, 'audio');
+    assert.strictEqual(m.focus, 0, 'on the current one');
+    const M = c.menuLayout(PL);
+    assert.ok(M.y + M.h <= L.y0 && M.y >= 0, 'above the bar');
+    c.touch('down', M.row(0).x + 50, M.row(0).y + M.ih / 2, PL, tinfo);
+    assert.strictEqual(c.menu(), null, 'the current one: closed, nothing sent');
+    assert.deepStrictEqual(acts, []);
+    c.touch('down', ...centre(L.buttons.find((b) => b.id === 'audio')), PL, tinfo);
+    const M2 = c.menuLayout(PL);
+    c.touch('down', M2.row(1).x + 50, M2.row(1).y + M2.ih / 2, PL, tinfo);
+    assert.deepStrictEqual(acts, [{ track: 'audio', index: 2 }]);
+    assert.strictEqual(c.visible(), true, 'the bar stays');
+    // SUBS: "Off" first and current; a touch above the list closes it, the bar stays
+    c.touch('down', ...centre(L.buttons.find((b) => b.id === 'subs')), PL, tinfo);
+    assert.deepStrictEqual(c.menu().items.map((x) => x.i), [-1, 4, 5]);
+    assert.strictEqual(c.menu().focus, 0);
+    c.touch('down', 5, 5, PL, tinfo);
+    assert.strictEqual(c.menu(), null);
+    assert.strictEqual(c.visible(), true);
+    // closes by itself after 10 s idle
+    c.touch('down', ...centre(L.buttons.find((b) => b.id === 'subs')), PL, tinfo);
+    c.keepOpen(true);
+    clock += 10500;
+    assert.strictEqual(c.menu(), null);
+    c.keepOpen(false);
+});
+
+test('tracks with the controller: press on SUBS, the knob down, a press chooses; a push left closes', () => {
+    clock = 0;
+    const { c, acts } = make();
+    c.key(tinfo);
+    c.ccu({ knob: 0, press: 0, tilt: 0 });
+    c.ccu({ knob: 1, press: 0, tilt: 0 });       // the bar, on play / pause
+    c.ccu({ knob: 5, press: 0, tilt: 0 });       // +4: subs
+    assert.strictEqual(c.focus(), 'subs');
+    c.ccu({ knob: 5, press: 1, tilt: 0 });
+    c.ccu({ knob: 5, press: 0, tilt: 0 });
+    assert.strictEqual(c.menu().kind, 'subs');
+    c.ccu({ knob: 6, press: 0, tilt: 0 });       // Off -> Romanian
+    c.ccu({ knob: 6, press: 0, tilt: 7 });       // pushed down: the next (English), not hidden
+    c.ccu({ knob: 6, press: 0, tilt: 0 });
+    c.ccu({ knob: 6, press: 0, tilt: 1 });       // up again: Romanian
+    c.ccu({ knob: 6, press: 0, tilt: 0 });
+    assert.strictEqual(c.visible(), true);
+    c.ccu({ knob: 6, press: 2, tilt: 0 });
+    c.ccu({ knob: 6, press: 0, tilt: 0 });
+    assert.deepStrictEqual(acts, [{ track: 'subs', index: 4 }]);
+    assert.strictEqual(c.menu(), null);
+    c.ccu({ knob: 6, press: 1, tilt: 0 });       // SUBS again
+    c.ccu({ knob: 6, press: 0, tilt: 0 });
+    assert.ok(c.menu());
+    c.ccu({ knob: 6, press: 0, tilt: 10 });      // pushed left: closed, the bar stays on SUBS
+    assert.strictEqual(c.menu(), null);
+    assert.strictEqual(c.focus(), 'subs');
+    // drawn, list and all; the key changes as the focus moves in it
+    c.ccu({ knob: 6, press: 0, tilt: 0 });
+    c.ccu({ knob: 6, press: 1, tilt: 0 });
+    c.ccu({ knob: 6, press: 0, tilt: 0 });
+    const k1 = c.key(tinfo);
+    c.ccu({ knob: 7, press: 0, tilt: 0 });
+    assert.notStrictEqual(c.key(tinfo), k1);
+    const rec = new record.Recorder(PL.w, PL.h).clear(0x000000ff);
+    c.draw(rec, PL, tinfo);
+    assert.ok(rec.n > 200);
 });
 
 test('hidden 5 s after the last touch, not while paused', () => {

@@ -36,7 +36,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.3.8';
+const SERVICE_VERSION = '0.3.9';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 // a film is on: playing, paused, starting; not one parked by Stop on the iDrive (its player closed)
@@ -357,6 +357,10 @@ mgu.run({
         const controls = createControls({
             act: (a) => {
                 if (a && a.seek != null) return seekAt(a.seek);
+                if (a && a.track) {
+                    log.info('emby: ' + a.track + ' track ' + a.index);
+                    return ask('track', { kind: a.track, index: a.index }).then((r) => { if (r) st = r; mirror.tick(); });
+                }
                 if (a === 'back10') return seekBy(-10);
                 if (a === 'fwd30') return seekBy(30);
                 if (a === 'playpause') return ask('playstate', { command: 'PlayPause' }).then((r) => { if (r) st = r; mirror.tick(); });
@@ -369,7 +373,8 @@ mgu.run({
             const pb = (st && st.playback) || {};
             // the seek's target until the new stream plays near it (or 15 s)
             if (seekTo != null && seekSentAt && (Date.now() - seekSentAt > 15000 || (pb.state === 'playing' && Math.abs((pb.pos || 0) - seekTo) < 5 && Date.now() - seekSentAt > 1500))) seekTo = null;
-            return { title: pb.item ? pb.item.title : '', pos: posNow(), dur: pb.dur, paused: pb.state === 'paused', aspect: aspect(), seeking: seekTo };
+            return { title: pb.item ? pb.item.title : '', pos: posNow(), dur: pb.dur, paused: pb.state === 'paused', aspect: aspect(), seeking: seekTo,
+                tracks: pb.tracks || null, audioIndex: pb.audioIndex, subtitleIndex: pb.subtitleIndex };
         }
         let wasPaused = false;
         function filmOverlay() {
