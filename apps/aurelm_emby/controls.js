@@ -5,7 +5,7 @@
  *
  * Shown by a touch on the picture or the iDrive controller (turn, press or push), hidden 5 s after the last one
  * (not while paused), by a touch outside the bar or a push down. On the bar: a touch on a button or on the progress
- * bar (a seek there); the knob moves the focus along the buttons and a press runs the focused one, a push left or
+ * bar (dragged: the target follows the finger, the seek goes when it lifts); the knob moves the focus along the buttons and a press runs the focused one, a push left or
  * right moves it too. The controller's codes are the kit's (kit/runtime/display.js): the knob a 16-bit counter, the
  * press 1 or 2, a push 1/2 north, 4/5 east, 7/8 south, 10/11 west; 15 and 15: no controller behind it.
  *
@@ -51,18 +51,29 @@ function createControls(o) {
     }
     function height(pl) { return Math.round(pl.h * 0.3); }
 
+    // a finger on the progress bar: the target follows it (shown, not sent), the seek goes when it lifts (0.3.5 in
+    // the car: only where it came down counted, so a drag of the knob moved a few seconds)
+    let scrub = null;   // { t } while a finger drags the progress bar
+    const fraction = (x, L) => Math.max(0, Math.min(1, (x - L.bar.x) / L.bar.w));
     function touch(phase, x, y, pl, info) {
+        const L = layout(pl);
+        if (scrub) {
+            if (info && info.dur) scrub.t = fraction(x, L) * info.dur;
+            show();
+            if (phase === 'up') { const t = scrub.t; scrub = null; act({ seek: t }); }
+            return true;
+        }
         if (phase !== 'down') return true;   // the picture keeps its touches; a tap acts on its way down
         if (!visible()) { show(); return true; }
-        const L = layout(pl);
+        // the progress bar (a generous band around it): the finger drags the target
+        if (info && info.dur && y >= L.bar.y - 36 && y <= L.bar.y + L.bar.h + 36 && x >= L.bar.x - 20 && x <= L.bar.x + L.bar.w + 20) {
+            scrub = { t: fraction(x, L) * info.dur };
+            show();
+            return true;
+        }
         if (y < L.y0) { hide(); return true; }
         const b = L.buttons.find((q) => x >= q.x && x <= q.x + q.w && y >= q.y - 10 && y <= q.y + q.h + 10);
         if (b) { focus = BUTTONS.indexOf(b.id); if (b.id !== 'exit' && b.id !== 'stop') show(); run(b.id); return true; }
-        // the progress bar (a generous band around it): a seek there
-        if (info && info.dur && y >= L.bar.y - 30 && y <= L.bar.y + L.bar.h + 30 && x >= L.bar.x && x <= L.bar.x + L.bar.w) {
-            act({ seek: Math.max(0, Math.min(1, (x - L.bar.x) / L.bar.w)) * info.dur });
-            show();
-        }
         return true;
     }
 
@@ -92,14 +103,18 @@ function createControls(o) {
         act(id);
     }
 
-    function key(info) {
+    /** the bar's info with a drag's target in place of the position */
+    function view(info) {
+        return scrub ? Object.assign({}, info, { seeking: scrub.t }) : info;
+    }
+    function key(info0) {
         if (!visible()) return null;
-        const i = info || {};
+        const i = view(info0 || {});
         return [focus, Math.floor(i.seeking != null ? i.seeking : i.pos || 0), i.dur, !!i.paused, i.aspect, i.title, i.seeking != null].join('|');
     }
 
     function draw(rec, pl, info) {
-        const i = info || {};
+        const i = view(info || {});
         const L = layout(pl);
         rec.gradientRect(0, L.y0 - 40, pl.w, L.H + 40, [[0, 0x00000000], [0.3, 0x000000a8], [1, 0x000000e0]]);
         const fs = Math.round(L.H * 0.13);

@@ -32,8 +32,15 @@ test('touch: the first shows the bar; a button runs; the progress bar seeks; abo
     c.touch('down', ...centre(pp), PL, info);
     c.touch('up', ...centre(pp), PL, info);
     assert.deepStrictEqual(acts, ['playpause'], 'on the way down only');
-    c.touch('down', L.bar.x + L.bar.w / 2, L.bar.y + 2, PL, info);
+    // a finger on the progress bar, dragged: nothing sent until it lifts, then one seek where it lifted
+    c.touch('down', L.bar.x + L.bar.w * 0.1, L.bar.y + 2, PL, info);
+    c.touch('move', L.bar.x + L.bar.w * 0.3, L.bar.y + 40, PL, info);
+    assert.strictEqual(acts.length, 1, 'nothing while dragging');
+    assert.ok(/\|true$/.test(c.key(info)), 'the bar shows the target');
+    c.touch('move', L.bar.x + L.bar.w / 2, L.bar.y + 80, PL, info);
+    c.touch('up', L.bar.x + L.bar.w / 2, L.bar.y + 80, PL, info);
     assert.ok(Math.abs(acts[1].seek - 4525) < 1, JSON.stringify(acts[1]));
+    assert.strictEqual(acts.length, 2);
     ['back10', 'fwd30', 'aspect', 'stop'].forEach((id) => c.touch('down', ...centre(L.buttons.find((b) => b.id === id)), PL, info));
     assert.deepStrictEqual(acts.slice(2), ['back10', 'fwd30', 'aspect', 'stop']);
     assert.strictEqual(c.visible(), false, 'stop hides the bar');
