@@ -13,6 +13,13 @@
       "author": "custom",
       "icon": "aurelm_emby.png",
       "iconSha256": "9682cbd70243b5b0193c54d589a11a38ee4b81eaec07326a666eed140ce39918"
+    },
+    "aurelm_tvh": {
+      "title": "TVH",
+      "description": "Tvheadend's TV channels on the centre screen: sign in once from the phone (QR code), then Watch, Channel + / -, or the channel list over the picture. The picture shows while parked, the sound plays on the car's speakers. The server transcodes (profiles mgu-hd, mgu-sd, mgu-low: H.264 deinterlaced, AAC) and the profile goes down by itself when the internet is slow. Needs the TVH service.",
+      "author": "custom",
+      "icon": "aurelm_tvh.png",
+      "iconSha256": "e58caa374e89c36706b63b11ea562c86fb7fa80f7ef42d01b10cd2ff049c55b8"
     }
   }
 }
