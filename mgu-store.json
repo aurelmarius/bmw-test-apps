@@ -1,12 +1,5 @@
 {
   "apps": {
-    "aurelm_airplay_probe": {
-      "title": "AirPlay Test",
-      "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers; videos sent with the AirPlay button (YouTube) played by the head unit itself. Also the network test. Needs the AirPlay test service.",
-      "author": "custom",
-      "icon": "aurelm_airplay_probe.png",
-      "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0"
-    },
     "aurelm_emby": {
       "title": "Emby",
       "description": "The head unit as a cast target for the Emby phone app: sign in once from the phone (QR code), then choose \"BMW iDrive\" in Emby's cast menu. The film plays on the centre screen while parked, its sound on the car's speakers; pause, seek and stop from the phone. Needs the Emby cast service.",

@@ -3,28 +3,6 @@
   "name": "Aurel Marius BMW Test Apps",
   "components": [
     {
-      "id": "aurelm-airplay-probe",
-      "kind": "tool",
-      "version": "0.9.10",
-      "title": "AirPlay network test service",
-      "description": "For the app AirPlay Test: the network test, and the AirPlay receiver (UxPlay's protocol on the head unit): the iPhone's screen mirroring decoded on the GPU into mgu-render's frame file, shown by the app while parked, and its sound into SmartXbar's CarLife input; a video sent with the AirPlay button (YouTube) played by its own player from the internet (mgu-uplink, through a proxy running as uid 13102). Opens the firewall for its ports only while a test runs.",
-      "author": "aurelmarius",
-      "mguHmi": [
-        "ID7"
-      ],
-      "artifact": {
-        "name": "aurelm-airplay-probe@0.9.10.tgz",
-        "size": 3214920,
-        "sha256": "dcb6f0f072efaf35dfe60c5627f3b9ff2a2a64c9f7ea2d7c57a5b0a583c0bd98",
-        "url": "packages/aurelm-airplay-probe@0.9.10.tgz"
-      },
-      "requires": {
-        "mgu-deploy": "0.7.0",
-        "mgu-uplink": "0.7.0"
-      },
-      "uninstallable": true
-    },
-    {
       "id": "aurelm-emby",
       "kind": "tool",
       "version": "0.3.9",
@@ -67,28 +45,6 @@
         "mgu-uplink": "0.7.0"
       },
       "uninstallable": true
-    },
-    {
-      "id": "aurelm_airplay_probe",
-      "kind": "app",
-      "version": "0.10.1",
-      "title": "AirPlay Test",
-      "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers; videos sent with the AirPlay button (YouTube) played by the head unit itself. Also the network test. Needs the AirPlay test service.",
-      "mguHmi": [
-        "ID7"
-      ],
-      "artifact": {
-        "name": "aurelm_airplay_probe@0.10.1.tgz",
-        "size": 576751,
-        "sha256": "947ce8c0a88e9afb75d8e73cd1c56fe4c2260ae17cd2a73332fe4193e2305a59",
-        "url": "packages/aurelm_airplay_probe@0.10.1.tgz"
-      },
-      "uninstallable": true,
-      "icon": "aurelm_airplay_probe.png",
-      "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0",
-      "requires": {
-        "aurelm-airplay-probe": "0.9.10"
-      }
     },
     {
       "id": "aurelm_emby",
