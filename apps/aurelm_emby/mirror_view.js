@@ -17,6 +17,7 @@
  *   view.wantAgain();                            // the user asked for the picture
  *   view.state()                                 // { shown, why }
  *   view.tick()                                  // Emby: o.overlay() changed? drawn again (the subtitles)
+ *   o.hold()                                     // Emby: true while a film is on: between two streams the picture stays up, black
  *
  * Emby's copy of AirPlay Test's mirror_view.js: o.overlay() -> { key, rect(placement), draw(rec, placement, hinting) }
  * places the picture (fit, zoom, fill) and draws over it (the controls, the subtitles); o.onTouch(phase, x, y,
@@ -120,12 +121,23 @@ function createMirrorView(o) {
         else if (!ready || !gpu.placement) why = 'waiting for mgu-render';
         else if (userHid) why = o.hiddenText || 'hidden: press "Start receiver" to show it again';
         else why = 'on the screen';
+        // Emby: between two streams (a seek is a new player, and its frame file a new one) the picture stays up,
+        // black with the overlay, while o.hold() says a film is still on (0.3.4 in the car: the status page flashed)
+        const canShow = !s.driving && !!s.pageVisible && ready && !!gpu.placement && !userHid;
+        const hold = () => {
+            if (ino !== null) { gpu.video(VID, null); ino = null; }
+            why = o.holdText || 'loading';
+            if (now() - lastFrame >= KEEPALIVE_MS) frame();
+            if (o.onTouch && gpu.placement) gpu.claim([{ x: 0, y: 0, w: gpu.placement.w, h: gpu.placement.h }]);
+        };
+        if (!pictures && shown && canShow && o.hold && o.hold()) return hold();
         if (!pictures) userHid = false;   // a new stream shows again
-        const want = pictures && !s.driving && !!s.pageVisible && ready && !!gpu.placement && !userHid;
+        const want = pictures && canShow;
         path = (dec && dec.path) || path;
         if (want) {
             let cur = null;
             try { const st = o.statIno(path); cur = st; } catch (e) { cur = null; }
+            if (cur === null && shown && o.hold && o.hold()) return hold();
             if (cur === null) { apply(false); why = 'the frame file is missing'; return; }
             // a new frame file (the decoder opened it again): named again
             if (ino !== null && cur !== ino) gpu.video(VID, null);

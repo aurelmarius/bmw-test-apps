@@ -96,6 +96,37 @@ test('the app hears when the picture comes and goes (its page lets go of touch);
     assert.deepStrictEqual(gpu.lastClaim, []);
 });
 
+test('between two streams (a seek): the picture stays up, black, while a film is on; it comes back with the new frame file', () => {
+    let gpu = null, on = true, ino = 7;
+    const videos = [];
+    class RC extends FakeGpu { constructor() { super(); gpu = this; } video(id, p) { videos.push(p); } }
+    const v = createMirrorView({ RenderClient: RC, Recorder: record.Recorder, kit: record, appId: 'aurelm_emby', now: () => clock,
+        statIno: () => { if (ino === null) throw new Error('gone'); return ino; }, hold: () => on });
+    gpu.emit('ready', { w: 1920, h: 720 }, { video: true });
+    const rx = { running: true, videoRunning: true, decoder: { ok: true, path: '/dev/shm/x' }, stream: { shown: 5 } };
+    v.update({ rx, pageVisible: true, driving: false });
+    assert.strictEqual(v.state().shown, true);
+    // the old player gone, its file too
+    ino = null;
+    v.update({ rx: null, pageVisible: true, driving: false });
+    assert.strictEqual(v.state().shown, true, 'held');
+    assert.strictEqual(videos[videos.length - 1], null, 'the old file let go');
+    // the new player: a new file
+    ino = 8;
+    v.update({ rx, pageVisible: true, driving: false });
+    assert.strictEqual(v.state().shown, true);
+    assert.strictEqual(videos[videos.length - 1], '/dev/shm/x', 'the new file named');
+    // the film ended: no hold, hidden
+    on = false;
+    v.update({ rx: null, pageVisible: true, driving: false });
+    assert.strictEqual(v.state().shown, false);
+    // driving while held: hidden as always
+    on = true;
+    v.update({ rx, pageVisible: true, driving: false });
+    v.update({ rx: null, pageVisible: true, driving: true });
+    assert.strictEqual(v.state().shown, false);
+});
+
 (async () => {
     let failed = 0;
     for (const t of tests) {

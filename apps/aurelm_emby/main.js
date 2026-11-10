@@ -36,7 +36,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.3.4';
+const SERVICE_VERSION = '0.3.5';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
@@ -218,6 +218,9 @@ mgu.run({
             onTouch: (phase, x, y, pl) => { if (pl && controls.touch(phase, x, y, pl, barInfo())) mirror.tick(); },
             onCcu: (c) => { const r = controls.ccu(c); mirror.tick(); return r; },
             onShown: (on) => pageTouch(!on),
+            // a seek or the next episode: a new player; the picture stays up (black, "Loading...") meanwhile
+            hold: () => !!(st && st.playback && ACTIVE.indexOf(st.playback.state) >= 0),
+            holdText: 'between two streams',
             idleText: 'the player is not running', hiddenText: 'hidden: press "Show picture" to show it again',
             statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
         // The app's page is drawn by the kit on its own connection to mgu-render, which claims the page and its bar for
@@ -357,10 +360,14 @@ mgu.run({
             // paused: the bar stays
             if (info.paused !== wasPaused) { wasPaused = info.paused; controls.keepOpen(info.paused); }
             const sub = subtitleText(), bar = controls.key(info);
+            // no picture yet (a new stream starting): a word in the middle of the black
+            const pb = st && st.playback;
+            const loading = !!(pb && (pb.state === 'loading' || pb.state === 'buffering') && !(pl && pl.running && pl.tick && pl.tick.shown > 0));
             return {
-                key: [mode, fw, fh, sub, bar].join('#'),
+                key: [mode, fw, fh, sub, bar, loading].join('#'),
                 rect: (p) => videoRect(mode, fw, fh, p),
                 draw: (rec, p, hinting) => {
+                    if (loading) rec.text('Loading...', p.w / 2, p.h / 2, Math.round(p.h * 0.05), 0xffffffb0, { align: 'center', font: 'bold', literal: true });
                     if (sub) drawSubs(rec, p, hinting, sub, bar ? controls.height(p) + 10 : 0);
                     if (bar) controls.draw(rec, p, info);
                 },
