@@ -48,6 +48,9 @@ const SERVICE_VERSION = '0.1.0';
 const ACTIVE = ['loading', 'playing', 'buffering'];
 const channelOn = (pb) => !!(pb && ACTIVE.indexOf(pb.state) >= 0);
 const PROFILES = ['mgu-hd', 'mgu-sd', 'mgu-low'];
+// the quality each profile is made for (README: the server's profiles), as Emby shows its quality; another profile by name
+const QUALITY = { 'mgu-hd': '3 Mbit/s', 'mgu-sd': '1.5 Mbit/s', 'mgu-low': '0.7 Mbit/s' };
+const quality = (p) => (QUALITY[p] ? QUALITY[p] + ' (' + p + ')' : p || '');
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#52b54b', AMBER = '#ffb020', RED = '#ef2b2d', BLUE = '#2f8fd8';
 
@@ -119,7 +122,7 @@ function playRows(s, rows) {
     const what = pb.state === 'error' ? pb.error
         : pb.state === 'loading' && PHASE[pb.phase] ? PHASE[pb.phase] + (waited >= 3 ? ' (' + waited + ' s)' : '') + (pb.phase === 'retry' && pb.error ? ': ' + pb.error : '')
             : STATE[pb.state];
-    const prof = pb.profile ? ', ' + pb.profile + (pb.lowered ? ' (lowered: slow internet)' : '') : '';
+    const prof = pb.profile ? ', ' + quality(pb.profile) + (pb.lowered ? ' (lowered: slow internet)' : '') : '';
     rows.push({ label: 'Playing', state: pb.state === 'error' ? 'bad' : pb.state === 'playing' ? 'ok' : 'wait',
         detail: chName(pb.channel) + ' - ' + what + prof + (pb.reconnects ? ', ' + pb.reconnects + ' reconnects' : '') });
     const fresh = pb.state !== 'loading' || pb.phase === 'player';
@@ -341,7 +344,7 @@ mgu.run({
             const cur = pb.channel ? pb.channel.uuid : null;
             return {
                 title: chName(pb.channel), now: cur ? chans.epg[cur] || null : null, aspect: aspect(),
-                profile: pb.profile ? pb.profile + (pb.lowered ? ' (slow)' : '') : '', note: pb.interlaced ? 'interlaced' : pb.state === 'buffering' ? 'buffering' : '',
+                profile: pb.profile ? (QUALITY[pb.profile] || pb.profile) + (pb.lowered ? ' (slow)' : '') : '', note: pb.interlaced ? 'interlaced' : pb.state === 'buffering' ? 'buffering' : '',
                 current: cur, drawLogo: logos.draw, logoVer: logos.version(),
                 channels: chans.channels.map((c) => ({ uuid: c.uuid, n: chName(c), t: chName(c) + (chans.epg[c.uuid] && chans.epg[c.uuid].title ? '  -  ' + chans.epg[c.uuid].title : '') })),
             };
@@ -418,7 +421,7 @@ mgu.run({
             const page = st && st.page && st.page.open ? st.page : null;
             const pb = st && st.playback;
             const live = pb && pb.state === 'error' ? { text: 'ERROR', color: 'accent' } : pb && pb.state === 'buffering' ? { text: 'BUFFERING' }
-                : pb && channelOn(pb) ? { text: pb.state === 'playing' ? 'LIVE ' + (pb.profile || '') : 'TUNING', color: 'cold' } : null;
+                : pb && channelOn(pb) ? { text: pb.state === 'playing' ? 'LIVE ' + (QUALITY[pb.profile] || pb.profile || '') : 'TUNING', color: 'cold' } : null;
             G.frame(cv, t, ['TV', 'Status'], tab, [busy && { text: busy, color: 'accent' }, page && { text: 'SIGN-IN ' + Math.ceil((page.left || 0) / 60) + ' MIN' }, live]);
             if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); }
             if (tab === 1) drawStatus(cv, t, page); else drawTv(cv, t, page);

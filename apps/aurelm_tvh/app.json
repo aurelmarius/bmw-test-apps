@@ -98,27 +98,27 @@
     },
     {
       "key": "profile",
-      "label": "Stream profile (the server's transcoding profile; create mgu-hd, mgu-sd, mgu-low in Tvheadend)",
+      "label": "Streaming quality (the server's profile: the most the car asks for)",
       "type": "choice",
       "default": "mgu-hd",
       "options": [
         [
           "mgu-hd",
-          "mgu-hd (720p, about 3 Mbit/s)"
+          "3 Mbit/s (720p, mgu-hd)"
         ],
         [
           "mgu-sd",
-          "mgu-sd (576p, about 1.5 Mbit/s)"
+          "1.5 Mbit/s (576p, mgu-sd)"
         ],
         [
           "mgu-low",
-          "mgu-low (about 0.7 Mbit/s)"
+          "0.7 Mbit/s (mgu-low)"
         ]
       ]
     },
     {
       "key": "adaptive",
-      "label": "Lower the profile by itself when the internet is slow",
+      "label": "Lower the quality by itself when the internet is slow",
       "type": "bool",
       "default": true
     },
