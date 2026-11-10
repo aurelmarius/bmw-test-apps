@@ -278,7 +278,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.3.3');
+        assert.strictEqual(s.version, '0.3.4');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -540,6 +540,11 @@ test('cast while the phone goes on playing: its film taken over where it is, wit
         assert.strictEqual(q.AudioStreamIndex, '1');
         assert.strictEqual(q.SubtitleStreamIndex, '2');
         await until(() => srv.seen.phoneStopped === 1, 3000, 'the phone told to stop');
+        // the phone, told to stop, sends the Stop on to the car: an echo, ignored
+        srv.send({ MessageType: 'Playstate', Data: { Command: 'Stop' } });
+        await wait(500);
+        assert.strictEqual(srv.seen.reports.filter((r) => r.path === '/Sessions/Playing/Stopped').length, 0, 'the echo did not stop the car');
+        await statusUntil(svc.sock, (x) => (x.log || []).some((l) => /Stop ignored/.test(l)), 3000, 'the echo logged');
         const s = await statusUntil(svc.sock, (x) => (x.log || []).some((l) => /take over \(PlayPause\): Sample from 339 s, from iPhone/.test(l)), 3000, 'logged');
         assert.ok(s);
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }

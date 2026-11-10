@@ -160,6 +160,7 @@ function createPlayback(o) {
      * here and such a command come: the film this user played last, if it stopped within the last 90 s, is taken over
      * from where the server saved it (its resume position; the start for a film stopped in its first minutes).
      */
+    let echoUntil = 0;
     async function takeOver(why) {
         if (cur) return false;
         const acc = account();
@@ -178,7 +179,10 @@ function createPlayback(o) {
             log('take over (' + why + '): ' + (it.Name || it.Id) + ' from ' + Math.round(start) + ' s, from ' + (x.DeviceName || x.Client || 'the phone'));
             play({ command: 'PlayNow', ids: [it.Id], start, startIndex: 0, mediaSourceId: ps.MediaSourceId || null,
                 audioIndex: ps.AudioStreamIndex != null ? ps.AudioStreamIndex : null, subtitleIndex: ps.SubtitleStreamIndex != null ? ps.SubtitleStreamIndex : null });
-            // the film goes on here, not there too
+            // the film goes on here, not there too. The Emby app for iOS, told to stop, sends the same Stop on to the
+            // device it controls, this car (0.3.3 in the car: taken over, then stopped 1 s later): one in the next
+            // 5 s is that echo, and is not ours to obey
+            echoUntil = now() + 5000;
             api('POST', 'Sessions/' + encodeURIComponent(x.Id) + '/Playing/Stop').catch((e) => log('take over: stopping ' + (x.DeviceName || x.Id) + ': ' + e.message));
             return true;
         }
@@ -457,7 +461,8 @@ function createPlayback(o) {
     }
     function playstate(d) {
         const c = d.command;
-        if (c === 'Stop') { finish('stopped from the phone'); set('idle'); }
+        if (c === 'Stop' && cur && now() < echoUntil) { log('Stop ignored: the phone\'s own, told to stop as its film came here'); }
+        else if (c === 'Stop') { finish('stopped from the phone'); set('idle'); }
         else if (c === 'Pause') pause(true);
         else if (c === 'Unpause') pause(false);
         else if (c === 'PlayPause') pause(!(cur && cur.paused));
