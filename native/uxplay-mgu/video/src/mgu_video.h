@@ -13,6 +13,8 @@ int mgu_video_frame_timed(const unsigned char *data, int len, long long pts_ms, 
                           unsigned long long *shown, unsigned long long *errors);
 /* stage 4: 1 a played video's pictures in display order (B frames), 0 decoding order (mirroring); from the next start */
 void mgu_video_display_order(int on);
+/* stage 4: 1 a played video's own size (the frame file made at its first picture, the app places it), 0 MGU_VIDEO_SIZE fitted */
+void mgu_video_native(int on);
 /* a seek: the decoder starts again at the next SPS, the frame file stays */
 void mgu_video_reset(void);
 void mgu_video_stop(void);

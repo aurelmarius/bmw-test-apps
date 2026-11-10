@@ -24,6 +24,7 @@ const record = require('./kit/record');
 const Parked = require('./kit/parked');
 const { RenderClient } = require('./mgu_render_client');
 const { createMirrorView } = require('./mirror_view');
+const { createControls, videoRect } = require('./controls');
 const { createCarAudio } = require('./car_audio');
 
 const W = 1600, H = 520;
@@ -31,7 +32,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.9.8';
+const SERVICE_VERSION = '0.9.9';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -169,13 +170,14 @@ const VERDICT_COLOR = { connected: GREEN, asked: AMBER, 'heard-phone': AMBER, wa
 mgu.run({
     async start(ctx) {
         const { ui, log } = ctx;
-        let st = null, busy = null, polling = false, askedExit = false;
+        let st = null, busy = null, polling = false, askedExit = false, stAt = Date.now();
 
         async function poll() {
             if (polling) return;
             polling = true;
             try {
                 st = await ask('status');
+                stAt = Date.now();
                 if (st && st.version && older(st.version, SERVICE_VERSION) && !st.active && !askedExit) {
                     askedExit = true;   // once: a service whose update failed is not stopped again and again
                     log.info('airplay test: service ' + st.version + ' running, ' + SERVICE_VERSION + ' installed: asking it to end');
@@ -199,8 +201,98 @@ mgu.run({
 
         /* ---------- stage 2: the picture over the screen, parked only ---------- */
         const parked = Parked.watch(ctx, log, { strict: true });
-        const mirror = createMirrorView({ RenderClient, Recorder: record.Recorder, kit: record, appId: ctx.spec.id, log,
-            statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
+        const mirrorOpts = { RenderClient, Recorder: record.Recorder, kit: record, appId: ctx.spec.id, log,
+            overlay: () => videoOverlay(),
+            // a played video's controls (controls.js, Emby's): touch and the controller go to them while it shows;
+            // screen mirroring keeps the controller's buttons for hiding the picture
+            onTouch: (phase, x, y, pl) => { if (pl && videoOn() && controls.touch(phase, x, y, pl, barInfo())) mirror.tick(); },
+            onCcu: (c) => { if (!videoOn()) return false; const r = controls.ccu(c); mirror.tick(); return r; },
+            onShown: (on) => pageTouch(!on),
+            statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } };
+        Object.defineProperty(mirrorOpts, 'hintText', { get: () => (videoOn()
+            ? 'Touch the picture or use the iDrive controller for the controls' : 'Press a button on the iDrive controller to return') });
+        const mirror = createMirrorView(mirrorOpts);
+        // The app's page is drawn by the kit on its own connection to mgu-render, which claims the page and its bar for
+        // touch (found by Emby, 0.3.0 in the car: with the film over it, a touch went to the page's buttons underneath).
+        // While the picture shows, the page claims nothing.
+        const disp = ctx.display;
+        let pageClaims = true;
+        if (disp && typeof disp._claimTabs === 'function') {
+            const claimTabs = disp._claimTabs.bind(disp);
+            disp._claimTabs = (rects, r) => {
+                if (pageClaims) return claimTabs(rects, r);
+                disp.tabs = [];
+                if (disp.gpu && disp.gpu.claim) disp.gpu.claim([]);
+                return undefined;
+            };
+        }
+        function pageTouch(on) {
+            if (on === pageClaims) return;
+            pageClaims = on;
+            try {
+                if (!on) { if (disp && disp.gpu && disp.gpu.claim) disp.gpu.claim([]); }
+                else if (disp) { disp.lastWords = null; if (disp._repaint) disp._repaint(); }
+            } catch (e) { log.warn('airplay page touch: ' + e); }
+        }
+
+        /* ---------- a played video's controls (controls.js) and shape: fit, zoom, fill ---------- */
+        // the video plays at its own size in the frame file (the player's decoder: stage 4), placed here
+        const ASPECTS = ['fit', 'zoom', 'fill'];
+        const aspect = () => (ASPECTS.indexOf(ctx.settings.get('aspect')) >= 0 ? ctx.settings.get('aspect') : 'fill');
+        const hlsOf = () => { const r = st && st.mode === 'receiver' && st.active ? st.rx : null; return r && r.hls && r.hls.open && !r.hls.ended ? r.hls : null; };
+        const videoOn = () => !!hlsOf();
+        // the position between two statuses (one a second): on from the last one while it plays
+        function posNow() {
+            const h = hlsOf();
+            if (!h) return 0;
+            return Math.max(0, (h.pos || 0) + (h.paused || h.buffering ? 0 : (Date.now() - stAt) / 1000));
+        }
+        // a seek from the bar: the target at once; it goes once the buttons rest (several taps on +30 s, one seek)
+        let seekTo = null, seekTimer = null, seekSentAt = 0;
+        function seekBy(d) { seekAt((seekTo != null ? seekTo : posNow()) + d); }
+        function seekAt(t) {
+            const h = hlsOf();
+            seekTo = Math.max(0, h && h.dur ? Math.min(t, h.dur - 2) : t);
+            clearTimeout(seekTimer);
+            seekTimer = setTimeout(() => {
+                seekSentAt = Date.now();
+                ask('video', { op: 'seek', to: seekTo }).then((r) => { if (r) { st = r; stAt = Date.now(); } });
+            }, 800);
+            mirror.tick();
+        }
+        const controls = createControls({
+            act: (a) => {
+                const h = hlsOf();
+                if (a && a.seek != null) return seekAt(a.seek);
+                if (a === 'back10') return seekBy(-10);
+                if (a === 'fwd30') return seekBy(30);
+                if (a === 'playpause') return ask('video', { op: h && h.paused ? 'resume' : 'pause' }).then((r) => { if (r) { st = r; stAt = Date.now(); } mirror.tick(); });
+                // stop: the video ends on the iPhone too (the session is ended: the receiver starts again)
+                if (a === 'stop') { controls.hide(); return ask('end-session', { why: 'stopped on the iDrive' }).then((r) => { if (r) st = r; }); }
+                if (a === 'aspect') { ctx.settings.set('aspect', ASPECTS[(ASPECTS.indexOf(aspect()) + 1) % ASPECTS.length]); log.info('airplay: aspect ' + aspect()); return mirror.tick(); }
+                if (a === 'exit') return mirror.hide('the controls');
+            },
+        });
+        function barInfo() {
+            const h = hlsOf() || {};
+            if (seekTo != null && seekSentAt && (Date.now() - seekSentAt > 15000 || (Math.abs((h.pos || 0) - seekTo) < 5 && Date.now() - seekSentAt > 1500))) seekTo = null;
+            return { title: 'AirPlay video', pos: posNow(), dur: h.dur, paused: !!h.paused, aspect: aspect(), seeking: seekTo };
+        }
+        let wasPaused = false;
+        function videoOverlay() {
+            if (!videoOn()) return null;   // screen mirroring: the whole screen, the decoder fitted it
+            const d = st.rx.decoder, fw = d && d.ok ? d.w : 0, fh = d && d.ok ? d.h : 0, mode = aspect();
+            const info = barInfo();
+            if (info.paused !== wasPaused) { wasPaused = info.paused; controls.keepOpen(info.paused); }   // paused: the bar stays
+            const bar = controls.key(info);
+            return {
+                key: [mode, fw, fh, bar].join('#'),
+                rect: (p) => videoRect(mode, fw, fh, p),
+                draw: (rec, p) => { if (bar) controls.draw(rec, p, info); },
+            };
+        }
+        // the bar's time moves on or it hides: a new frame (only then)
+        setInterval(() => { if (mirror.state().shown) mirror.tick(); }, 100);
         // leaving the app (HOME, another app, CarPlay's tile) ends the iPhone's mirroring, so CarPlay is free at once
         // (setting endOnLeave, on): 1.5 s after the page went, once per session
         let goneAt = 0, ended = false;

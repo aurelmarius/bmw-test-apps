@@ -125,6 +125,23 @@ static void stats_locked(double t) {
 /* the player's events, as ours */
 static void emit_json(const char *json) { emit("%s", json); }
 static char *hls_uri = NULL;     /* the address of the video to play (stage 4), NULL for screen mirroring */
+
+/* The service's commands on stdin, one a line, for a played video: the app's controls on the iDrive.
+ *   pause | resume | seek <seconds>
+ * The iPhone follows them through /playback-info (the rate, the position), as it follows its own. */
+static void *mgu_commands(void *arg) {
+    (void) arg;
+    char line[128];
+    while (fgets(line, sizeof line, stdin)) {
+        double t = 0;
+        if (!strncmp(line, "pause", 5)) mgu_hls_pause(1);
+        else if (!strncmp(line, "resume", 6)) mgu_hls_pause(0);
+        else if (sscanf(line, "seek %lf", &t) == 1 && t >= 0) mgu_hls_seek(t);
+        else continue;
+        emit("{\"ev\":\"cmd\",\"line\":\"%.*s\"}", (int) strcspn(line, "\r\n\"\\"), line);
+    }
+    return NULL;
+}
 static float hls_start = 0.0f;
 
 /* ---------------- video ---------------- */
@@ -143,7 +160,12 @@ void video_renderer_init(logger_t *logger, const char *server_name, videoflip_t 
     free(hls_uri);
     hls_uri = uri ? strdup(uri) : NULL;
     static bool once = false;
-    if (!once) { once = true; atexit(mgu_video_close); }   /* no frame file left behind */
+    if (!once) {
+        once = true;
+        atexit(mgu_video_close);   /* no frame file left behind */
+        pthread_t t;
+        if (pthread_create(&t, NULL, mgu_commands, NULL) == 0) pthread_detach(t);
+    }
 }
 
 void video_renderer_start() {

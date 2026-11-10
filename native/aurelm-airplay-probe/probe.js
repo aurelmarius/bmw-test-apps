@@ -35,7 +35,7 @@ const rxm = require('./receiver');
 const sockgroup = require('./sockgroup');
 const { fork } = require('child_process');
 
-const VERSION = '0.9.8';
+const VERSION = '0.9.9';
 const MDNS_GROUP = '224.0.0.251';
 const QUERY_NAMES = ['_airplay._tcp.local', '_raop._tcp.local', '_companion-link._tcp.local', '_apple-mobdev2._tcp.local'];
 
@@ -563,9 +563,14 @@ function createProbe(opts) {
         if (st.active && t) rx.start(t);
         return status();
     }
+    /** the app's controls for a played video: pause, resume, seek (the receiver's player; the iPhone follows) */
+    function video(op, to) {
+        if (st.active && st.mode === 'receiver') rx.control(op, to);
+        return status();
+    }
     function cleanupSync() { rx.killSync(); stopProxy(); if (o.nft) { try { nft.remove({ nft: o.nft }); } catch (e) { /* best effort */ } } }
 
-    return { start, stop, status, endSession, cleanupSync, identity: id };
+    return { start, stop, status, endSession, video, cleanupSync, identity: id };
 }
 
 /* ---------------- control socket ---------------- */
@@ -594,7 +599,7 @@ function serveControl(probe, sockPath, log, onRequest, onExit) {
                     onExit();
                     return;
                 }
-                const p = m.cmd === 'end-session' ? probe.endSession(m.why) : m.cmd === 'start' ? probe.start(m.minutes, m.mode, m.hls, m.identity, m.net) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
+                const p = m.cmd === 'end-session' ? probe.endSession(m.why) : m.cmd === 'video' ? probe.video(m.op, m.to) : m.cmd === 'start' ? probe.start(m.minutes, m.mode, m.hls, m.identity, m.net) : m.cmd === 'stop' ? probe.stop('stopped from the app') : Promise.resolve(probe.status());
                 Promise.resolve(p).then((s) => { try { c.write(JSON.stringify(s) + '\n'); } catch (e) { /* gone */ } }, (e) => { try { c.write(JSON.stringify({ error: String(e.message || e) }) + '\n'); } catch (x) { /* gone */ } });
             }
         });

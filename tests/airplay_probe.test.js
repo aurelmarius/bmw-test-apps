@@ -442,6 +442,7 @@ function fakeVideoReceiver(dir) {
         "setTimeout(() => out({ ev: 'hlspos', pos: 13.7, dur: 212.4, paused: true, buffering: false }), 300);",
         "setTimeout(() => out({ ev: 'hlsseek', to: 60, ok: true }), 320);",
         "setTimeout(() => out({ ev: 'stats', frames: 90, fps: 30, kbps: 3800, idr: 2, sps: 2, audio: 120, shown: 88, decerr: 0 }), 340);",
+        "let inb = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (d) => { inb += d; let i; while ((i = inb.indexOf('\\n')) >= 0) { console.log('stdin ' + inb.slice(0, i)); inb = inb.slice(i + 1); } });",
         "process.on('SIGTERM', () => { out({ ev: 'hlsend', why: 'stopped' }); out({ ev: 'soundstop' }); out({ ev: 'stop', frames: 0 }); process.exit(0); });",
         "setInterval(() => {}, 1000);",
     ].join('\n'));
@@ -475,6 +476,11 @@ test('receiver with the video button: -hls and the H.264 filter, the proxy for i
         assert.strictEqual(s.rx.soundRunning, true);
         assert.strictEqual(s.rx.stream.shown, 88);
         assert.strictEqual(s.verdict.code, 'rx-hls');
+        // the app's controls reach the receiver's player, one a line on its stdin
+        probe.video('pause'); probe.video('seek', 61.5); probe.video('bogus');
+        await new Promise((r) => setTimeout(r, 200));
+        const got = probe.status().rx.lines.filter((l) => / stdin /.test(l)).map((l) => l.replace(/^.* stdin /, ''));
+        assert.deepStrictEqual(got, ['pause', 'seek 61.500']);
         assert.ok(/PASS: the head unit plays the video the iPhone sent \(1920x1080\)/.test(s.verdict.text), s.verdict.text);
         // the setting switched off: the receiver starts again without it, and the proxy goes
         s = await probe.start(1, 'receiver', false);

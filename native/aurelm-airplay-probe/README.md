@@ -87,6 +87,13 @@ pause, seek and its progress bar. **It works only while the iPhone is not in a C
 starts, whatever the identity or network; with CarPlay off it plays on, 720p at ~28 fps, its sound on the speakers,
 over the car's Wi-Fi or the iPhone's hotspot). Screen mirroring is the way with CarPlay on.
 
+**Its controls and shape on the iDrive** (0.10): the video plays at its own size in the frame file (the decoder's
+"native" mode, display order for its B frames) and the app places it: fill (default), zoom or fit, the setting "Picture
+shape" and the ASPECT button. A touch on the picture or the iDrive controller shows Emby's controls bar (controls.js):
+-10 s, play / pause, stop, +30 s, aspect, exit, and the progress bar. Pause, resume and seek reach the player as
+`{"cmd":"video","op":"pause"|"resume"|"seek","to":s}`, a line on the receiver's stdin; the iPhone follows through
+/playback-info. Stop ends the iPhone's session.
+
 **Internet.** The receiver runs as nobody, which mgu-uplink does not route. The video's segments come through
 `proxy.js`, a child of the service running as uid **13102** (`component.json` `"internet": true`, `"uids": [13102]`;
 the deploy tool writes `/var/opt/mgu-uplink/uids.d/aurelm-airplay-probe`): on 127.0.0.1:7390 only, `CONNECT` to ports

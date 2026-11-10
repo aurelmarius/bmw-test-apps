@@ -218,7 +218,8 @@ function createReceiver(opts) {
             Object.assign(env, { LANGUAGE: HLS_LANGUAGE, http_proxy: 'http://127.0.0.1:' + (w.proxyPort || 7390), no_proxy: 'localhost,127.0.0.1',
                 MGU_CA_FILE: o.caFile || path.join(__dirname, 'cacert.pem') }, o.env || {});
         }
-        const spawnOpts = { env, cwd: home, stdio: ['ignore', 'pipe', 'pipe'] };
+        // stdin: the app's controls for a played video (pause, resume, seek), one a line (renderer/mgu_renderer.c)
+        const spawnOpts = { env, cwd: home, stdio: ['pipe', 'pipe', 'pipe'] };
         // As nobody when the service is root (the car), in the groups video (the GPU's render node) and mgu_alsa (the
         // sound devices, as Moonride). Node gives a spawned process no supplementary groups, so the receiver is started
         // as root and drops to nobody with those groups itself before anything else runs (renderer/mgu_renderer.c,
@@ -240,6 +241,7 @@ function createReceiver(opts) {
             return;
         }
         st.pid = child.pid;
+        child.stdin.on('error', () => { /* the receiver went */ });
         lines(child.stdout, onLine);
         lines(child.stderr, keep);
         const me = child;
@@ -292,7 +294,20 @@ function createReceiver(opts) {
     /** for exit: no receiver left behind, synchronously */
     function killSync() { if (child) { try { child.kill('SIGKILL'); } catch (e) { /* gone */ } } removeVideo(); }
 
-    return { start, stop, killSync, state: () => st };
+    /** a played video's control (stage 4): 'pause' | 'resume' | 'seek' with `to` seconds; false when no receiver */
+    function control(op, to) {
+        const c = child;
+        if (!c || !c.stdin || !c.stdin.writable) return false;
+        let line = null;
+        if (op === 'pause' || op === 'resume') line = op;
+        else if (op === 'seek' && Number(to) >= 0) line = 'seek ' + Number(to).toFixed(3);
+        if (!line) return false;
+        try { c.stdin.write(line + '\n'); } catch (e) { return false; }
+        if (o.log) o.log('receiver: ' + line + ' (the app)');
+        return true;
+    }
+
+    return { start, stop, killSync, control, state: () => st };
 }
 
 module.exports = { createReceiver, PORTS, BASE_PORT, VIDEO_PATH, AUDIO_DEVICE, HLS_PROFILE, IDENTITIES };

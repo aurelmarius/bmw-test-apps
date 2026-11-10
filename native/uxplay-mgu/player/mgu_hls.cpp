@@ -213,6 +213,7 @@ void video_loop(Player *p) {
     }
     AVPacket *out = av_packet_alloc();
     bool reported = false;
+    unsigned repW = 0, repH = 0;   /* the frame file's size last reported (the video's own: it comes with its first picture) */
     int gen = p->seek_gen;
     for (;;) {
         AVPacket *pk = nullptr;
@@ -252,12 +253,16 @@ void video_loop(Player *p) {
             const int v = mgu_video_frame_timed(au->data, au->size, apts >= 0 ? (long long) llround(apts * 1000) : -1, wait_picture, &w, &sh, &er);
             p->vpk++;
             p->shown = sh; p->decerr = er;
-            if (v == 1 && !reported) {
+            if (v == 1) reported = true;
+            if (reported && sh > 0) {   /* the decoder open and a picture written: its size is the frame file's */
                 unsigned W = 0, H = 0;
                 mgu_video_size(&W, &H);
-                emitf("{\"ev\":\"decoder\",\"ok\":true,\"path\":\"%s\",\"w\":%u,\"h\":%u}", clean(mgu_video_path()).c_str(), W, H);
-                reported = true;
-            } else if (v == -1) {
+                if (W != repW || H != repH) {
+                    repW = W; repH = H;
+                    emitf("{\"ev\":\"decoder\",\"ok\":true,\"path\":\"%s\",\"w\":%u,\"h\":%u}", clean(mgu_video_path()).c_str(), W, H);
+                }
+            }
+            if (v == -1) {
                 emitf("{\"ev\":\"decoder\",\"ok\":false,\"error\":\"%s\"}", clean(mgu_video_error()).c_str());
                 p->video_ok = false;
             }
@@ -392,6 +397,7 @@ void demux_loop(Player *p) {
     }
     p->open = true;
     mgu_video_display_order(1);   /* B frames: display order (the decoder starts at the first SPS after this) */
+    mgu_video_native(1);          /* the video's own size: the app places it (fit, zoom, fill) */
     mgu_video_reset();
     emitf("{\"ev\":\"start\"}");
     if (p->vi >= 0) p->vthr = std::thread(video_loop, p);
@@ -511,6 +517,7 @@ void stop_locked() {
     if (was_open) { emitf("{\"ev\":\"soundstop\"}"); emitf("{\"ev\":\"stop\",\"frames\":0}"); }
     mgu_video_stop();
     mgu_video_display_order(0);   /* mirroring again: decoding order, the lowest latency */
+    mgu_video_native(0);          /* and the screen's size, fitted by the decoder */
 }
 
 }  // namespace

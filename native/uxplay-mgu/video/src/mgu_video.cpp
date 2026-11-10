@@ -36,6 +36,9 @@ std::mutex g_mu;
 woc::Decoder *g_dec = nullptr;
 ytdec::Mgvf g_mgvf;
 bool g_open = false, g_failed = false, g_reported = false, g_file = false;
+/* stage 4: a played video's own shape: the decoder outputs the stream's size, and the frame file is made at the
+ * first picture with that size (the app places it: fit, zoom, fill); mirroring keeps MGU_VIDEO_SIZE, fitted */
+bool g_native = false;
 unsigned long long g_shown = 0, g_errors = 0;
 uint32_t g_w = 1920, g_h = 720;
 std::string g_path = "/dev/shm/mgu-video-aurelm-airplay", g_err;
@@ -51,12 +54,12 @@ bool open_locked() {
     unsigned w = 0, h = 0;
     if (sz && sscanf(sz, "%ux%u", &w, &h) == 2 && w >= 16 && h >= 16 && w <= 2048 && h <= 2048) g_w = w & ~1u, g_h = h & ~1u;
     std::string err, warn;
-    if (!g_file) {
+    if (!g_file && !g_native) {
         if (!g_mgvf.open(g_path.c_str(), g_w, g_h, 3, &err, &warn)) { g_failed = true; g_err = "frame file: " + err; return false; }
         g_file = true;
     }
     if (!g_dec) g_dec = new woc::Decoder();
-    if (!g_dec->init("/dev/dri/renderD128", g_w, g_h, false, &err)) {
+    if (!g_dec->init("/dev/dri/renderD128", g_native ? 0 : g_w, g_native ? 0 : g_h, false, &err)) {
         g_failed = true;
         g_err = "decoder: " + err;
         g_mgvf.close();
@@ -81,7 +84,20 @@ static int frame_locked(const unsigned char *data, int len, long long pts_ms, in
         const bool ok = g_dec->feed(data, (size_t) len, [&](const woc::VideoFrame &f) {
             if (!f.y) return;
             if (wait && wait(f.pts_ms, arg) != 0) return;
-            ytdec::nv12_to_i420(f.y, f.uv, f.pitch, f.w, f.h, g_mgvf.begin());
+            if (g_native && (!g_file || (f.w & ~1u) != g_w || (f.h & ~1u) != g_h)) {
+                /* the stream's own size: the frame file made (again) for it */
+                std::string ferr, fwarn;
+                if (g_file) { g_mgvf.close(); g_file = false; }
+                const uint32_t w = f.w & ~1u, h = f.h & ~1u;
+                if (w < 16 || h < 16 || w > 2048 || h > 2048 || !g_mgvf.open(g_path.c_str(), w, h, 3, &ferr, &fwarn)) {
+                    g_errors++;
+                    if (g_errors <= 3) fprintf(stderr, "mgu_video: frame file %ux%u: %s\n", w, h, ferr.c_str());
+                    return;
+                }
+                g_file = true; g_w = w; g_h = h;
+            }
+            if (!g_file) return;
+            ytdec::nv12_to_i420(f.y, f.uv, f.pitch, g_native ? g_w : f.w, g_native ? g_h : f.h, g_mgvf.begin());
             g_mgvf.commit();
             g_shown++;
         }, &err, true, true, wait ? (int64_t) pts_ms : -1);
@@ -108,6 +124,13 @@ extern "C" int mgu_video_frame_timed(const unsigned char *data, int len, long lo
 extern "C" void mgu_video_display_order(int on) {
     std::lock_guard<std::mutex> l(g_mu);
     woc::Decoder::set_display_order(on != 0);
+}
+
+/* stage 4: 1 the stream's own size (the frame file made at the first picture), 0 MGU_VIDEO_SIZE (mirroring); from
+ * the next open */
+extern "C" void mgu_video_native(int on) {
+    std::lock_guard<std::mutex> l(g_mu);
+    g_native = on != 0;
 }
 
 /* a seek: the decoder starts again at the next SPS; the frame file and its last picture stay */
