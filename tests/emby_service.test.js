@@ -58,6 +58,11 @@ function fakeEmby(opts) {
             if (req.headers['x-emby-token'] !== TOKEN || o.revoked) return json(401);
             if (p === '/System/Info') return json(200, { ServerName: 'Home Emby', Version: '4.9.1.80' });
             if (p === '/Sessions/Capabilities/Full') { seen.caps = JSON.parse(body); seen.capsCount = (seen.capsCount || 0) + 1; return json(204); }
+            if (p === '/Sessions' && qs.parse(req.url.split('?')[1] || '').ActiveWithinSeconds) return json(200, [{ Id: 'sess-car', DeviceName: 'BMW iDrive', UserId: 'u1' }].concat(o.phonePlaying ? [
+                { Id: 'phone1', DeviceId: 'iphone-1', DeviceName: 'iPhone', Client: 'Emby for iOS', UserId: 'u1', LastActivityDate: new Date().toISOString(),
+                    NowPlayingItem: { Id: 'film2', Name: 'Sample', MediaType: 'Video' },
+                    PlayState: { PositionTicks: 3389270000, MediaSourceId: 'ms2', AudioStreamIndex: 1, SubtitleStreamIndex: 2 } }] : []));
+            if (p === '/Sessions/phone1/Playing/Stop') { seen.phoneStopped = (seen.phoneStopped || 0) + 1; return json(204); }
             if (p === '/Sessions') return json(200, [{ Id: 'sess-car', DeviceName: 'BMW iDrive' }]);
             if (p === '/Sessions/Logout') { seen.logout++; return json(204); }
             const query = qs.parse(req.url.split('?')[1] || '');
@@ -273,7 +278,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.3.2');
+        assert.strictEqual(s.version, '0.3.3');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -523,12 +528,29 @@ test('cast during a film on the phone (it sends only SetVolume): the film it jus
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 
+test('cast while the phone goes on playing: its film taken over where it is, with its tracks, and the phone told to stop', async () => {
+    const srv = await fakeEmby({ seconds: 600, phonePlaying: true, lastPlayedAgo: 10 * 60000 });
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100' } });
+    try {
+        srv.send({ MessageType: 'Playstate', Data: { Command: 'PlayPause' } });
+        await until(() => srv.seen.reports.some((r) => r.path === '/Sessions/Playing'), 6000, 'taken over');
+        const q = srv.seen.pbinfo[0].query;
+        assert.strictEqual(q.StartTimeTicks, '3389270000');
+        assert.strictEqual(q.MediaSourceId, 'ms2');
+        assert.strictEqual(q.AudioStreamIndex, '1');
+        assert.strictEqual(q.SubtitleStreamIndex, '2');
+        await until(() => srv.seen.phoneStopped === 1, 3000, 'the phone told to stop');
+        const s = await statusUntil(svc.sock, (x) => (x.log || []).some((l) => /take over \(PlayPause\): Sample from 339 s, from iPhone/.test(l)), 3000, 'logged');
+        assert.ok(s);
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
 test('no take over: a film stopped long ago, or a Play that came meanwhile', async () => {
     const srv = await fakeEmby({ seconds: 600, lastPlayedAgo: 10 * 60000 });
     const svc = await signedIn(srv);
     try {
         srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetVolume', Arguments: { Volume: '50' } } });
-        const s = await statusUntil(svc.sock, (x) => (x.log || []).some((l) => /no film stopped in the last 90 s/.test(l)), 6000, 'nothing taken');
+        const s = await statusUntil(svc.sock, (x) => (x.log || []).some((l) => /no film stopped in the last 90 s \(last: Sample, 600 s ago\)/.test(l)), 6000, 'nothing taken');
         assert.strictEqual(srv.seen.pbinfo.length, 0);
         assert.strictEqual(s.playback.state, 'idle');
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }

@@ -164,18 +164,38 @@ function createPlayback(o) {
         if (cur) return false;
         const acc = account();
         if (!acc) return false;
+        // 1. a film this account plays right now on another device (0.3.2 in the car: the phone, cast to us, went on
+        //    playing itself): taken from where it is, with its tracks, and that device is told to stop
+        let sessions = null;
+        try { sessions = await api('GET', 'Sessions?ActiveWithinSeconds=600'); } catch (e) { log('take over: sessions: ' + e.message); }
+        const ourId = o.sessionId ? o.sessionId() : null;
+        const busy = (Array.isArray(sessions) ? sessions : []).filter((x) => x && x.NowPlayingItem && x.NowPlayingItem.Id && x.Id !== ourId &&
+            x.DeviceId !== o.device.id && (!x.UserId || x.UserId === acc.userId) && /Video|Audio/.test(x.NowPlayingItem.MediaType || 'Video'));
+        busy.sort((a, b) => Date.parse(b.LastActivityDate || 0) - Date.parse(a.LastActivityDate || 0));
+        if (busy[0] && !cur) {
+            const x = busy[0], ps = x.PlayState || {}, it = x.NowPlayingItem;
+            const start = ps.PositionTicks ? ps.PositionTicks / TICKS : 0;
+            log('take over (' + why + '): ' + (it.Name || it.Id) + ' from ' + Math.round(start) + ' s, from ' + (x.DeviceName || x.Client || 'the phone'));
+            play({ command: 'PlayNow', ids: [it.Id], start, startIndex: 0, mediaSourceId: ps.MediaSourceId || null,
+                audioIndex: ps.AudioStreamIndex != null ? ps.AudioStreamIndex : null, subtitleIndex: ps.SubtitleStreamIndex != null ? ps.SubtitleStreamIndex : null });
+            // the film goes on here, not there too
+            api('POST', 'Sessions/' + encodeURIComponent(x.Id) + '/Playing/Stop').catch((e) => log('take over: stopping ' + (x.DeviceName || x.Id) + ': ' + e.message));
+            return true;
+        }
+        // 2. none plays: the film this account stopped within the last 90 s, from the position the server saved
         const r = await api('GET', 'Users/' + encodeURIComponent(acc.userId) + '/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=1&Recursive=true' +
             '&IncludeItemTypes=Movie,Episode,Video,MusicVideo&Fields=UserData,MediaSources');
         const it = r && r.Items && r.Items[0];
         const ud = it && it.UserData;
         const when = ud && ud.LastPlayedDate ? Date.parse(ud.LastPlayedDate) : NaN;
         if (!it || !(now() - when < 90000 && now() - when > -60000)) {
-            log('take over (' + why + '): no film stopped in the last 90 s' + (it ? ' (last: ' + (it.Name || it.Id) + ')' : ''));
+            log('take over (' + why + '): nothing plays elsewhere, no film stopped in the last 90 s' +
+                (it ? ' (last: ' + (it.Name || it.Id) + ', ' + (isNaN(when) ? 'no date' : Math.round((now() - when) / 1000) + ' s ago') + ')' : ''));
             return false;
         }
         if (cur) return false;
         const start = ud.PlaybackPositionTicks ? ud.PlaybackPositionTicks / TICKS : 0;
-        log('take over (' + why + '): ' + (it.Name || it.Id) + ' from ' + Math.round(start) + ' s, as the phone left it');
+        log('take over (' + why + '): ' + (it.Name || it.Id) + ' from ' + Math.round(start) + ' s, as it was left');
         play({ command: 'PlayNow', ids: [it.Id], start, startIndex: 0 });
         return true;
     }
