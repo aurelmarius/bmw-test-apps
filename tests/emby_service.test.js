@@ -61,6 +61,8 @@ function fakeEmby(opts) {
             if (p === '/Sessions') return json(200, [{ Id: 'sess-car', DeviceName: 'BMW iDrive' }]);
             if (p === '/Sessions/Logout') { seen.logout++; return json(204); }
             const query = qs.parse(req.url.split('?')[1] || '');
+            if (p === '/Users/u1/Items' && /DatePlayed/.test(query.SortBy || '')) return json(200, { Items: o.lastPlayedAgo == null ? [] : [{ Id: 'film2', Name: 'Sample', Type: 'Movie',
+                UserData: { LastPlayedDate: new Date(Date.now() - o.lastPlayedAgo).toISOString(), PlaybackPositionTicks: o.resumeTicks || 0 } }] });
             if (p === '/Users/u1/Items/film2') return json(200, { Id: 'film2', Name: 'Sample', Type: 'Movie', MediaType: 'Video', RunTimeTicks: (o.seconds || 3) * 10000000,
                 MediaSources: [{ Id: 'ms2', Container: 'mkv', MediaStreams: [{ Type: 'Video', Codec: 'hevc', Width: 3840, Height: 2160 }, { Type: 'Audio', Codec: 'eac3', Channels: 6, IsDefault: true }] }] });
             if (p === '/Items/film2/PlaybackInfo' && req.method === 'POST') {
@@ -271,7 +273,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.3.1');
+        assert.strictEqual(s.version, '0.3.2');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -509,14 +511,37 @@ test('the app\'s controls: play / pause, a seek to a position, stop', async () =
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 
-test('a command with no film after it: what the server\'s log says about our session', async () => {
-    const srv = await fakeEmby({ seconds: 60 });
+test('cast during a film on the phone (it sends only SetVolume): the film it just stopped is taken over, from its position', async () => {
+    const srv = await fakeEmby({ seconds: 600, lastPlayedAgo: 2000, resumeTicks: 1234500000 });
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100' } });
+    try {
+        srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetVolume', Arguments: { Volume: '50' } } });
+        await until(() => srv.seen.reports.some((r) => r.path === '/Sessions/Playing'), 6000, 'taken over');
+        assert.strictEqual(srv.seen.pbinfo[0].query.StartTimeTicks, '1234500000');
+        const s = await statusUntil(svc.sock, (x) => x.playback && x.playback.state === 'playing', 5000, 'playing');
+        assert.ok((s.log || []).some((l) => /take over \(SetVolume\): Sample from 123 s/.test(l)), JSON.stringify(s.log));
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('no take over: a film stopped long ago, or a Play that came meanwhile', async () => {
+    const srv = await fakeEmby({ seconds: 600, lastPlayedAgo: 10 * 60000 });
     const svc = await signedIn(srv);
     try {
         srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetVolume', Arguments: { Volume: '50' } } });
-        const s = await statusUntil(svc.sock, (x) => (x.log || []).some((l) => /server log: .*Sessions\/sess-car\/Command/.test(l)), 8000, 'the server log in ours');
-        assert.ok(!(s.log || []).some((l) => /something else/.test(l)), 'only the lines about our session');
+        const s = await statusUntil(svc.sock, (x) => (x.log || []).some((l) => /no film stopped in the last 90 s/.test(l)), 6000, 'nothing taken');
+        assert.strictEqual(srv.seen.pbinfo.length, 0);
+        assert.strictEqual(s.playback.state, 'idle');
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+    const srv2 = await fakeEmby({ seconds: 600, lastPlayedAgo: 1000 });
+    const svc2 = await signedIn(srv2, { playerEnv: { FAKE_PLAYER_SECONDS: '100' } });
+    try {
+        srv2.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetVolume', Arguments: { Volume: '50' } } });
+        srv2.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow', StartPositionTicks: 300000000 } });
+        await until(() => srv2.seen.pbinfo.length === 1, 5000, 'the Play');
+        await wait(2500);
+        assert.strictEqual(srv2.seen.pbinfo.length, 1, 'only the Play\'s stream');
+        assert.strictEqual(srv2.seen.pbinfo[0].query.StartTimeTicks, '300000000');
+    } finally { srv2.close(); svc2.svc.stop(); svc2.server.close(); }
 });
 
 test('playback: the end of a film plays the next in the queue, then stops', async () => {

@@ -154,14 +154,30 @@ function createPlayback(o) {
         }
         return r ? r.text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : null;
     }
-    /** a command came and no film followed (cast during a film on the phone, 0.3.0): what the server's own log says
-     *  about our session in the last minute, in our log */
-    async function castLog(sessionId) {
-        const lines = await serverLogLines(/^embyserver/i);
-        if (!Array.isArray(lines)) { if (lines) log('server log: ' + lines); return; }
-        const ours = lines.slice(-400).filter((l) => (sessionId && l.indexOf(sessionId) >= 0) || /BMW iDrive|PlayMediaSource|\/Playing|Sessions\/[0-9a-f]+\/(Command|Playing)/i.test(l)).slice(-6);
-        if (!ours.length) log('server log: nothing about this session');
-        ours.forEach((l) => log('server log: ' + l.slice(0, 260)));
+    /**
+     * The Emby app for iOS, cast to us during a film, stops it on the phone and sends us only a command (SetVolume;
+     * PlayPause when play is pressed then): never the film (its server's log, 0.3.1 in the car). So, nothing playing
+     * here and such a command come: the film this user played last, if it stopped within the last 90 s, is taken over
+     * from where the server saved it (its resume position; the start for a film stopped in its first minutes).
+     */
+    async function takeOver(why) {
+        if (cur) return false;
+        const acc = account();
+        if (!acc) return false;
+        const r = await api('GET', 'Users/' + encodeURIComponent(acc.userId) + '/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=1&Recursive=true' +
+            '&IncludeItemTypes=Movie,Episode,Video,MusicVideo&Fields=UserData,MediaSources');
+        const it = r && r.Items && r.Items[0];
+        const ud = it && it.UserData;
+        const when = ud && ud.LastPlayedDate ? Date.parse(ud.LastPlayedDate) : NaN;
+        if (!it || !(now() - when < 90000 && now() - when > -60000)) {
+            log('take over (' + why + '): no film stopped in the last 90 s' + (it ? ' (last: ' + (it.Name || it.Id) + ')' : ''));
+            return false;
+        }
+        if (cur) return false;
+        const start = ud.PlaybackPositionTicks ? ud.PlaybackPositionTicks / TICKS : 0;
+        log('take over (' + why + '): ' + (it.Name || it.Id) + ' from ' + Math.round(start) + ' s, as the phone left it');
+        play({ command: 'PlayNow', ids: [it.Id], start, startIndex: 0 });
+        return true;
     }
 
     function status() {
@@ -504,7 +520,7 @@ function createPlayback(o) {
 
     function stop() { finish('stopped'); set('idle'); }
 
-    return { play, playstate, command, onPlayer, stop, status, castLog, position: () => position() };
+    return { play, playstate, command, onPlayer, stop, status, takeOver, position: () => position() };
 }
 
 module.exports = { createPlayback, deviceProfile, setParam, describeUrl, parseSrt, ascii, TICKS };

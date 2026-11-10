@@ -25,6 +25,8 @@ shows the position as for any Emby player.
 | on the speakers | the app routes source 287 to the speakers (`car_audio.js`) while a film is on, paused included. 287 is shared with AirPlay Test: each app disconnects only the connection whose number it saved, neither connects over the other's, and the source is marked unavailable only when 287 is empty. A number saved before a restart of the head unit is forgotten, never disconnected. |
 | reports | `Sessions/Playing` at the start, `/Progress` every 10 s and at pause, unpause and volume, `/Stopped` at the end. The transcode is stopped (`DELETE Videos/ActiveEncodings`) when its stream is left. |
 
+**Cast during a film on the phone.** The Emby app for iOS (2.2.59) stops the film and sends the car only a command (SetVolume; PlayPause if play is pressed), never the film. With nothing playing, such a command makes the client take over the film this account played last, if it stopped within the last 90 s (`Items?SortBy=DatePlayed`), from its saved position (the server saves one past its resume threshold: earlier, the start).
+
 A seek, another audio or subtitle track, or a lost connection (3 tries from the position) is a new stream and a
 new player. The end of a film plays the next one in the queue. The app must have been opened once since the head
 unit started, because the sound's route and the picture are the app's.

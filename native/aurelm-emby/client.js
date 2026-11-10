@@ -54,20 +54,28 @@ function playbackStatus() {
 setInterval(playbackStatus, 1000);
 
 c.on('status', (status) => send({ ev: 'status', status }));
-let lastPlay = 0, castProbe = null;
+// The phone casting a film it plays sends no Play (see playback.js takeOver): a command while nothing plays here is
+// the cue to take that film over, 1.5 s later (the phone's Stopped, sent with it, saved the position by then), unless
+// a Play came meanwhile; once a minute at most.
+let lastPlay = 0, overAt = 0;
+function cue(why) {
+    if (pb.status().state !== 'idle' || Date.now() - overAt < 60000) return;
+    overAt = Date.now();
+    const at = Date.now();
+    setTimeout(() => {
+        if (lastPlay >= at || pb.status().state !== 'idle') return;
+        pb.takeOver(why).then((took) => { if (took) playbackStatus(); else overAt = 0; }).catch((e) => { overAt = 0; log('take over: ' + e.message); });
+    }, 1500);
+}
 c.on('play', (data) => { lastPlay = Date.now(); send({ ev: 'play', data }); pb.play(data); playbackStatus(); });
-c.on('playstate', (data) => { send({ ev: 'playstate', data }); pb.playstate(data); playbackStatus(); });
+c.on('playstate', (data) => {
+    send({ ev: 'playstate', data });
+    if (pb.status().state === 'idle' && /^(PlayPause|Unpause)$/.test(data.command || '')) cue(data.command);
+    else { pb.playstate(data); playbackStatus(); }
+});
 c.on('command', (data) => {
     send({ ev: 'command', data }); pb.command(data); playbackStatus();
-    // nothing playing and no Play after a command (the phone handing over its film sent only SetVolume in the car):
-    // the server's log says why, once a minute at most
-    if (pb.status().state === 'idle' && !castProbe) {
-        const at = Date.now();
-        castProbe = setTimeout(() => {
-            if (lastPlay < at && pb.status().state === 'idle') pb.castLog(c.status().sessionId).catch((e) => log('server log: ' + e.message));
-            setTimeout(() => { castProbe = null; }, 60000);
-        }, 4000);
-    }
+    if (data.name === 'SetVolume' || data.name === 'Unmute') cue(data.name);
 });
 c.on('signed-out', (why) => { pb.stop(); send({ ev: 'signed-out', why }); });
 
