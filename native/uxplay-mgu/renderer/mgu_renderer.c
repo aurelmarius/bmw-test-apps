@@ -197,7 +197,10 @@ void video_renderer_set_device_model(const char *model, const char *name) {
 
 void video_renderer_set_track_metadata(const char *title, const char *artist, const char *album) { (void) title; (void) artist; (void) album; }
 void video_renderer_pause() { mgu_hls_pause(1); }
-void video_renderer_hls_ready() {}
+/* the iPhone's /stop (on_video_stop) and a video's end (the EOS watch): the player stops, as GStreamer UxPlay's
+ * pipeline goes to READY (in the car, 0.10.0: it played on after the phone's Stop, and the next video from the phone
+ * ended after a few seconds) */
+void video_renderer_hls_ready() { mgu_hls_stop(); }
 void video_renderer_seek(float position) { mgu_hls_seek(position); }
 void video_renderer_set_start(float position) { hls_start = position; }
 void video_renderer_resume() { mgu_hls_pause(0); }

@@ -32,7 +32,7 @@ const SOCK = process.env.AIRPLAY_PROBE_SOCK || '/run/aurelm-airplay-probe.sock';
 const MINUTES = 15;
 // the service version this app is built with: an older one still running (its files were updated, the
 // process not) is asked to end, and the socket starts the new one at the next request
-const SERVICE_VERSION = '0.9.9';
+const SERVICE_VERSION = '0.9.10';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#2fd27a', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -261,14 +261,14 @@ mgu.run({
             mirror.tick();
         }
         const controls = createControls({
+            // no Stop: from the iDrive it ended the iPhone's session, and YouTube went to "Something went wrong"
+            buttons: ['back10', 'playpause', 'fwd30', 'aspect', 'exit'],
             act: (a) => {
                 const h = hlsOf();
                 if (a && a.seek != null) return seekAt(a.seek);
                 if (a === 'back10') return seekBy(-10);
                 if (a === 'fwd30') return seekBy(30);
                 if (a === 'playpause') return ask('video', { op: h && h.paused ? 'resume' : 'pause' }).then((r) => { if (r) { st = r; stAt = Date.now(); } mirror.tick(); });
-                // stop: the video ends on the iPhone too (the session is ended: the receiver starts again)
-                if (a === 'stop') { controls.hide(); return ask('end-session', { why: 'stopped on the iDrive' }).then((r) => { if (r) st = r; }); }
                 if (a === 'aspect') { ctx.settings.set('aspect', ASPECTS[(ASPECTS.indexOf(aspect()) + 1) % ASPECTS.length]); log.info('airplay: aspect ' + aspect()); return mirror.tick(); }
                 if (a === 'exit') return mirror.hide('the controls');
             },

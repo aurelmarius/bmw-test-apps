@@ -9,7 +9,7 @@
  * right moves it too. The controller's codes are the kit's (kit/runtime/display.js): the knob a 16-bit counter, the
  * press 1 or 2, a push 1/2 north, 4/5 east, 7/8 south, 10/11 west; 15 and 15: no controller behind it.
  *
- *   const ctl = createControls({ now, act });   // act('back10' | 'playpause' | 'stop' | 'fwd30' | 'aspect' | 'exit' | { seek })
+ *   const ctl = createControls({ now, act, buttons });   // buttons: a subset of the six, in their order; act('back10' | 'playpause' | 'stop' | 'fwd30' | 'aspect' | 'exit' | { seek })
  *   ctl.touch(phase, x, y, placement, info)     // true: taken
  *   ctl.ccu({ knob, press, tilt })               // true: taken (the picture stays)
  *   ctl.visible()  ctl.show()  ctl.hide()
@@ -17,7 +17,7 @@
  *   ctl.draw(rec, placement, info)               // info: { title, pos, dur, paused, aspect, seeking }
  *   ctl.height(placement)                        // the bar's height (the subtitles go above it)
  */
-const BUTTONS = ['back10', 'playpause', 'stop', 'fwd30', 'aspect', 'exit'];
+const ALL_BUTTONS = ['back10', 'playpause', 'stop', 'fwd30', 'aspect', 'exit'];
 const SHOW_MS = 5000;
 const TILT = { 1: 'N', 2: 'N', 4: 'E', 5: 'E', 7: 'S', 8: 'S', 10: 'W', 11: 'W' };
 const ASPECT_NAME = { fit: 'FIT', zoom: 'ZOOM', fill: 'FILL' };
@@ -31,6 +31,8 @@ const hms = (s) => {
 function createControls(o) {
     const now = o.now || Date.now;
     const act = o.act || (() => {});
+    // AirPlay: no stop (the iPhone's own Stop ends a video; ending it from here left YouTube in error)
+    const BUTTONS = (o.buttons || ALL_BUTTONS).filter((b) => ALL_BUTTONS.indexOf(b) >= 0);
     let until = 0, focus = 1, last = null, keepOpen = false;
 
     const visible = () => keepOpen || now() < until;
@@ -157,4 +159,4 @@ function videoRect(mode, fw, fh, pl) {
     return { x: Math.round((pl.w - w) / 2), y: Math.round((pl.h - h) / 2), w, h };
 }
 
-module.exports = { createControls, videoRect, BUTTONS, hms };
+module.exports = { createControls, videoRect, BUTTONS: ALL_BUTTONS, hms };
