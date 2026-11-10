@@ -88,6 +88,15 @@ function fakeTvh(opts) {
         if (p === '/api/serverinfo') return json({ sw_version: '4.3-2735~gfcd987f0b', api_version: 19, name: 'Tvheadend' });
         // anonymous paths: an anonymous request sees nothing
         if (p === '/api/channel/grid') return json({ entries: user ? CH : [], total: user ? CH.length : 0 });
+        if (p === '/api/epg/events/grid' && q.channel) {
+            seen.epg = (seen.epg || 0) + 1;
+            const t = Math.floor(Date.now() / 1000);
+            return json({ entries: !user ? [] : [
+                { eventId: 9, channelUuid: q.channel, title: 'Ended', start: t - 7200, stop: t - 3600 },
+                { eventId: 11, channelUuid: q.channel, title: 'Vremea', start: t + 1200, stop: t + 1500 },
+                { eventId: 10, channelUuid: q.channel, title: 'Știrile Pro TV', subtitle: 'Ediția de seară', description: 'Cele mai importante știri ale zilei.', start: t - 600, stop: t + 1200 },
+                { eventId: 12, channelUuid: q.channel, title: 'Tomorrow', start: t + 30 * 3600, stop: t + 31 * 3600 }] });
+        }
         if (p === '/api/epg/events/grid') return json({ entries: user && q.mode === 'now' ? [
             { channelUuid: CH[0].uuid, title: 'Știrile Pro TV', subtitle: 'Ediția de seară', start: Math.floor(Date.now() / 1000) - 600, stop: Math.floor(Date.now() / 1000) + 1200 },
             { channelUuid: CH[1].uuid, title: 'Vremea', start: 1, stop: Math.floor(Date.now() / 1000) + 3600 }] : [] });
@@ -372,6 +381,20 @@ test('service: the channels\' logos: fetched once from the imagecache as the use
         assert.ok(body.length > 30 && body.length < 200, body.length + ' runs');
         assert.ok(body.every((r) => r[0] >= 100 && r[0] + r[2] <= 164 && r[1] >= 10 && r[1] < 46 && r[3] === 1), 'inside the box');
         assert.ok(body.some((r) => r[4] === 0xe00018ff) && body.some((r) => r[4] === 0xffffffff), 'red and white, rounded to 32 levels');
+    } finally { s.close(); srv.close(); }
+});
+
+test('service: a channel\'s programme for the guide: from now, 24 hours, in order, in ASCII, kept 3 minutes', async () => {
+    const srv = await fakeTvh();
+    const s = await signedIn(srv);
+    try {
+        const r = await ask(s.sock, { cmd: 'epg', uuid: CH[0].uuid });
+        assert.deepStrictEqual(r.events.map((e) => e.title), ['Stirile Pro TV', 'Vremea'], 'the ended one and the one after 24 h left out');
+        assert.strictEqual(r.events[0].subtitle, 'Editia de seara');
+        assert.strictEqual(r.events[0].text, 'Cele mai importante stiri ale zilei.');
+        await ask(s.sock, { cmd: 'epg', uuid: CH[0].uuid });
+        assert.strictEqual(srv.seen.epg, 1, 'kept');
+        assert.ok((await ask(s.sock, { cmd: 'epg', uuid: 'nope' })).error);
     } finally { s.close(); srv.close(); }
 });
 

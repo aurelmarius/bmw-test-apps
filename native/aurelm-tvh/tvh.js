@@ -11,6 +11,7 @@
  *   await t.profiles()    ['mgu-hd', 'pass', ...] the stream profiles (null: the server does not list them)
  *   await t.epgNow()      { <channel uuid>: { title, subtitle, start, stop } } (seconds since 1970)
  *   await t.stream(uuid, profile) -> { status, res, abort } (MPEG-TS from /stream/channel/<uuid>?profile=...)
+ *   await t.epg(uuid, hours) a channel's programme from now: [{ id, title, subtitle, summary, description, start, stop }]
  *   await t.logo(icon)    a channel's logo (its icon_public_url: imagecache/<n> on the server, or an address), a PNG
  *
  * Authentication: Tvheadend asks for HTTP Digest (MD5 or SHA-256, "Digest hash type") or Basic, as its
@@ -233,6 +234,16 @@ function createTvh(o) {
         throw new Error('unreachable');
     }
 
+    /** a channel's programme: what is on now and what follows, `hours` ahead (Tvheadend sorts the grid by start) */
+    async function epg(uuid, hours) {
+        const t = Math.floor(now() / 1000), until = t + (hours || 24) * 3600;
+        const j = await json('api/epg/events/grid?channel=' + encodeURIComponent(uuid) + '&start=0&limit=80&sort=start&dir=ASC', 'epg');
+        return (j.entries || []).filter((e) => e && (!e.channelUuid || e.channelUuid === uuid) && e.stop > t && e.start < until)
+            .sort((a, b) => a.start - b.start).slice(0, 60)
+            .map((e) => ({ id: e.eventId || null, title: e.title || '', subtitle: e.subtitle || '', summary: e.summary || '', description: e.description || '',
+                start: e.start, stop: e.stop, episode: e.episodeOnscreen || '' }));
+    }
+
     /** a channel's logo as Tvheadend gives it: its imagecache (as the user) or another address; PNG only, 512 KiB at most */
     async function logo(icon) {
         const s = String(icon || '').trim();
@@ -251,7 +262,7 @@ function createTvh(o) {
         return r.body;
     }
 
-    return { signIn, use, info, channels, profiles, epgNow, stream, logo, account: () => acc };
+    return { signIn, use, info, channels, profiles, epgNow, epg, stream, logo, account: () => acc };
 }
 
 module.exports = { createTvh, candidates, challenges, pick, authorization, parsePlaylist };

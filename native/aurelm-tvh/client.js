@@ -6,10 +6,11 @@
  *
  *   parent -> { op: 'run', account } | { op: 'signin', id, server, user, password } | { op: 'signout' } | { op: 'stop' }
  *             | { op: 'play', channel } | { op: 'playback-stop' } | { op: 'prefs', prefs } | { op: 'refresh' }
- *             | { op: 'player', id, ev } (the player's events) | { op: 'logo', id, icon }
+ *             | { op: 'player', id, ev } (the player's events) | { op: 'logo', id, icon } | { op: 'epg', id, uuid }
  *   child  -> { ev: 'status', status } | { ev: 'signin', id, ok, account | error } | { ev: 'channels', channels, epg, at }
  *             | { ev: 'playback', status } | { ev: 'player-start', id } | { ev: 'player-ctl', id, line } | { ev: 'player-stop', id }
  *             | { ev: 'signed-out', why } | { ev: 'log', line } | { ev: 'ready', uid } | { ev: 'logo', id, ok, png (base64) | error }
+ *             | { ev: 'epg', id, ok, events | error }
  *
  * The channel's stream goes to the parent on fd 4 (the parent hands it to tvh-player's stdin), in frames: a stream
  * id (u32 LE), a length (u32 LE; 0xffffffff: that stream ended), the bytes. A stream left (another channel) can still
@@ -123,6 +124,12 @@ process.on('message', (m) => {
     else if (m.op === 'play') { pb.play(m.channel); playbackStatus(); }
     else if (m.op === 'playback-stop') { pb.stop(); playbackStatus(); }
     else if (m.op === 'prefs') { pb.setPrefs(m.prefs); playbackStatus(); }
+    else if (m.op === 'epg') {
+        tvh.epg(m.uuid, 24).then((list) => send({ ev: 'epg', id: m.id, ok: true, events: list.map((e) => ({ id: e.id, start: e.start, stop: e.stop,
+            title: ascii(e.title), subtitle: ascii(e.subtitle), episode: ascii(e.episode),
+            text: ascii(e.description || e.summary).slice(0, 1200) })) }))
+            .catch((e) => send({ ev: 'epg', id: m.id, ok: false, error: e.message }));
+    }
     else if (m.op === 'logo') {
         tvh.logo(m.icon).then((b) => send({ ev: 'logo', id: m.id, ok: true, png: b.toString('base64') }))
             .catch((e) => send({ ev: 'logo', id: m.id, ok: false, error: e.message }));

@@ -81,10 +81,59 @@ test('the controller: knob and press along the buttons; push up opens the list, 
     assert.strictEqual(c.visible(), false, 'no controller behind it');
 });
 
+test('the guide: EPG opens it on the channel playing; the knob moves along, a push right shows the next channel, a press watches it', () => {
+    const acts = [], asked = [];
+    const PROG = { u0: [{ title: 'Stirile', start: t0 - 600, stop: t0 + 1200, text: 'Azi.' }, { title: 'Vremea', start: t0 + 1200, stop: t0 + 1500 }],
+        u1: [{ title: 'Observator', start: t0 - 60, stop: t0 + 3600 }] };
+    const c = createControls({ now: () => clock, act: (a) => acts.push(a), guide: (u) => { asked.push(u); return PROG[u] ? { state: 'ok', events: PROG[u] } : { state: 'loading', events: [] }; } });
+    c.key(info);
+    c.ccu({ knob: 100, press: 0, tilt: 0 });
+    c.ccu({ knob: 101, press: 0, tilt: 0 });           // the bar, CH+
+    c.ccu({ knob: 103, press: 0, tilt: 0 });           // LIST, EPG
+    assert.strictEqual(c.focus(), 'epg');
+    c.ccu({ knob: 103, press: 1, tilt: 0 }); c.ccu({ knob: 103, press: 0, tilt: 0 });
+    assert.deepStrictEqual(c.guide(), { uuid: 'u0', focus: 0, first: 0 });
+    const rec = { text() {}, textWidth: (t, z) => String(t).length * z * 0.5, roundRect() {}, strokeRoundRect() {}, fillRect() {}, gradientRect() {}, circle() {}, line() {} };
+    c.draw(rec, PL, info);
+    assert.ok(asked.indexOf('u0') >= 0, 'the programme asked for');
+    c.ccu({ knob: 104, press: 0, tilt: 0 });
+    assert.strictEqual(c.guide().focus, 1);
+    c.ccu({ knob: 104, press: 1, tilt: 0 }); c.ccu({ knob: 104, press: 0, tilt: 0 });
+    assert.strictEqual(c.guide(), null, 'a press on the channel playing closes the guide');
+    assert.deepStrictEqual(acts, []);
+    c.openGuide('u0');
+    c.ccu({ knob: 104, press: 0, tilt: 4 }); c.ccu({ knob: 104, press: 0, tilt: 0 });
+    assert.strictEqual(c.guide().uuid, 'u1', 'a push right: the next channel');
+    c.ccu({ knob: 104, press: 0, tilt: 10 }); c.ccu({ knob: 104, press: 0, tilt: 0 });
+    c.ccu({ knob: 104, press: 0, tilt: 10 }); c.ccu({ knob: 104, press: 0, tilt: 0 });
+    assert.strictEqual(c.guide().uuid, 'u4', 'round, the other way');
+    c.ccu({ knob: 104, press: 0, tilt: 4 }); c.ccu({ knob: 104, press: 0, tilt: 0 });
+    c.ccu({ knob: 104, press: 0, tilt: 4 }); c.ccu({ knob: 104, press: 0, tilt: 0 });
+    c.ccu({ knob: 104, press: 2, tilt: 0 });
+    assert.deepStrictEqual(acts, [{ channel: 'u1' }], 'a press watches the guide\'s channel');
+    assert.strictEqual(c.guide(), null);
+    // touch: < >, a programme chosen, a second touch watches; outside closes; 30 s idle closes
+    c.openGuide('u0');
+    const G = c.guideLayout(PL);
+    c.touch('down', G.next.x + 10, G.next.y + 10, PL, info);
+    assert.strictEqual(c.guide().uuid, 'u1');
+    c.touch('down', G.prev.x + 10, G.prev.y + 10, PL, info);
+    assert.strictEqual(c.guide().uuid, 'u0');
+    const r1 = G.row(1);
+    c.touch('down', r1.x + 50, r1.y + 10, PL, info);
+    assert.strictEqual(c.guide().focus, 1);
+    c.touch('down', r1.x + 50, r1.y + 10, PL, info);
+    assert.strictEqual(c.guide(), null, 'the channel playing: closed, nothing played');
+    assert.strictEqual(acts.length, 1);
+    c.openGuide('u0');
+    clock += 30001;
+    assert.strictEqual(c.guide(), null, '30 s idle');
+});
+
 test('drawn: the bar, the programme, the list', () => {
     const { c } = make();
     c.show(); c.openList();
-    const rec = new record.Recorder(PL.w, PL.h).clear(0x000000ff);
+    let rec = new record.Recorder(PL.w, PL.h).clear(0x000000ff);
     const said = [];
     const text = rec.text.bind(rec);
     rec.text = (t, ...r) => { said.push(String(t)); return text(t, ...r); };
@@ -92,6 +141,15 @@ test('drawn: the bar, the programme, the list', () => {
     const texts = said.join('|');
     assert.ok(texts.indexOf('Stirile Pro TV') >= 0 && texts.indexOf('CHANNELS') >= 0 && texts.indexOf('CH +') >= 0 && texts.indexOf('mgu-hd') >= 0, 'texts drawn');
     assert.ok(/^\d\d:\d\d$/.test(hm(t0)));
+    // the guide, with the details of the programme chosen
+    const g = createControls({ now: () => Date.now(), guide: () => ({ state: 'ok', events: [{ title: 'Stirile Pro TV', subtitle: 'Editia de seara', start: t0 - 600, stop: t0 + 1200, text: 'Cele mai importante stiri ale zilei, pe larg.' }] }) });
+    g.key(info); g.openGuide('u0');
+    rec = new record.Recorder(PL.w, PL.h).clear(0x000000ff);
+    said.length = 0;
+    rec.text = (t, ...r) => { said.push(String(t)); return text(t, ...r); };
+    g.draw(rec, PL, info);
+    const all = said.join('|');
+    assert.ok(all.indexOf('EPG - PLAYING') >= 0 && all.indexOf('Editia de seara') >= 0 && /min left/.test(all) && all.indexOf('Cele mai importante') >= 0, all);
 });
 
 test('the app: CH+ / CH- go round the list', () => {

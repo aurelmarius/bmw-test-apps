@@ -5,9 +5,9 @@ Tvheadend client (`kodi-pvr/pvr.hts`) shows them, over Tvheadend's HTTP interfac
 it lists the channels the user may watch, with what is on now (EPG), and plays one: the server transcodes it with
 one of its stream profiles, the head unit's GPU decodes it, and the sound goes to the car's speakers.
 
-**Step 1 (0.1.x):** sign-in, the channels and what is on now, a channel playing with a profile from the app's
-settings, the profile lowered by itself when the internet is slow. Not yet: recordings (DVR), timeshift, the EPG
-beyond "now", HTSP.
+**Step 1 (0.1.x):** sign-in, the channels with their logos and what is on now, a channel's programme for the next
+24 hours (the guide), a channel playing with a profile from the app's settings, the profile lowered by itself when
+the internet is slow. Not yet: recordings (DVR), timeshift, a grid of every channel's programme, HTSP.
 
 ## Why the server transcodes
 
@@ -40,6 +40,7 @@ server does not list (`api/profile/list`) is passed over.
 |---|---|
 | the channels | `api/channel/grid` (the enabled ones, by number; names in ASCII: the kit's fonts are ASCII, Știrile is Stirile), or `/playlist/channels` when the grid lists none; again every 10 minutes |
 | what is on now | `api/epg/events/grid?mode=now`, every minute and when a programme ends |
+| the guide | `api/epg/events/grid?channel=<uuid>` sorted by start: from what is on now, 24 hours ahead, 60 at most, with the subtitle, the episode and the description (in ASCII, 1200 characters at most); asked for when the app draws it (`{"cmd":"epg"}`), kept 3 minutes. The app shows it over the picture (EPG on the controls: the programme on the left, the one chosen on the right, < > the other channels, a press watches one) and on its page (Guide). |
 | the logos | the channel's `icon_public_url`: `imagecache/<n>` on the server (as the user) or the address the server gives; fetched by the client once and kept a week in `state/logos/<uuid>.png` (`{"cmd":"logo"}`); PNG only (512 KiB at most): a JPEG or SVG logo, or none, leaves the channel's name alone. The app asks only for the rows it draws, decodes them with the kit's `png.js`, fits them into 64x36 and draws them as runs of one colour (`apps/aurelm_tvh/logos.js`): mgu-render's own dialect, which the app needs for touch and the controller, takes no pixel images. |
 | the stream | `/stream/channel/<uuid>?profile=<profile>`, MPEG-TS, fetched by the client through `netx.js` (the uplink's DNS, our CA list). It goes to the service on the client's fd 4, in frames (stream id, length), and on to `tvh-player`'s stdin (`player.js`), with the pipes' backpressure. A stream that breaks or ends (live TV never ends) is opened again, 3 times, 2 s apart; a 503 (no free tuner) too, then said. A 404: the channel or the profile is not on the server. |
 | the player | `native/tvh-player` (its own player, see its README): started as root for its frame file, then **nobody** with the groups `video` and `mgu_alsa`. It waits for 1.5 s of the live stream before it starts (and again after the stream ran dry). The GPU decodes into `/dev/shm/mgu-video-aurelm-tvh`, the sound goes into `plug:smartx:CarLifeMedia_CF_48_STEREO`. |
@@ -112,12 +113,12 @@ nice 10, idle I/O, 2 cores at most, 256 MiB, 48 tasks. `tvh-player` runs with th
 ## Control
 
 One JSON object per line on `/run/aurelm-tvh.sock`: `{"cmd":"status"}`, `{"cmd":"channels"}` (the list and EPG now),
-`{"cmd":"logo","uuid":"..."}` (a logo's PNG), `{"cmd":"play","uuid":"..."}`, `{"cmd":"stop"}`, `{"cmd":"prefs","profile":"mgu-hd","adaptive":true}`,
+`{"cmd":"logo","uuid":"..."}` (a logo's PNG), `{"cmd":"epg","uuid":"..."}` (the guide), `{"cmd":"play","uuid":"..."}`, `{"cmd":"stop"}`, `{"cmd":"prefs","profile":"mgu-hd","adaptive":true}`,
 `{"cmd":"refresh"}`, `{"cmd":"signin-open"}`, `{"cmd":"signin-close"}`, `{"cmd":"signout"}`, `{"cmd":"exit"}`.
 
 Tests: `node tests/tvh_service.test.js` (a fake Tvheadend: Digest SHA-256 and MD5 with expiring nonces, Basic, the
 sign-in page, channels and EPG, a channel playing through the service to a stand-in player and to `tvh-player`
 itself when it is built, another channel, the profile ladder, a broken stream, no free tuner, the app's watch,
-the logos fetched once and drawn, sign-out) and `node tests/tvh_controls.test.js` (the controls over the picture).
+the logos fetched once and drawn, a channel's programme, sign-out) and `node tests/tvh_controls.test.js` (the controls over the picture).
 
 **Not checked yet (car only):** everything on the head unit: the uplink, the GPU picture, the speakers.

@@ -20,6 +20,8 @@
  * {"cmd":"signout"}, {"cmd":"play","uuid":...}, {"cmd":"stop"}, {"cmd":"prefs","profile":...,"adaptive":...},
  * {"cmd":"refresh"}, {"cmd":"exit"}; the reply is the status.
  * {"cmd":"channels"}: the channels and what is on now instead ({ at, channels: [{ uuid, name, number }], epg }).
+ * {"cmd":"epg","uuid":...}: a channel's programme for the next 24 hours instead ({ uuid, events: [{ start, stop, title,
+ * subtitle, episode, text }] } or { uuid, error }); kept 3 minutes.
  * {"cmd":"logo","uuid":...}: a channel's logo instead ({ uuid, png: base64 } or { uuid, none: true, why }); the
  * client fetches it once, it is kept a week in state/logos; one that is not there is asked again after 30 minutes.
  *
@@ -90,6 +92,27 @@ function createService(opts) {
 
     const st = { version: VERSION, client: { state: account ? 'starting' : 'signed-out' }, page: { open: false }, lastSignIn: null, error: null, playback: null };
     let chans = { at: null, channels: [], epg: {} };
+
+    /* ---------- a channel's programme (the guide), kept 3 minutes ---------- */
+    const epgKept = {}, epgWait = {};
+    function epg(uuid) {
+        if (!/^[0-9a-f]{32}$/.test(uuid)) return Promise.resolve({ uuid, error: 'not a channel' });
+        const k = epgKept[uuid];
+        if (k && now() - k.at < 3 * 60000) return Promise.resolve({ uuid, events: k.events });
+        startChild();
+        if (!child || !account) return Promise.resolve({ uuid, error: 'not signed in' });
+        return new Promise((res) => {
+            const id = crypto.randomBytes(6).toString('hex');
+            const t = setTimeout(() => { if (epgWait[id]) { delete epgWait[id]; res({ uuid, error: 'the server did not answer in time' }); } }, 20000);
+            epgWait[id] = (m) => {
+                clearTimeout(t);
+                if (!m.ok) { log('epg: ' + m.error); return res({ uuid, error: m.error }); }
+                epgKept[uuid] = { at: now(), events: m.events };
+                res({ uuid, events: m.events });
+            };
+            toChild({ op: 'epg', id, uuid });
+        });
+    }
 
     /* ---------- the channels' logos (state/logos/<uuid>.png) ---------- */
     const logoDir = file('logos');
@@ -168,6 +191,7 @@ function createService(opts) {
         else if (m.ev === 'signed-out') st.client = { state: 'signed-out' };
         else if (m.ev === 'signin' && signinWait[m.id]) { signinWait[m.id](m); delete signinWait[m.id]; }
         else if (m.ev === 'logo' && logoWait[m.id]) { logoWait[m.id](m); delete logoWait[m.id]; }
+        else if (m.ev === 'epg' && epgWait[m.id]) { epgWait[m.id](m); delete epgWait[m.id]; }
     }
     function signIn(server, user, password) {
         return new Promise((res) => {
@@ -290,6 +314,7 @@ function createService(opts) {
                 toChild({ op: 'signout' });
                 account = null;
                 try { fs.unlinkSync(file('account.json')); } catch (e) { /* none */ }
+                Object.keys(epgKept).forEach((k) => { delete epgKept[k]; });
                 // another server's channels have other logos
                 try { fs.readdirSync(logoDir).forEach((n) => fs.unlinkSync(path.join(logoDir, n))); } catch (e) { /* none */ }
                 st.playback = null;
@@ -298,6 +323,8 @@ function createService(opts) {
             }
         } else if (cmd === 'channels') {
             return { at: chans.at, channels: chans.channels, epg: chans.epg };
+        } else if (cmd === 'epg') {
+            return epg(String(m.uuid || ''));
         } else if (cmd === 'logo') {
             return logo(String(m.uuid || ''));
         } else if (cmd === 'play' && m.uuid) {

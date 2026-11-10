@@ -7,12 +7,15 @@
  *                   plays, shows its picture again after the controller hid it
  *   "Channel +/-"   the next / previous channel (also with the picture hidden, or while driving: the sound goes on)
  *   "Stop"          ends the channel (the stream, the player, the speakers)
+ *   "Guide"         the page's right column shows the programme of the channel playing (or the last one) instead of
+ *                   the channels, and back
  *   "Sign in"       opens the sign-in page on the car Wi-Fi for 10 minutes; its QR code shows here. The phone (on the
  *                   car Wi-Fi for wireless CarPlay) scans it: the server's address, a Tvheadend user and password.
  *   "Sign out"      forgets the server, the user and the password.
  * The page lists the channels around the one playing, each with its logo (logos.js) and what is on now. Over the picture (shown while the car
  * is parked; setting "Picture only while parked") a touch or the controller shows the controls (controls.js): CH-,
- * CH+, LIST (every channel: the knob and a press, or a touch, plays one), stop, aspect, exit.
+ * CH+, LIST (every channel: the knob and a press, or a touch, plays one), EPG (the guide: a channel's programme for
+ * the next 24 hours with the details of the one chosen; < > the other channels, a press watches one), stop, aspect, exit.
  *
  * The stream comes with one of the server's profiles (setting "Stream profile": mgu-hd, mgu-sd, mgu-low; H.264
  * deinterlaced by the server, AAC); "Lower the quality by itself" goes down that ladder when the stream runs dry.
@@ -30,7 +33,7 @@ const Parked = require('./kit/parked');
 const qrcode = require('./qrcode');
 const { RenderClient } = require('./mgu_render_client');
 const { createMirrorView } = require('./mirror_view');
-const { createControls, videoRect, hm } = require('./controls');
+const { createControls, videoRect, hm, when } = require('./controls');
 const { createCarAudio } = require('./car_audio');
 const { createLogos, BOX: LOGO } = require('./logos');
 const png = require('./kit/png');
@@ -158,6 +161,22 @@ mgu.run({
         const { ui, log } = ctx;
         let st = null, busy = null, polling = false, askedExit = false, code = null, codeFor = null;
         let chans = { at: null, channels: [], epg: {} };
+        /* ---------- the guide: a channel's programme, asked for when it is drawn, kept 3 minutes ---------- */
+        const guides = new Map();   // uuid -> { state, events, error, at }
+        function guideOf(uuid) {
+            if (!uuid) return null;
+            const g = guides.get(uuid);
+            if (g && (g.state === 'loading' || Date.now() - g.at < 3 * 60000)) return g;
+            const e = { state: 'loading', events: g ? g.events : [], at: Date.now() };
+            guides.set(uuid, e);
+            ask('epg', { uuid }).then((r) => {
+                const done = r && r.events ? { state: 'ok', events: r.events, at: Date.now() } : { state: 'error', events: [], error: r ? r.error : 'no service', at: Date.now() };
+                guides.set(uuid, done);
+                if (mirror.state().shown) mirror.tick();
+            });
+            return e;
+        }
+        let pageGuide = false;
         // the channels' logos, asked for when a row with them is drawn
         const logos = createLogos({ ask, png, log, onChange: () => { if (mirror && mirror.state().shown) mirror.tick(); } });
 
@@ -256,6 +275,7 @@ mgu.run({
         ui.onClick('BTN_CHUP', () => zap(1));
         ui.onClick('BTN_CHDOWN', () => zap(-1));
         ui.onClick('BTN_STOP', () => command('stop', 'Stopping...'));
+        ui.onClick('BTN_GUIDE', () => { pageGuide = !pageGuide; return render(); });
 
         /* ---------- the channel: the picture over the screen (parked only), the sound on the speakers ---------- */
         const parked = Parked.watch(ctx, log, { strict: true });
@@ -305,6 +325,7 @@ mgu.run({
         const ASPECTS = ['fit', 'zoom', 'fill'];
         const aspect = () => (ASPECTS.indexOf(ctx.settings.get('aspect')) >= 0 ? ctx.settings.get('aspect') : 'fit');
         const controls = createControls({
+            guide: guideOf,
             act: (a) => {
                 if (a && a.channel) return playChannel(a.channel, 'from the list');
                 if (a === 'chup') return zap(1);
@@ -321,7 +342,7 @@ mgu.run({
                 title: chName(pb.channel), now: cur ? chans.epg[cur] || null : null, aspect: aspect(),
                 profile: pb.profile ? pb.profile + (pb.lowered ? ' (slow)' : '') : '', note: pb.interlaced ? 'interlaced' : pb.state === 'buffering' ? 'buffering' : '',
                 current: cur, drawLogo: logos.draw, logoVer: logos.version(),
-                channels: chans.channels.map((c) => ({ uuid: c.uuid, t: chName(c) + (chans.epg[c.uuid] && chans.epg[c.uuid].title ? '  -  ' + chans.epg[c.uuid].title : '') })),
+                channels: chans.channels.map((c) => ({ uuid: c.uuid, n: chName(c), t: chName(c) + (chans.epg[c.uuid] && chans.epg[c.uuid].title ? '  -  ' + chans.epg[c.uuid].title : '') })),
             };
         }
         function overlay() {
@@ -379,7 +400,7 @@ mgu.run({
                 cv.text(clip(cv, r.detail || '', 22, textW, 'label'), 250, y, 22, r.state === 'off' ? t.dim : t.text, { literal: true });
             });
             if (page) return drawCode(cv, t, page);
-            if (chans.channels.length) drawChannels(cv, t);
+            if (chans.channels.length) { if (pageGuide) drawGuide(cv, t); else drawChannels(cv, t); }
             const lines = (st && st.log ? st.log : []).slice(-3);
             lines.forEach((l, i) => cv.text(clip(cv, l, 16, side ? 960 : 1500, 'label'), 44, 440 + i * 24, 16, t.dim, { literal: true }));
         }
@@ -406,6 +427,33 @@ mgu.run({
                         cv.fillRect(x0 + lw, y + 8, w - lw, 3, withAlpha('#ffffff', 0.12));
                         cv.fillRect(x0 + lw, y + 8, Math.round((w - lw) * f), 3, BLUE);
                     }
+                }
+            });
+        }
+
+        /** the programme of the channel playing (or the last one): what is on now and what follows */
+        function drawGuide(cv, t) {
+            const x0 = 1050, w = 510, rowH = 46, n = 7;
+            const cur = playing() || lastUuid || (chans.channels[0] && chans.channels[0].uuid);
+            const ch = chans.channels.filter((c) => c.uuid === cur)[0];
+            const lw = logos.draw(cv, cur, x0, 40) ? LOGO.w + 12 : 0;
+            cv.text(clip(cv, 'GUIDE  ' + chName(ch), 20, w - lw, 'label'), x0 + lw, 66, 20, t.text, { font: 'bold', literal: true });
+            const g = guideOf(cur), tnow = Date.now() / 1000;
+            const ev = g ? (g.events || []).filter((e) => e.stop > tnow) : [];
+            if (!ev.length) {
+                cv.text(g && g.state === 'error' ? 'No programme: ' + (g.error || '?') : g && g.state === 'loading' ? 'Loading the programme...' : 'No programme for this channel',
+                    x0, 130, 20, t.dim, { literal: true });
+                return;
+            }
+            ev.slice(0, n).forEach((e, k) => {
+                const y = 130 + k * rowH, on = e.start <= tnow;
+                if (on) cv.fillRect(x0 - 12, y - 30, w + 24, rowH - 4, withAlpha(BLUE, 0.25));
+                cv.text(when(e.start, Date.now()), x0, y, 20, on ? BLUE : t.dim, { font: 'bold', literal: true });
+                cv.text(clip(cv, e.title + (e.subtitle ? ' - ' + e.subtitle : ''), 22, w - 110, 'label'), x0 + 110, y, 22, t.text, { font: on ? 'bold' : undefined, literal: true });
+                if (on && e.stop > e.start) {
+                    const f = Math.max(0, Math.min(1, (tnow - e.start) / (e.stop - e.start)));
+                    cv.fillRect(x0 + 110, y + 8, w - 110, 3, withAlpha('#ffffff', 0.12));
+                    cv.fillRect(x0 + 110, y + 8, Math.round((w - 110) * f), 3, BLUE);
                 }
             });
         }
