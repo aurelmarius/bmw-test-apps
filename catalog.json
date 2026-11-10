@@ -5,7 +5,7 @@
     {
       "id": "aurelm-airplay-probe",
       "kind": "tool",
-      "version": "0.9.8",
+      "version": "0.9.9",
       "title": "AirPlay network test service",
       "description": "For the app AirPlay Test: the network test, and the AirPlay receiver (UxPlay's protocol on the head unit): the iPhone's screen mirroring decoded on the GPU into mgu-render's frame file, shown by the app while parked, and its sound into SmartXbar's CarLife input; a video sent with the AirPlay button (YouTube) played by its own player from the internet (mgu-uplink, through a proxy running as uid 13102). Opens the firewall for its ports only while a test runs.",
       "author": "aurelmarius",
@@ -13,10 +13,10 @@
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm-airplay-probe@0.9.8.tgz",
-        "size": 3213147,
-        "sha256": "90a375f17b6591d7b0934b9551b59dbc00a7960edfe5d2294325d42100ad5a18",
-        "url": "packages/aurelm-airplay-probe@0.9.8.tgz"
+        "name": "aurelm-airplay-probe@0.9.9.tgz",
+        "size": 3214809,
+        "sha256": "f311828c3e1235e6456dd08057e84cb24d50a3884ceddc65a3b9bb5c162f4729",
+        "url": "packages/aurelm-airplay-probe@0.9.9.tgz"
       },
       "requires": {
         "mgu-deploy": "0.7.0",
@@ -49,23 +49,23 @@
     {
       "id": "aurelm_airplay_probe",
       "kind": "app",
-      "version": "0.9.9",
+      "version": "0.10.0",
       "title": "AirPlay Test",
       "description": "AirPlay receiver for the head unit: the iPhone's screen mirroring on the centre screen while parked, with its sound on the car's speakers; videos sent with the AirPlay button (YouTube) played by the head unit itself. Also the network test. Needs the AirPlay test service.",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_airplay_probe@0.9.9.tgz",
-        "size": 571025,
-        "sha256": "684b5f302019650e5536790744387aead73e768f2a8d20bd1dfbc304e666c790",
-        "url": "packages/aurelm_airplay_probe@0.9.9.tgz"
+        "name": "aurelm_airplay_probe@0.10.0.tgz",
+        "size": 576671,
+        "sha256": "f76febd4e0b67aa97778574e8b2615a1cff5861edceec49639502a576f0c15dd",
+        "url": "packages/aurelm_airplay_probe@0.10.0.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_airplay_probe.png",
       "iconSha256": "10b690639717c15bbffe7425e23d8bd34609f6f4fa34fee7a455a7c5dd4442f0",
       "requires": {
-        "aurelm-airplay-probe": "0.9.8"
+        "aurelm-airplay-probe": "0.9.9"
       }
     },
     {
