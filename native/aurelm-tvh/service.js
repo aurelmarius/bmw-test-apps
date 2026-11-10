@@ -14,12 +14,14 @@
  *                 it for wireless CarPlay, opens it from the QR code), and one accept rule per chain for its port
  *                 on the car Wi-Fi's interfaces (nft.js); both go when it closes
  *   state         /var/opt/aurelm-tvh/state: account.json (server, user, password: Tvheadend has no token; 0600,
- *                 root's), prefs.json (the app's profile settings)
+ *                 root's), prefs.json (the app's profile settings), logos/<channel uuid>.png (fetched once, a week)
  *
  * Control: one JSON object per line: {"cmd":"status"}, {"cmd":"signin-open"}, {"cmd":"signin-close"},
  * {"cmd":"signout"}, {"cmd":"play","uuid":...}, {"cmd":"stop"}, {"cmd":"prefs","profile":...,"adaptive":...},
  * {"cmd":"refresh"}, {"cmd":"exit"}; the reply is the status.
  * {"cmd":"channels"}: the channels and what is on now instead ({ at, channels: [{ uuid, name, number }], epg }).
+ * {"cmd":"logo","uuid":...}: a channel's logo instead ({ uuid, png: base64 } or { uuid, none: true, why }); the
+ * client fetches it once, it is kept a week in state/logos; one that is not there is asked again after 30 minutes.
  *
  * The app's watch: while a channel plays, the app asks every second or two; 90 s without a request (the app was
  * closed, or crashed) and the channel stops, so the internet is not used for a picture and a sound nobody gets.
@@ -44,6 +46,8 @@ const WATCH_MS = 90 * 1000;
 const NET_UID = 13103;    // component.json "uids": the only uid of this tool mgu-uplink routes
 const LOG_LINES = 40;
 const PLAYING = ['loading', 'playing', 'buffering'];
+const LOGO_KEEP_MS = 7 * 24 * 3600 * 1000;
+const LOGO_NONE_MS = 30 * 60 * 1000;
 
 function createService(opts) {
     const o = Object.assign({
@@ -86,6 +90,36 @@ function createService(opts) {
 
     const st = { version: VERSION, client: { state: account ? 'starting' : 'signed-out' }, page: { open: false }, lastSignIn: null, error: null, playback: null };
     let chans = { at: null, channels: [], epg: {} };
+
+    /* ---------- the channels' logos (state/logos/<uuid>.png) ---------- */
+    const logoDir = file('logos');
+    const logoNone = {}, logoWait = {};
+    function logo(uuid) {
+        if (!/^[0-9a-f]{32}$/.test(uuid)) return Promise.resolve({ uuid, none: true, why: 'not a channel' });
+        const f = path.join(logoDir, uuid + '.png');
+        try {
+            const s = fs.statSync(f);
+            if (now() - s.mtime.getTime() < LOGO_KEEP_MS) return Promise.resolve({ uuid, png: fs.readFileSync(f).toString('base64') });
+        } catch (e) { /* not kept yet */ }
+        if (logoNone[uuid] && logoNone[uuid].until > now()) return Promise.resolve({ uuid, none: true, why: logoNone[uuid].why });
+        const ch = chans.channels.filter((c) => c.uuid === uuid)[0];
+        const none = (why) => { logoNone[uuid] = { until: now() + LOGO_NONE_MS, why }; return { uuid, none: true, why }; };
+        if (!ch || !ch.icon) return Promise.resolve(none(ch ? 'the server has no logo for it' : 'not a channel of the list'));
+        startChild();
+        if (!child) return Promise.resolve({ uuid, none: true, why: 'no client' });
+        return new Promise((res) => {
+            const id = crypto.randomBytes(6).toString('hex');
+            const t = setTimeout(() => { if (logoWait[id]) { delete logoWait[id]; res({ uuid, none: true, why: 'the server did not answer in time' }); } }, 20000);
+            logoWait[id] = (m) => {
+                clearTimeout(t);
+                if (!m.ok) { log('logo ' + ch.name + ': ' + m.error); return res(none(m.error)); }
+                try { fs.mkdirSync(logoDir, 0o700); } catch (e) { /* there */ }
+                try { fs.writeFileSync(f, Buffer.from(m.png, 'base64'), { mode: 0o600 }); } catch (e) { log('logo: ' + e.message); }
+                res({ uuid, png: m.png });
+            };
+            toChild({ op: 'logo', id, icon: ch.icon });
+        });
+    }
 
     /* ---------- the player (root: its frame file; it runs as nobody) ---------- */
     const player = createPlayer({ bin: o.playerBin, uid: o.uid, env: o.playerEnv, videoPath: o.videoPath, log,
@@ -133,6 +167,7 @@ function createService(opts) {
         else if (m.ev === 'player-stop') player.stop(m.id);
         else if (m.ev === 'signed-out') st.client = { state: 'signed-out' };
         else if (m.ev === 'signin' && signinWait[m.id]) { signinWait[m.id](m); delete signinWait[m.id]; }
+        else if (m.ev === 'logo' && logoWait[m.id]) { logoWait[m.id](m); delete logoWait[m.id]; }
     }
     function signIn(server, user, password) {
         return new Promise((res) => {
@@ -255,12 +290,16 @@ function createService(opts) {
                 toChild({ op: 'signout' });
                 account = null;
                 try { fs.unlinkSync(file('account.json')); } catch (e) { /* none */ }
+                // another server's channels have other logos
+                try { fs.readdirSync(logoDir).forEach((n) => fs.unlinkSync(path.join(logoDir, n))); } catch (e) { /* none */ }
                 st.playback = null;
                 chans = { at: null, channels: [], epg: {} };
                 st.client = { state: 'signed-out' };
             }
         } else if (cmd === 'channels') {
             return { at: chans.at, channels: chans.channels, epg: chans.epg };
+        } else if (cmd === 'logo') {
+            return logo(String(m.uuid || ''));
         } else if (cmd === 'play' && m.uuid) {
             const ch = chans.channels.filter((c) => c.uuid === String(m.uuid))[0] || { uuid: String(m.uuid), name: String(m.name || '?'), number: null };
             log('play ' + (ch.number != null ? ch.number + ' ' : '') + ch.name);

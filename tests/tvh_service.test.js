@@ -22,6 +22,9 @@ const tvhm = require(path.join(DIR, 'tvh'));
 const playback = require(path.join(DIR, 'playback'));
 const nft = require(path.join(DIR, 'nft'));
 const FIXTURES = path.join(__dirname, 'fixtures');
+const { Canvas } = require(path.join(__dirname, '..', 'kit', 'runtime', 'canvas'));
+/** a logo as Tvheadend's imagecache gives it: a 220x132 PNG, red with a white bar */
+const LOGO_PNG = (() => { const c = new Canvas(220, 132).clear('#e1001a'); c.fillRect(20, 50, 180, 30, '#ffffff'); return c.png(); })();
 const PLAYER = path.join(__dirname, '..', 'native', 'tvh-player', 'build', 'tvh-player');
 
 const tests = [];
@@ -34,7 +37,7 @@ async function until(fn, ms, what) {
 
 const CH = [
     { uuid: 'a'.repeat(32), name: 'PRO TV HD', number: 1, enabled: true, icon_public_url: 'imagecache/1' },
-    { uuid: 'b'.repeat(32), name: 'Știrile Pro TV', number: 2, enabled: true },
+    { uuid: 'b'.repeat(32), name: 'Știrile Pro TV', number: 2, enabled: true, icon_public_url: 'imagecache/2' },
     { uuid: 'c'.repeat(32), name: 'Hidden', number: 3, enabled: false },
     { uuid: 'd'.repeat(32), name: 'Radio ZU', number: 0, enabled: true },
 ];
@@ -90,6 +93,8 @@ function fakeTvh(opts) {
             { channelUuid: CH[1].uuid, title: 'Vremea', start: 1, stop: Math.floor(Date.now() / 1000) + 3600 }] : [] });
         if (p === '/api/profile/list') return json({ entries: (o.profiles || ['htsp', 'pass', 'matroska', 'mgu-hd', 'mgu-sd', 'mgu-low']).map((n, i) => ({ key: 'k' + i, val: n })) });
         if (!user) return challenge(res);
+        if (p === '/imagecache/1') { seen.logos = (seen.logos || 0) + 1; res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(LOGO_PNG); }
+        if (p === '/imagecache/2') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(Buffer.from('ffd8ffe000104a464946', 'hex')); }
         if (p === '/playlist/channels') {
             res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl' });
             return res.end('#EXTM3U\n' + CH.filter((c) => c.enabled).map((c) => '#EXTINF:-1 logo="x" tvg-id="' + c.uuid + '" tvg-chno="' + c.number + '",' + c.name +
@@ -332,6 +337,41 @@ test('service: no free tuner (503): tried 3 times, then said', async () => {
         const p = await until(() => { const x = s.svc.status().playback; return x && x.state === 'error' && x; }, 8000, 'error');
         assert.ok(/no free tuner/.test(p.error), p.error);
         assert.strictEqual(srv.seen.streams.length, 4);
+    } finally { s.close(); srv.close(); }
+});
+
+test('service: the channels\' logos: fetched once from the imagecache as the user, kept; none when not a PNG or none given', async () => {
+    const srv = await fakeTvh();
+    const s = await signedIn(srv);
+    try {
+        const r = await ask(s.sock, { cmd: 'logo', uuid: CH[0].uuid });
+        assert.ok(r.png && Buffer.from(r.png, 'base64').equals(LOGO_PNG), 'the PNG as the server has it');
+        assert.ok(fs.existsSync(path.join(s.tmp, 'state', 'logos', CH[0].uuid + '.png')), 'kept');
+        await ask(s.sock, { cmd: 'logo', uuid: CH[0].uuid });
+        assert.strictEqual(srv.seen.logos, 1, 'fetched once');
+        const j = await ask(s.sock, { cmd: 'logo', uuid: CH[1].uuid });
+        assert.ok(j.none && /not a PNG \(image\/jpeg\)/.test(j.why), JSON.stringify(j));
+        const n = await ask(s.sock, { cmd: 'logo', uuid: CH[3].uuid });
+        assert.ok(n.none && /no logo/.test(n.why), JSON.stringify(n));
+        assert.ok((await ask(s.sock, { cmd: 'logo', uuid: '../../etc/passwd' })).none);
+        // the app's side: decoded, fitted into 64x36, drawn as runs of one colour over the tile
+        const logos = require(path.join(__dirname, '..', 'apps', 'aurelm_tvh', 'logos'));
+        const png = require(path.join(__dirname, '..', 'kit', 'runtime', 'png'));
+        let changed = 0;
+        const L = logos.createLogos({ ask: (cmd, x) => ask(s.sock, Object.assign({ cmd }, x)), png, onChange: () => { changed++; } });
+        const rects = [];
+        const rec = { fillRect: (x, y, w, h, c) => rects.push([x, y, w, h, c]) };
+        assert.strictEqual(L.draw(rec, CH[0].uuid, 100, 10), false, 'not yet');
+        assert.strictEqual(L.draw(rec, CH[1].uuid, 100, 10), false);
+        await until(() => changed >= 2, 5000, 'both answered');
+        assert.strictEqual(L.state(CH[1].uuid), 'none');
+        assert.strictEqual(L.draw(rec, CH[1].uuid, 100, 10), false, 'a JPEG: the name only');
+        assert.strictEqual(L.draw(rec, CH[0].uuid, 100, 10), true);
+        assert.deepStrictEqual(rects[0].slice(0, 4), [100, 10, 64, 36], 'the tile');
+        const body = rects.slice(1);
+        assert.ok(body.length > 30 && body.length < 200, body.length + ' runs');
+        assert.ok(body.every((r) => r[0] >= 100 && r[0] + r[2] <= 164 && r[1] >= 10 && r[1] < 46 && r[3] === 1), 'inside the box');
+        assert.ok(body.some((r) => r[4] === 0xe00018ff) && body.some((r) => r[4] === 0xffffffff), 'red and white, rounded to 32 levels');
     } finally { s.close(); srv.close(); }
 });
 

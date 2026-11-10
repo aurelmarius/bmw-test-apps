@@ -10,7 +10,7 @@
  *   "Sign in"       opens the sign-in page on the car Wi-Fi for 10 minutes; its QR code shows here. The phone (on the
  *                   car Wi-Fi for wireless CarPlay) scans it: the server's address, a Tvheadend user and password.
  *   "Sign out"      forgets the server, the user and the password.
- * The page lists the channels around the one playing, each with what is on now. Over the picture (shown while the car
+ * The page lists the channels around the one playing, each with its logo (logos.js) and what is on now. Over the picture (shown while the car
  * is parked; setting "Picture only while parked") a touch or the controller shows the controls (controls.js): CH-,
  * CH+, LIST (every channel: the knob and a press, or a touch, plays one), stop, aspect, exit.
  *
@@ -32,6 +32,8 @@ const { RenderClient } = require('./mgu_render_client');
 const { createMirrorView } = require('./mirror_view');
 const { createControls, videoRect, hm } = require('./controls');
 const { createCarAudio } = require('./car_audio');
+const { createLogos, BOX: LOGO } = require('./logos');
+const png = require('./kit/png');
 
 const W = 1600, H = 520;
 const SOCK = process.env.TVH_SOCK || '/run/aurelm-tvh.sock';
@@ -156,6 +158,8 @@ mgu.run({
         const { ui, log } = ctx;
         let st = null, busy = null, polling = false, askedExit = false, code = null, codeFor = null;
         let chans = { at: null, channels: [], epg: {} };
+        // the channels' logos, asked for when a row with them is drawn
+        const logos = createLogos({ ask, png, log, onChange: () => { if (mirror && mirror.state().shown) mirror.tick(); } });
 
         /* ---------- the last channel, kept for "Watch" ---------- */
         const lastFile = ctx.dataDir ? path.join(ctx.dataDir, 'last-channel.json') : null;
@@ -316,7 +320,7 @@ mgu.run({
             return {
                 title: chName(pb.channel), now: cur ? chans.epg[cur] || null : null, aspect: aspect(),
                 profile: pb.profile ? pb.profile + (pb.lowered ? ' (slow)' : '') : '', note: pb.interlaced ? 'interlaced' : pb.state === 'buffering' ? 'buffering' : '',
-                current: cur,
+                current: cur, drawLogo: logos.draw, logoVer: logos.version(),
                 channels: chans.channels.map((c) => ({ uuid: c.uuid, t: chName(c) + (chans.epg[c.uuid] && chans.epg[c.uuid].title ? '  -  ' + chans.epg[c.uuid].title : '') })),
             };
         }
@@ -382,7 +386,7 @@ mgu.run({
 
         /** the channels around the one playing (or the last one), each with what is on now */
         function drawChannels(cv, t) {
-            const x0 = 1050, w = 510, rowH = 46, n = 8;
+            const x0 = 1050, w = 510, rowH = 46, n = 8, lw = LOGO.w + 12;
             const list = chans.channels, cur = playing() || lastUuid;
             let at = Math.max(0, list.findIndex((c) => c.uuid === cur));
             const first = Math.max(0, Math.min(at - 3, list.length - n));
@@ -391,14 +395,16 @@ mgu.run({
             list.slice(first, first + n).forEach((c, k) => {
                 const y = 108 + k * rowH, on = c.uuid === cur, e = chans.epg[c.uuid];
                 if (on) cv.fillRect(x0 - 12, y - 30, w + 24, rowH - 4, withAlpha(BLUE, playing() ? 0.35 : 0.15));
-                cv.text(clip(cv, chName(c), 22, w * 0.45, 'label'), x0, y, 22, t.text, { font: on ? 'bold' : undefined, literal: true });
+                // the logo in a column before the name (the names line up, logo or not)
+                logos.draw(cv, c.uuid, x0, y - 27);
+                cv.text(clip(cv, chName(c), 22, w * 0.45 - lw, 'label'), x0 + lw, y, 22, t.text, { font: on ? 'bold' : undefined, literal: true });
                 if (e && e.title) {
                     const tail = e.stop ? ' ' + hm(e.stop) : '';
                     cv.text(clip(cv, e.title, 18, w * 0.5 - 60, 'label') + tail, x0 + w, y, 18, t.dim, { align: 'right', literal: true });
                     if (e.start && e.stop && e.stop > e.start) {
                         const f = Math.max(0, Math.min(1, (tnow - e.start) / (e.stop - e.start)));
-                        cv.fillRect(x0, y + 8, w, 3, withAlpha('#ffffff', 0.12));
-                        cv.fillRect(x0, y + 8, Math.round(w * f), 3, BLUE);
+                        cv.fillRect(x0 + lw, y + 8, w - lw, 3, withAlpha('#ffffff', 0.12));
+                        cv.fillRect(x0 + lw, y + 8, Math.round((w - lw) * f), 3, BLUE);
                     }
                 }
             });

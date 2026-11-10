@@ -11,6 +11,7 @@
  *   await t.profiles()    ['mgu-hd', 'pass', ...] the stream profiles (null: the server does not list them)
  *   await t.epgNow()      { <channel uuid>: { title, subtitle, start, stop } } (seconds since 1970)
  *   await t.stream(uuid, profile) -> { status, res, abort } (MPEG-TS from /stream/channel/<uuid>?profile=...)
+ *   await t.logo(icon)    a channel's logo (its icon_public_url: imagecache/<n> on the server, or an address), a PNG
  *
  * Authentication: Tvheadend asks for HTTP Digest (MD5 or SHA-256, "Digest hash type") or Basic, as its
  * "Authentication type" is set. The first request goes without; the server's 401 brings its challenge, which
@@ -232,7 +233,25 @@ function createTvh(o) {
         throw new Error('unreachable');
     }
 
-    return { signIn, use, info, channels, profiles, epgNow, stream, account: () => acc };
+    /** a channel's logo as Tvheadend gives it: its imagecache (as the user) or another address; PNG only, 512 KiB at most */
+    async function logo(icon) {
+        const s = String(icon || '').trim();
+        if (!s) throw new Error('no logo');
+        await prime();
+        let r;
+        const own = acc.server + '/';
+        if (/^https?:\/\//i.test(s) && s.indexOf(own) !== 0) r = await nx.request({ url: s, maxBytes: 512 * 1024, timeoutMs: 15000 });
+        else {
+            const p = s.indexOf(own) === 0 ? s.slice(own.length) : s.replace(/^\/+/, '');
+            if (!/^imagecache\/\d+$/.test(p)) throw new Error('not a logo the car can fetch: ' + s.slice(0, 60));
+            r = await send(acc, 'GET', p, { maxBytes: 512 * 1024, timeoutMs: 15000 });
+        }
+        check(r, 'logo');
+        if (r.body.toString('hex', 0, 8) !== '89504e470d0a1a0a') throw new Error('not a PNG (' + (r.headers['content-type'] || '?') + ')');
+        return r.body;
+    }
+
+    return { signIn, use, info, channels, profiles, epgNow, stream, logo, account: () => acc };
 }
 
 module.exports = { createTvh, candidates, challenges, pick, authorization, parsePlaylist };
