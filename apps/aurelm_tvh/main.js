@@ -3,17 +3,18 @@
  * TVH - Tvheadend's channels on the head unit.
  *
  * The screen of the TVH service (native/aurelm-tvh, a root tool with its client on mgu-uplink):
- *   "Watch"         plays the last channel (the first one the first time) and shows the picture; while a channel
- *                   plays, shows its picture again after the controller hid it
+ *   "Watch"         plays the channel selected on the TV tab (the last one, the first time) and shows the picture;
+ *                   on the one playing, shows its picture again after the controller hid it
  *   "Channel +/-"   the next / previous channel (also with the picture hidden, or while driving: the sound goes on)
  *   "Stop"          ends the channel (the stream, the player, the speakers)
- *   "Guide"         the page's right column shows the programme of the channel playing (or the last one) instead of
- *                   the channels, and back
  *   "Sign in"       opens the sign-in page on the car Wi-Fi for 10 minutes; its QR code shows here. The phone (on the
  *                   car Wi-Fi for wireless CarPlay) scans it: the server's address, a Tvheadend user and password.
  *   "Sign out"      forgets the server, the user and the password.
- * The page lists the channels around the one playing, each with its logo (logos.js) and what is on now. Over the picture (shown while the car
- * is parked; setting "Picture only while parked") a touch or the controller shows the controls (controls.js): CH-,
+ * The page has two tabs. TV: the channels on the left (logo, number, name, what is on now and how far it is; the one
+ * playing marked), the selected channel's programme on the right (from now, 6 entries; the chosen one's time and
+ * description below). A touch or a press of the controller on a channel selects it; again, it plays. Status: the
+ * steps (service, internet, account, server, playing, picture, sound) and the service's log. "TV / Status" switches.
+ * Over the picture (shown while the car is parked; setting "Picture only while parked") a touch or the controller shows the controls (controls.js): CH-,
  * CH+, LIST (every channel: the knob and a press, or a touch, plays one), EPG (the guide: a channel's programme for
  * the next 24 hours with the details of the one chosen; < > the other channels, a press watches one), stop, aspect, exit.
  *
@@ -176,7 +177,6 @@ mgu.run({
             });
             return e;
         }
-        let pageGuide = false;
         // the channels' logos, asked for when a row with them is drawn
         const logos = createLogos({ ask, png, log, onChange: () => { if (mirror && mirror.state().shown) mirror.tick(); } });
 
@@ -236,12 +236,13 @@ mgu.run({
             if (!ch) return render();
             log.info('tvh: ' + why + ': ' + chName(ch));
             remember(uuid);
+            sel = uuid; selAt = Date.now();
             mirror.wantAgain();
             return command('play', 'Tuning ' + chName(ch) + '...', { uuid });
         }
         const playing = () => { const pb = st && st.playback; return channelOn(pb) && pb.channel ? pb.channel.uuid : null; };
         function zap(d) {
-            const from = playing() || lastUuid;
+            const from = playing() || selected();
             const ch = neighbour(chans.channels, from, d);
             if (ch) return playChannel(ch.uuid, d > 0 ? 'channel +' : 'channel -');
             return render();
@@ -267,15 +268,15 @@ mgu.run({
             return command('signout', 'Signing out...');
         });
         ui.onClick('BTN_WATCH', () => {
-            if (playing()) { mirror.wantAgain(); sync(); return render(); }
-            const ch = chans.channels.filter((c) => c.uuid === lastUuid)[0] || chans.channels[0];
+            const want = selected();
+            if (playing() && (!want || want === playing())) { mirror.wantAgain(); sync(); return render(); }
+            const ch = chans.channels.filter((c) => c.uuid === want)[0] || chans.channels[0];
             if (!ch) { busy = st && st.account ? 'No channels yet' : 'Sign in first'; setTimeout(() => { busy = null; render(); }, 3000); return render(); }
             return playChannel(ch.uuid, 'watch');
         });
         ui.onClick('BTN_CHUP', () => zap(1));
         ui.onClick('BTN_CHDOWN', () => zap(-1));
         ui.onClick('BTN_STOP', () => command('stop', 'Stopping...'));
-        ui.onClick('BTN_GUIDE', () => { pageGuide = !pageGuide; return render(); });
 
         /* ---------- the channel: the picture over the screen (parked only), the sound on the speakers ---------- */
         const parked = Parked.watch(ctx, log, { strict: true });
@@ -377,85 +378,165 @@ mgu.run({
         }
         if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => { mirror.close(); carAudio.want(false); ask('stop'); });
 
+        /* ---------- the page: TV (the channels, the selected one's programme) and Status (the diagnosis) ---------- */
+        let tab = 0;                 // 0 TV, 1 Status
+        let sel = null, selAt = 0;   // the channel whose programme shows (chosen on the page; else the one playing)
+        let first = 0, firstFor = null;   // the list's first row, kept so the selected channel shows
+        const evSel = { uuid: null, i: 0 };   // the programme's chosen entry (its details below)
+        ctx.onTab((i) => { tab = i; return render(); });
+        ui.onClick('BTN_PAGE', () => { tab = 1 - tab; return render(); });
+        /** the selected channel: chosen on the page in the last 30 s, else the one playing, else the last one */
+        function selected() {
+            const list = chans.channels, has = (u) => u && list.some((c) => c.uuid === u);
+            if (has(sel) && Date.now() - selAt < 30000) return sel;
+            const u = playing() || lastUuid;
+            return has(u) ? u : has(sel) ? sel : list[0] && list[0].uuid;
+        }
+        function choose(uuid) {
+            if (uuid === selected() && Date.now() - selAt < 30000 && uuid !== playing()) return playChannel(uuid, 'from the page');
+            if (uuid === selected() && uuid === playing()) { mirror.wantAgain(); sync(); return render(); }
+            sel = uuid; selAt = Date.now();
+            return render();
+        }
+        const pctOf = (e, tnow) => (e && e.start && e.stop && e.stop > e.start ? Math.max(0, Math.min(1, (tnow - e.start) / (e.stop - e.start))) : 0);
+        /** `text` in at most `max` lines of `w` px (the label font) */
+        function lines(cv, text, size, w, max) {
+            const out = [];
+            let cur = '';
+            String(text || '').split(/\s+/).filter(Boolean).forEach((word) => {
+                const next = cur ? cur + ' ' + word : word;
+                if (cur && cv.textWidth(next, size, { font: 'label', literal: true }) > w) { out.push(cur); cur = word; } else cur = next;
+            });
+            if (cur) out.push(cur);
+            if (out.length > max) { out.length = max; out[max - 1] = clip(cv, out[max - 1] + ' ' + 'x'.repeat(200), size, w, 'label'); }
+            return out;
+        }
+
         function render() {
             const t = ctx.theme();
             const cv = ctx.canvas(W, H).clear(t.bg);
             const page = st && st.page && st.page.open ? st.page : null;
-            G.frame(cv, t, ['TVH'], 0, [busy && { text: busy, color: 'accent' }, page && { text: 'SIGN-IN ' + Math.ceil((page.left || 0) / 60) + ' MIN' }]);
-            draw(cv, t, page);
+            const pb = st && st.playback;
+            const live = pb && pb.state === 'error' ? { text: 'ERROR', color: 'accent' } : pb && pb.state === 'buffering' ? { text: 'BUFFERING' }
+                : pb && channelOn(pb) ? { text: pb.state === 'playing' ? 'LIVE ' + (pb.profile || '') : 'TUNING', color: 'cold' } : null;
+            G.frame(cv, t, ['TV', 'Status'], tab, [busy && { text: busy, color: 'accent' }, page && { text: 'SIGN-IN ' + Math.ceil((page.left || 0) / 60) + ' MIN' }, live]);
+            if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); }
+            if (tab === 1) drawStatus(cv, t, page); else drawTv(cv, t, page);
             return ui.image('MAIN_GFX', cv);
         }
 
-        function draw(cv, t, page) {
-            if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); }
+        /** Status: the steps, each with its light, and the service's log */
+        function drawStatus(cv, t, page) {
             const rows = steps(st);
             const COL = { ok: GREEN, wait: AMBER, bad: RED, off: withAlpha('#ffffff', 0.3) };
-            const side = page || chans.channels.length;
-            const textW = side ? 760 : 1180;
-            const rowH = rows.length > 7 ? 40 : 52;
+            const textW = page ? 860 : 1300, rowH = 46;
             rows.forEach((r, i) => {
-                const y = 96 + i * rowH;
+                const y = 84 + i * rowH;
                 cv.circle(44, y - 8, 10, COL[r.state]);
                 cv.text(r.label, 68, y, 24, t.text, { font: 'bold', literal: true });
                 cv.text(clip(cv, r.detail || '', 22, textW, 'label'), 250, y, 22, r.state === 'off' ? t.dim : t.text, { literal: true });
             });
             if (page) return drawCode(cv, t, page);
-            if (chans.channels.length) { if (pageGuide) drawGuide(cv, t); else drawChannels(cv, t); }
-            const lines = (st && st.log ? st.log : []).slice(-3);
-            lines.forEach((l, i) => cv.text(clip(cv, l, 16, side ? 960 : 1500, 'label'), 44, 440 + i * 24, 16, t.dim, { literal: true }));
+            const n = Math.max(2, Math.floor((500 - (84 + rows.length * rowH)) / 22));
+            (st && st.log ? st.log : []).slice(-n).forEach((l, i, a) => cv.text(clip(cv, l, 16, 1520, 'label'), 44, 500 - (a.length - 1 - i) * 22, 16, t.dim, { literal: true }));
         }
 
-        /** the channels around the one playing (or the last one), each with what is on now */
-        function drawChannels(cv, t) {
-            const x0 = 1050, w = 510, rowH = 46, n = 8, lw = LOGO.w + 12;
-            const list = chans.channels, cur = playing() || lastUuid;
-            let at = Math.max(0, list.findIndex((c) => c.uuid === cur));
-            const first = Math.max(0, Math.min(at - 3, list.length - n));
-            cv.text('CHANNELS', x0, 64, 18, t.dim, { font: 'bold', literal: true });
-            const tnow = Date.now() / 1000;
-            list.slice(first, first + n).forEach((c, k) => {
-                const y = 108 + k * rowH, on = c.uuid === cur, e = chans.epg[c.uuid];
-                if (on) cv.fillRect(x0 - 12, y - 30, w + 24, rowH - 4, withAlpha(BLUE, playing() ? 0.35 : 0.15));
-                // the logo in a column before the name (the names line up, logo or not)
-                logos.draw(cv, c.uuid, x0, y - 27);
-                cv.text(clip(cv, chName(c), 22, w * 0.45 - lw, 'label'), x0 + lw, y, 22, t.text, { font: on ? 'bold' : undefined, literal: true });
-                if (e && e.title) {
-                    const tail = e.stop ? ' ' + hm(e.stop) : '';
-                    cv.text(clip(cv, e.title, 18, w * 0.5 - 60, 'label') + tail, x0 + w, y, 18, t.dim, { align: 'right', literal: true });
-                    if (e.start && e.stop && e.stop > e.start) {
-                        const f = Math.max(0, Math.min(1, (tnow - e.start) / (e.stop - e.start)));
-                        cv.fillRect(x0 + lw, y + 8, w - lw, 3, withAlpha('#ffffff', 0.12));
-                        cv.fillRect(x0 + lw, y + 8, Math.round((w - lw) * f), 3, BLUE);
-                    }
+        /** TV: the channels on the left, the selected one's programme on the right */
+        function drawTv(cv, t, page) {
+            const touch = !!(cv.own && cv.target);
+            const list = chans.channels;
+            if (!list.length) {
+                // nothing to list yet: what is missing, from the steps (the first one not green)
+                const rows = steps(st), bad = rows.filter((r) => r.state !== 'ok')[0];
+                cv.text(bad ? bad.label : 'Channels', page ? 420 : 800, 220, 30, t.text, { align: 'center', font: 'bold', literal: true });
+                cv.text(clip(cv, bad ? bad.detail : 'loading the channels...', 22, page ? 780 : 1400, 'label'), page ? 420 : 800, 262, 22, t.dim, { align: 'center', literal: true });
+                if (page) drawCode(cv, t, page);
+                return;
+            }
+            drawChannels(cv, t, touch);
+            if (page) return drawCode(cv, t, page);
+            drawProgramme(cv, t, touch);
+        }
+
+        function arrow(cv, x, y, up, c) {
+            cv.quad(up ? [[x - 10, y + 6], [x, y - 6], [x + 10, y + 6], [x + 10, y + 6]] : [[x - 10, y - 6], [x + 10, y - 6], [x, y + 6], [x, y + 6]], c);
+        }
+        /** the channels: logo, number and name, what is on now and how far it is; the selected one tinted, the one playing marked */
+        function drawChannels(cv, t, touch) {
+            const x0 = 24, w = 740, top = 52, rowH = 50, rows = 8, lw = LOGO.w + 14;
+            const list = chans.channels, cur = selected(), on = playing();
+            const at = Math.max(0, list.findIndex((c) => c.uuid === cur));
+            if (firstFor !== cur) { firstFor = cur; if (at < first || at >= first + rows) first = at - 2; }
+            first = Math.max(0, Math.min(first, list.length - rows));
+            cv.text('CHANNELS', x0, top + 18, 18, t.dim, { font: 'bold', literal: true });
+            if (list.length > rows) {
+                cv.text((first + 1) + '-' + Math.min(list.length, first + rows) + ' / ' + list.length, x0 + w - 120, top + 18, 18, t.dim, { align: 'right', literal: true });
+                arrow(cv, x0 + w - 80, top + 12, true, first > 0 ? t.text : withAlpha('#ffffff', 0.2));
+                arrow(cv, x0 + w - 24, top + 12, false, first + rows < list.length ? t.text : withAlpha('#ffffff', 0.2));
+                if (touch) {
+                    cv.target(x0 + w - 104, top - 8, 48, 40, () => { first = Math.max(0, first - (rows - 1)); return render(); }, 'up', 8);
+                    cv.target(x0 + w - 48, top - 8, 48, 40, () => { first = Math.min(list.length - rows, first + rows - 1); return render(); }, 'down', 8);
                 }
+            }
+            const tnow = Date.now() / 1000;
+            list.slice(first, first + rows).forEach((c, k) => {
+                const y = top + 34 + k * rowH, isSel = c.uuid === cur, e = chans.epg[c.uuid];
+                if (isSel) cv.fillRect(x0 - 8, y, w + 16, rowH - 4, withAlpha(BLUE, 0.28));
+                if (c.uuid === on) cv.quad([[x0, y + 13], [x0 + 14, y + 23], [x0, y + 33], [x0, y + 33]], GREEN);
+                logos.draw(cv, c.uuid, x0 + 22, y + 5);
+                const nx = x0 + 22 + lw, ny = y + 26;
+                cv.text(clip(cv, chName(c), 22, 250, 'label'), nx, ny, 22, t.text, { font: isSel || c.uuid === on ? 'bold' : undefined, literal: true });
+                if (e && e.title) {
+                    cv.text(clip(cv, e.title, 19, x0 + w - nx - 270, 'label'), x0 + w, ny, 19, t.dim, { align: 'right', literal: true });
+                    const f = pctOf(e, tnow);
+                    cv.fillRect(nx, y + 36, x0 + w - nx, 3, withAlpha('#ffffff', 0.1));
+                    if (f) cv.fillRect(nx, y + 36, Math.round((x0 + w - nx) * f), 3, BLUE);
+                }
+                if (touch) cv.target(x0 - 8, y, w + 16, rowH - 4, () => choose(c.uuid), 'ch:' + c.uuid, 8);
             });
         }
 
-        /** the programme of the channel playing (or the last one): what is on now and what follows */
-        function drawGuide(cv, t) {
-            const x0 = 1050, w = 510, rowH = 46, n = 7;
-            const cur = playing() || lastUuid || (chans.channels[0] && chans.channels[0].uuid);
-            const ch = chans.channels.filter((c) => c.uuid === cur)[0];
-            const lw = logos.draw(cv, cur, x0, 40) ? LOGO.w + 12 : 0;
-            cv.text(clip(cv, 'GUIDE  ' + chName(ch), 20, w - lw, 'label'), x0 + lw, 66, 20, t.text, { font: 'bold', literal: true });
-            const g = guideOf(cur), tnow = Date.now() / 1000;
+        /** the selected channel's programme: from now, the chosen entry's details below */
+        function drawProgramme(cv, t, touch) {
+            const x0 = 808, w = 768, top = 52;
+            const uuid = selected(), ch = chans.channels.filter((c) => c.uuid === uuid)[0];
+            cv.fillRect(x0 - 22, top, 1, 456, withAlpha('#ffffff', 0.12));
+            const lw = logos.draw(cv, uuid, x0, top + 2) ? LOGO.w + 14 : 0;
+            cv.text(clip(cv, chName(ch), 26, w - lw - 230, 'label'), x0 + lw, top + 30, 26, t.text, { font: 'bold', literal: true });
+            const watching = uuid === playing();
+            const hint = watching ? 'WATCHING' : touch ? 'PRESS AGAIN TO WATCH' : '"WATCH" TO WATCH';
+            cv.text(hint, x0 + w, top + 28, 16, watching ? GREEN : BLUE, { align: 'right', font: 'bold', literal: true });
+            const g = guideOf(uuid), tnow = Date.now() / 1000;
             const ev = g ? (g.events || []).filter((e) => e.stop > tnow) : [];
             if (!ev.length) {
                 cv.text(g && g.state === 'error' ? 'No programme: ' + (g.error || '?') : g && g.state === 'loading' ? 'Loading the programme...' : 'No programme for this channel',
-                    x0, 130, 20, t.dim, { literal: true });
+                    x0, top + 100, 20, t.dim, { literal: true });
                 return;
             }
-            ev.slice(0, n).forEach((e, k) => {
-                const y = 130 + k * rowH, on = e.start <= tnow;
-                if (on) cv.fillRect(x0 - 12, y - 30, w + 24, rowH - 4, withAlpha(BLUE, 0.25));
-                cv.text(when(e.start, Date.now()), x0, y, 20, on ? BLUE : t.dim, { font: 'bold', literal: true });
-                cv.text(clip(cv, e.title + (e.subtitle ? ' - ' + e.subtitle : ''), 22, w - 110, 'label'), x0 + 110, y, 22, t.text, { font: on ? 'bold' : undefined, literal: true });
-                if (on && e.stop > e.start) {
-                    const f = Math.max(0, Math.min(1, (tnow - e.start) / (e.stop - e.start)));
-                    cv.fillRect(x0 + 110, y + 8, w - 110, 3, withAlpha('#ffffff', 0.12));
-                    cv.fillRect(x0 + 110, y + 8, Math.round((w - 110) * f), 3, BLUE);
+            if (evSel.uuid !== uuid) { evSel.uuid = uuid; evSel.i = 0; }
+            const rows = 6, rowH = 42, y0 = top + 52;
+            evSel.i = Math.min(evSel.i, Math.min(rows, ev.length) - 1);
+            const tw = Math.max.apply(null, ev.slice(0, rows).map((e) => cv.textWidth(when(e.start, Date.now()), 20, { font: 'bold', literal: true }))) + 20;
+            ev.slice(0, rows).forEach((e, k) => {
+                const y = y0 + k * rowH, now = e.start <= tnow, chosen = k === evSel.i;
+                if (chosen) cv.fillRect(x0 - 8, y, w + 16, rowH - 4, withAlpha('#ffffff', 0.07));
+                cv.text(when(e.start, Date.now()), x0, y + 26, 20, now ? BLUE : t.dim, { font: 'bold', literal: true });
+                cv.text(clip(cv, e.title + (e.subtitle ? ' - ' + e.subtitle : ''), 21, w - tw, 'label'), x0 + tw, y + 26, 21, t.text, { font: now ? 'bold' : undefined, literal: true });
+                if (now) {
+                    cv.fillRect(x0 + tw, y + 34, w - tw, 3, withAlpha('#ffffff', 0.1));
+                    cv.fillRect(x0 + tw, y + 34, Math.round((w - tw) * pctOf(e, tnow)), 3, BLUE);
                 }
+                if (touch) cv.target(x0 - 8, y, w + 16, rowH - 4, () => { evSel.i = k; return render(); }, 'ev:' + k, 8);
             });
+            // the chosen entry: its time, length, and description
+            const e = ev[evSel.i], dy = y0 + rows * rowH + 8;
+            cv.fillRect(x0, dy - 6, w, 1, withAlpha('#ffffff', 0.12));
+            const mins = Math.round((e.stop - e.start) / 60);
+            const left = e.start <= tnow ? ', ' + Math.max(1, Math.round((e.stop - tnow) / 60)) + ' min left' : '';
+            cv.text(clip(cv, e.title, 20, w - 300, 'label'), x0, dy + 22, 20, t.text, { font: 'bold', literal: true });
+            cv.text(when(e.start, Date.now()) + ' - ' + hm(e.stop) + '  (' + mins + ' min' + left + ')', x0 + w, dy + 22, 18, BLUE, { align: 'right', font: 'bold', literal: true });
+            const text = [e.episode, e.text].filter(Boolean).join('  -  ') || 'No description';
+            lines(cv, text, 18, w, 3).forEach((l, i) => cv.text(l, x0, dy + 48 + i * 23, 18, t.dim, { font: 'label', literal: true }));
         }
 
         function drawCode(cv, t, page) {
