@@ -19,31 +19,8 @@ mgu-store** and **IterioDev's App Manager**. Built with the same kit as
 ## 🧪 Apps being tested
 
 > **Graduated:** Wheel Heating (`aurelm_wheel_heat`) works in the car and moved to [aurelmarius/bmw-apps](https://github.com/aurelmarius/bmw-apps) (1.0.6); install it from there.
-
-### 📡 AirPlay Test (`aurelm_airplay_probe`) + AirPlay network test service (`aurelm-airplay-probe`)
-*A network test for a future AirPlay receiver: can an iPhone find the head unit and connect to it?*
-
-**Status:** first in-car test. Not a receiver: nothing is streamed.
-
-The app and its root service announce a test receiver, **BMW iDrive test**, on the Wi-Fi networks for 15 minutes and show step by step what gets through: the network, the firewall, mDNS, the iPhone's AirPlay query and its connection. While the test runs, the service opens the firewall for its AirPlay port (tcp 7300; 7000 is the car's own CarPlay receiver's) and udp 5353 on the Wi-Fi interfaces only, and closes it again when the test ends.
-
-1. Install **AirPlay Test**: the Store installs the **AirPlay network test service** first. **Restart the head unit once** after installing (the service listens for the app from the next start).
-2. Put the iPhone and the head unit on one network, one setup per run:
-   - **A. Head unit on the iPhone's hotspot:** Personal Hotspot on (Maximise Compatibility on); the head unit joins it through **mgu-uplink**.
-   - **B. iPhone on the car's network:** wireless CarPlay connected.
-3. In the app press **Start test**. On the iPhone: Control Center -> **Screen Mirroring**; if **BMW iDrive test** shows up, tap it.
-4. **PASS** when the iPhone connected (it then says it could not connect: expected). Otherwise the first step that is not green says where it stopped. **Take a photo of the screen when you report a test.**
-
-**The receiver ("Start receiver"), stage 2: the picture on the screen.** UxPlay's AirPlay protocol on the head unit, presenting itself as an Apple TV (iOS 27 sends the mirrored picture during CarPlay only to one), takes the iPhone's screen mirroring; the head unit's GPU decodes it and the app shows it **over the whole centre screen, only while the car is parked**. With wireless CarPlay connected: **Start receiver**, then on the iPhone Control Center → Screen Mirroring → **BMW iDrive**. Any button of the iDrive controller (or HOME) hides it (the status page is back, and the touch screen and controller are the HMI's again; a tap on the picture does nothing); **Start receiver** shows it again. **Leaving the app (HOME, another app, the CarPlay tile) ends the iPhone's mirroring**, so CarPlay can be opened at once (setting "End the iPhone's mirroring when leaving the app", on; in the car, the CarPlay tile did nothing while the iPhone still mirrored). The receiver asks the iPhone for 1920x720, the centre screen: landscape fills it, portrait has bars either side. **YouTube's own AirPlay button does not work** (it sends the video's address, not the picture, and iOS ends CarPlay for it): mirror the screen and play the video full screen instead. **With its sound on the car's speakers** (stage 3): the app connects the receiver's sound to the speakers while it is up; the volume is the iPhone's and the car's. If the picture does not come, the status page says where it stopped (**GPU decoder**, **On screen**): take a photo of it.
-5. Removing **AirPlay Test** in the Store takes the service with it; nothing stays on the head unit ([what goes, and how](native/aurelm-airplay-probe/README.md#removal-leaves-nothing)). The service never runs at boot: only while the app is open, and 10 minutes after.
-
-![AirPlay Test - waiting for the iPhone](docs/screenshots/aurelm_airplay_probe-waiting.png)
-![AirPlay Test - PASS](docs/screenshots/aurelm_airplay_probe-pass.png)
-<sub>Screenshots drawn by the app on a PC, against the real service on the loopback interface.</sub>
-
----
-
-**AirPlay video button (0.9).** With the setting **AirPlay video button** (on by default), a video sent with the AirPlay button in YouTube is played by the head unit itself, from the internet (mgu-uplink): the picture through the same GPU decoder, the sound through the same speakers' route, pause and seek from the iPhone. iOS ends CarPlay while a video plays this way. Should mirroring during CarPlay stop working with the setting on, turn it off.
+>
+> **Graduated:** AirPlay Test works in the car and moved to [aurelmarius/bmw-apps](https://github.com/aurelmarius/bmw-apps) as **myAirPlay** (1.0.0, with the myAirPlay service). Remove AirPlay Test and its service from the Store, then install myAirPlay from there; its fixes are made there. `native/uxplay-mgu` stays here: Emby's player builds its GPU decoder from `native/uxplay-mgu/video`.
 
 ### 🎬 Emby (`aurelm_emby`) + Emby cast service (`aurelm-emby`)
 *The head unit as a cast target for the Emby phone app, as Emby's TV apps and Kodi's Emby add-on are.*
@@ -58,7 +35,7 @@ The service signs in once with your Emby account and stays connected to your Emb
 4. The film plays **over the whole centre screen while the car is parked**, with its sound on the car's speakers. Driving, the picture hides and the sound goes on. The setting **Picture only while parked** (on by default) can be turned off in the app's Settings, so the picture also stays while driving (for passengers, e.g. children watching cartoons). The centre screen is in the driver's view: where the law forbids a video in the driver's view while driving, leave it on. A touch on the picture or the iDrive controller shows the **controls**: the title, the position, a progress bar (drag along it: the film goes where the finger lifts), and the buttons **-10 s**, **play / pause**, **stop**, **+30 s**, **aspect** (**fit** the whole film with black bars, **zoom**, **fill** the screen with the edges cut; also in Settings) and **exit** (back to the status page; **Show picture** brings the picture back). With the controller: turn to move along the buttons, press to run one, push down to hide the bar. It hides after 5 s, not while paused. Pause, seek, volume, the audio and subtitle tracks and the next episode all come from the phone, which shows the position. **Stop** on the iDrive pauses the film (the phone shows it paused) and closes the player; play on the phone goes on from there.
 5. The server sends what fits as it is (H.264 up to 1080p with AAC or AC-3) and converts the rest (HEVC, 4K, HDR, DTS, E-AC-3, chosen subtitles), at 8 Mbit/s at most. If something does not work, the page says where it stopped (**Playing**, **Picture**, **Sound**): take a photo of it.
 
-AirPlay Test, Emby and TVH share the car's speakers' input: the one playing keeps it, and the others say so and wait.
+myAirPlay (bmw-apps), Emby and TVH share the car's speakers' input: the one playing keeps it, and the others say so and wait.
 
 Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md), the player: [`native/emby-player/README.md`](native/emby-player/README.md).
 
@@ -101,15 +78,15 @@ Details: [`native/aurelm-tvh/README.md`](native/aurelm-tvh/README.md), the playe
 1. Download `<id>@<version>.tgz` from [Releases](https://github.com/aurelmarius/bmw-test-apps/releases).
 2. Build a USB repository:
    ```powershell
-   node mgu-install.js usb-repo E:\ aurelm-airplay-probe@<version>.tgz aurelm_airplay_probe@<version>.tgz
+   node mgu-install.js usb-repo E:\ aurelm-emby@<version>.tgz aurelm_emby@<version>.tgz
    ```
 3. Insert the USB drive into your car and install from the **USB** page of the Store.
 
 ### Via SSH
 ```bash
-/var/opt/mgu-deploy/mgu-deploy.sh install --artifact aurelm_airplay_probe@<version>.tgz --yes
+/var/opt/mgu-deploy/mgu-deploy.sh install --artifact aurelm_emby@<version>.tgz --yes
 ```
-A service (`aurelm-airplay-probe@<version>.tgz`) installs the same way, before the app that needs it.
+A service (`aurelm-emby@<version>.tgz`) installs the same way, before the app that needs it.
 
 ---
 
@@ -119,7 +96,6 @@ A service (`aurelm-airplay-probe@<version>.tgz`) installs the same way, before t
 python3 kit/tools/build.py <id>                       # -> dist/<id>@<version>.tgz
 cp dist/<id>@<version>.tgz packages/                  # a push to main with a new package publishes a release
 python3 tools/pack_tools.py                           # native/<id>/ services -> packages/<id>@<version>.tgz
-node tests/airplay_probe.test.js                      # the AirPlay network test service
 ```
 
 **Services (tools).** A native service lives in `native/<id>/` with its `component.json` (the Store's tool

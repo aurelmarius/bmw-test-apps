@@ -1,5 +1,9 @@
 # uxplay-mgu
 
+> The AirPlay receiver (AirPlay Test) moved to [aurelmarius/bmw-apps](https://github.com/aurelmarius/bmw-apps) as
+> myAirPlay, with its own copy of this folder; fixes are made there. This copy stays for Emby's player
+> (`native/emby-player`), which builds its GPU decoder from `video/`.
+
 UxPlay's AirPlay mirroring protocol for the iDrive 7 head unit (MGU), run by the service
 `aurelm-airplay-probe` in its receiver test. The renderer (`renderer/mgu_renderer.c`) replaces UxPlay's GStreamer renderers: it reports what the iPhone sends
 (client, codec and size, frames, frame rate, bit rate, keyframes, sound packets, pictures decoded) on stdout as
