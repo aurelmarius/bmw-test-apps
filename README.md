@@ -58,9 +58,32 @@ The service signs in once with your Emby account and stays connected to your Emb
 4. The film plays **over the whole centre screen while the car is parked**, with its sound on the car's speakers. Driving, the picture hides and the sound goes on. The setting **Picture only while parked** (on by default) can be turned off in the app's Settings, so the picture also stays while driving (for passengers, e.g. children watching cartoons). The centre screen is in the driver's view: where the law forbids a video in the driver's view while driving, leave it on. A touch on the picture or the iDrive controller shows the **controls**: the title, the position, a progress bar (drag along it: the film goes where the finger lifts), and the buttons **-10 s**, **play / pause**, **stop**, **+30 s**, **aspect** (**fit** the whole film with black bars, **zoom**, **fill** the screen with the edges cut; also in Settings) and **exit** (back to the status page; **Show picture** brings the picture back). With the controller: turn to move along the buttons, press to run one, push down to hide the bar. It hides after 5 s, not while paused. Pause, seek, volume, the audio and subtitle tracks and the next episode all come from the phone, which shows the position. **Stop** on the iDrive pauses the film (the phone shows it paused) and closes the player; play on the phone goes on from there.
 5. The server sends what fits as it is (H.264 up to 1080p with AAC or AC-3) and converts the rest (HEVC, 4K, HDR, DTS, E-AC-3, chosen subtitles), at 8 Mbit/s at most. If something does not work, the page says where it stopped (**Playing**, **Picture**, **Sound**): take a photo of it.
 
-AirPlay Test and Emby share the car's speakers' input: the one playing keeps it, and the other says so and waits.
+AirPlay Test, Emby and TVH share the car's speakers' input: the one playing keeps it, and the others say so and wait.
 
 Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md), the player: [`native/emby-player/README.md`](native/emby-player/README.md).
+
+### 📺 TVH (`aurelm_tvh`) + TVH service (`aurelm-tvh`)
+*Tvheadend's TV channels on the centre screen, over Tvheadend's HTTP interface (as Kodi's `pvr.hts` shows them).*
+
+**Status:** 0.1.0, first in-car test. Checked off the car against the server's own `mgu-hd` stream and a fake Tvheadend.
+
+The server **transcodes** each channel with a stream profile made for the car: H.264 **deinterlaced by the server**
+(VAAPI), AAC, MPEG-TS. A channel as the satellite sends it (`pass`: 1080i, MP2, 12 Mbit/s) is not for the car. The
+head unit's GPU decodes the picture (its own player, `native/tvh-player`), and the sound goes to the car's speakers.
+
+**On the server (once):** Tvheadend 4.3, Configuration > Stream (Expert view):
+1. **Codec Profiles**: `h264_vaapi` with **Deinterlace** on, one per step: 720p at 3 Mbit/s, 576p at 1.5 Mbit/s, 360p at 0.7 Mbit/s, a key frame each second (GOP 25), no or 1 B frame; and `aac`, stereo, 128k (96k for the lowest).
+2. **Stream Profiles**: "Transcode/av-lib", container **MPEG-TS**, named **`mgu-hd`**, **`mgu-sd`**, **`mgu-low`**.
+3. **Users**: a user of its own for the car, with **Streaming** and the profiles `mgu-*` only. Configuration > General > Base: Authentication type **Digest** (the password then never crosses the internet in clear).
+
+**In the car:**
+1. Install **TVH**: the Store installs the **TVH service** first. **Restart the head unit once** after installing.
+2. Open **TVH** and press **Sign in**: scan the QR code with the iPhone (wireless CarPlay connected), enter the server's address (e.g. `tv.example.com:9981`, the port forward), the user and the password. Tvheadend has no token: the password is kept on the head unit (root's, 0600).
+3. The page lists the channels with what is on now. **Watch** plays the last channel (the first one the first time); **Channel +** and **Channel -** change it, also while driving (the picture hides, the sound goes on); **Stop** ends it.
+4. The picture shows **over the whole centre screen while parked** (setting "Picture only while parked", on by default). A touch or the iDrive controller shows the controls: **CH -**, **CH +**, **LIST** (every channel with what is on now: turn the knob and press, or touch one; a push up opens it too), **stop**, **aspect** (fit, zoom, fill), **exit**.
+5. Settings: **Stream profile** (mgu-hd, mgu-sd, mgu-low) and **Lower the profile by itself when the internet is slow** (on: the stream running dry twice in a minute, or for 8 s, goes one profile down; 5 minutes without, one back up). If something does not work, the page says where it stopped (**Server**, **Playing**, **Picture**, **Sound**): take a photo of it. A profile that does not deinterlace shows **INTERLACED** on the page.
+
+Details: [`native/aurelm-tvh/README.md`](native/aurelm-tvh/README.md), the player: [`native/tvh-player/README.md`](native/tvh-player/README.md).
 
 ## 🚀 Installation
 
