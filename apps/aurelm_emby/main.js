@@ -36,9 +36,11 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.3.6';
+const SERVICE_VERSION = '0.3.7';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
+// a film is on: playing, paused, starting; not one parked by Stop on the iDrive (its player closed)
+const filmOn = (pb) => !!(pb && ACTIVE.indexOf(pb.state) >= 0 && !pb.parked);
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#52b54b', AMBER = '#ffb020', RED = '#ef2b2d';
 
@@ -113,6 +115,11 @@ function steps(s) {
 /** a film playing: what, where, the picture, the sound */
 function playRows(s, rows) {
     const pb = s.playback, pl = s.player || {}, tk = pl.tick || {};
+    if (pb.parked) {
+        rows.push({ label: 'Playing', state: 'off', detail: ((pb.item && pb.item.title) || '?') + ' - stopped here at ' + hms(pb.pos) +
+            (pb.dur ? ' / ' + hms(pb.dur) : '') + ': play on the phone goes on from there' });
+        return;
+    }
     const it = pb.item || {};
     const where = hms(pb.pos) + (pb.dur ? ' / ' + hms(pb.dur) : '');
     const STATE = { loading: 'starting', playing: 'playing', paused: 'paused', buffering: 'buffering (the internet or the server is slow)' };
@@ -219,7 +226,7 @@ mgu.run({
             onCcu: (c) => { const r = controls.ccu(c); mirror.tick(); return r; },
             onShown: (on) => pageTouch(!on),
             // a seek or the next episode: a new player; the picture stays up (black, "Loading...") meanwhile
-            hold: () => !!(st && st.playback && ACTIVE.indexOf(st.playback.state) >= 0),
+            hold: () => filmOn(st && st.playback),
             holdText: 'between two streams',
             idleText: 'the player is not running', hiddenText: 'hidden: press "Show picture" to show it again',
             statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
@@ -253,7 +260,7 @@ mgu.run({
         /** the player as the mirror view knows a receiver: running, its decoder, pictures shown */
         function rxOf(s) {
             const pb = s && s.playback, pl = s && s.player;
-            if (!pb || ACTIVE.indexOf(pb.state) < 0 || !pl || !pl.running) return null;
+            if (!filmOn(pb) || !pl || !pl.running) return null;
             const d = pl.decoder;
             return { running: true, videoRunning: true, stream: { shown: pl.tick ? pl.tick.shown : 0 },
                 decoder: d ? { ok: d.ok, error: d.error, path: d.path || pl.videoPath, w: d.w, h: d.h } : null };
@@ -385,7 +392,7 @@ mgu.run({
             // coming in the car. Kept 5 s more after the film, for the next episode or a cast again.
             const pl = st && st.player;
             const soundFailed = !!(pl && pl.running && pl.audio && pl.audio.ok === false);
-            const on = !!(pb && ACTIVE.indexOf(pb.state) >= 0 && !soundFailed);
+            const on = filmOn(pb) && !soundFailed;
             if (on) soundUntil = Date.now() + 5000;
             carAudio.want(on || Date.now() < soundUntil);
         }
@@ -442,7 +449,7 @@ mgu.run({
         let tick = 0;
         setInterval(() => {
             tick++;
-            const on = st && st.playback && ACTIVE.indexOf(st.playback.state) >= 0;
+            const on = filmOn(st && st.playback);
             if (shown() || (on && tick % 2 === 0)) poll().then(syncSubs).catch(() => {});
             sync();
         }, 1000);
@@ -453,4 +460,4 @@ mgu.run({
     },
 });
 
-module.exports = { steps, castText, qr, ask, ACTIVE };
+module.exports = { steps, castText, qr, ask, ACTIVE, filmOn };

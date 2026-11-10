@@ -278,7 +278,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.3.6');
+        assert.strictEqual(s.version, '0.3.7');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -511,8 +511,27 @@ test('the app\'s controls: play / pause, a seek to a position, stop', async () =
         await ask(svc.sock, 'playstate', { command: 'Seek', seek: 312.5 });
         await until(() => srv.seen.streams.length === 2, 5000, 'a new stream from the position');
         assert.strictEqual(srv.seen.streams[1].query.StartTimeTicks, '3125000000');
+        // Stop on the iDrive: parked (paused for the phone, which has no Stop), the player closed, no Stopped
+        await statusUntil(svc.sock, (x) => x.playback.state === 'playing' && x.player.running, 5000, 'playing again');
+        const pauses = reports('/Sessions/Playing/Progress').filter((r) => r.body.EventName === 'pause').length;
+        const encStops = srv.seen.encStops.length;
         await ask(svc.sock, 'playstate', { command: 'Stop' });
-        await until(() => reports('/Sessions/Playing/Stopped').length, 3000, 'stopped from the app');
+        let s = await statusUntil(svc.sock, (x) => x.playback.parked && !x.player.running, 5000, 'parked');
+        assert.strictEqual(s.playback.state, 'paused');
+        assert.ok(reports('/Sessions/Playing/Progress').filter((r) => r.body.EventName === 'pause' && r.body.IsPaused).length > pauses, 'reported paused');
+        assert.strictEqual(reports('/Sessions/Playing/Stopped').length, 0);
+        await until(() => srv.seen.encStops.length > encStops, 3000, 'its transcode stopped');
+        await wait(1500);
+        assert.strictEqual(srv.seen.streams.length, 2, 'the parked player\'s end opened no stream');
+        // play on the phone: on from where it was, a new stream
+        const at = s.playback.pos;
+        srv.send({ MessageType: 'Playstate', Data: { Command: 'PlayPause' } });
+        await until(() => srv.seen.streams.length === 3, 5000, 'on again');
+        assert.ok(Math.abs(Number(srv.seen.streams[2].query.StartTimeTicks) / 1e7 - at) < 2, srv.seen.streams[2].query.StartTimeTicks + ' vs ' + at);
+        s = await statusUntil(svc.sock, (x) => !x.playback.parked && x.playback.state === 'playing', 5000, 'playing after the stop');
+        // a Stop from the phone ends it
+        srv.send({ MessageType: 'Playstate', Data: { Command: 'Stop' } });
+        await until(() => reports('/Sessions/Playing/Stopped').length, 3000, 'stopped from the phone');
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 

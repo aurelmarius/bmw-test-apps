@@ -33,7 +33,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.3.6';
+const VERSION = '0.3.7';
 const PAGE_PORT = 8490;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;

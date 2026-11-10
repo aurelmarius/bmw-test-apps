@@ -210,7 +210,7 @@ function createPlayback(o) {
             item: cur ? cur.info : null, pos: cur ? position() : null, dur: cur && cur.info ? cur.info.seconds : null,
             posAt: cur ? cur.tAt || null : null,
             subs: cur && cur.subs ? { key: cur.subs.key, count: cur.subs.count, lang: cur.subs.lang, error: cur.subs.error || null } : null,
-            paused: cur ? cur.paused : false, playMethod: cur ? cur.playMethod : null, volume, muted,
+            paused: cur ? cur.paused : false, parked: cur ? !!cur.parked : false, playMethod: cur ? cur.playMethod : null, volume, muted,
             queue: { index: q.index, length: q.ids.length }, player: cur ? cur.player : null,
             audioIndex: cur ? cur.audioIndex : null, subtitleIndex: cur ? cur.subtitleIndex : null,
         });
@@ -446,7 +446,36 @@ function createPlayback(o) {
         const start = Math.min(Math.max(0, Number(d.startIndex) || 0), ids.length - 1);
         begin(start, d.start || 0, { audioIndex: d.audioIndex, subtitleIndex: d.subtitleIndex, mediaSourceId: d.mediaSourceId });
     }
+    /**
+     * Stop on the iDrive. The Emby app has no Stop for the device it controls, only play / pause: a film ended here
+     * left the phone showing it playing, and its play then took the film over again (0.3.6 in the car). So the film
+     * is parked: reported paused where it is, its player, stream and transcode ended, the picture and the speakers
+     * let go; play on the phone goes on from there, a Stop from the phone ends it.
+     */
+    function park() {
+        const c = cur;
+        if (!c || c.parked) return;
+        c.paused = true;
+        c.parked = true;
+        c.t = c.t || 0;
+        const at = position(c);
+        closeStream(c);
+        c.start = at; c.t = 0;
+        c.streamId = 0;   // the parked player's exit is no lost connection
+        stopEncoding(c.playSessionId);
+        set('paused');
+        report('progress', { EventName: 'pause' });
+        log('stopped on the iDrive at ' + Math.round(at) + ' s: paused for the phone, the player closed');
+    }
+    function unpark(why) {
+        const c = cur;
+        c.parked = false;
+        c.paused = false;
+        report('progress', { EventName: 'unpause' });
+        openStream(position(c), why);
+    }
     function pause(on) {
+        if (cur && cur.parked) { if (!on) unpark('play after a stop'); return; }
         if (!cur || cur.paused === on) return;
         cur.paused = on;
         if (cur.streamId) sink.ctl(cur.streamId, on ? 'pause' : 'resume');
@@ -454,6 +483,7 @@ function createPlayback(o) {
     }
     function seek(sec) {
         if (!cur) return;
+        if (cur.parked) { cur.parked = false; cur.paused = false; }
         const dur = cur.info && cur.info.seconds;
         sec = Math.max(0, dur ? Math.min(sec, dur - 1) : sec);
         cur.retries = 0;
@@ -545,7 +575,7 @@ function createPlayback(o) {
 
     function stop() { finish('stopped'); set('idle'); }
 
-    return { play, playstate, command, onPlayer, stop, status, takeOver, position: () => position() };
+    return { play, playstate, command, onPlayer, stop, park, status, takeOver, position: () => position() };
 }
 
 module.exports = { createPlayback, deviceProfile, setParam, describeUrl, parseSrt, ascii, TICKS };

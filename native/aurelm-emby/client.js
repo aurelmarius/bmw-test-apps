@@ -86,7 +86,8 @@ process.on('message', (m) => {
     else if (m.op === 'stop') { pb.stop(); c.stop(); }
     else if (m.op === 'player') { pb.onPlayer(m.id, m.ev); if (m.ev && m.ev.ev !== 'tick') playbackStatus(); }
     else if (m.op === 'playback-stop') { pb.stop(); playbackStatus(); }
-    else if (m.op === 'playstate') { pb.playstate({ command: m.command, seek: m.seek }); playbackStatus(); }
+    // Stop from the iDrive parks the film (paused for the phone, the player closed): the phone has no Stop to undo it
+    else if (m.op === 'playstate') { if (m.command === 'Stop') pb.park(); else pb.playstate({ command: m.command, seek: m.seek }); playbackStatus(); }
     else if (m.op === 'signout') { pb.stop(); c.signOut().then(() => send({ ev: 'signed-out', why: 'signed out' })); }
     else if (m.op === 'signin') {
         c.signIn(m.server, m.user, m.password)
