@@ -44,7 +44,7 @@ const pb = createPlayback({
     api: (m, p, b) => c.call(m, p, b), apiText: (p) => c.callText(p), nx,
     onSubs: (key, cues) => send({ ev: 'subs', key, cues }),
     sessionId: () => c.status().sessionId, account: () => c.account(), device, log, sink, describe: c.describe,
-    bitrate: Number(process.env.EMBY_BITRATE) || undefined, serverLogAfterMs: Number(process.env.EMBY_SERVER_LOG_AFTER_MS) || undefined,
+    bitrate: Number(process.env.EMBY_BITRATE) || undefined, adaptUpMs: Number(process.env.EMBY_ADAPT_UP_MS) || undefined, serverLogAfterMs: Number(process.env.EMBY_SERVER_LOG_AFTER_MS) || undefined,
 });
 let lastSent = '';
 function playbackStatus() {
@@ -86,6 +86,7 @@ process.on('message', (m) => {
     else if (m.op === 'stop') { pb.stop(); c.stop(); }
     else if (m.op === 'player') { pb.onPlayer(m.id, m.ev); if (m.ev && m.ev.ev !== 'tick') playbackStatus(); }
     else if (m.op === 'playback-stop') { pb.stop(); playbackStatus(); }
+    else if (m.op === 'prefs') { pb.setPrefs(m.prefs); playbackStatus(); }
     // Stop from the iDrive parks the film (paused for the phone, the player closed): the phone has no Stop to undo it
     else if (m.op === 'playstate') { if (m.command === 'Stop') pb.park(); else pb.playstate({ command: m.command, seek: m.seek }); playbackStatus(); }
     else if (m.op === 'signout') { pb.stop(); c.signOut().then(() => send({ ev: 'signed-out', why: 'signed out' })); }

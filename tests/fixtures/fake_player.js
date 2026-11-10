@@ -3,7 +3,8 @@
 /* A stand-in for native/emby-player in the tests (no GPU, no ALSA, no build needed): reads the stream on stdin,
  * takes the control lines on fd 3, and reports as the real one does (MGU {json} lines): open, decoder, audio, a
  * tick every 100 ms with the position (stopped while paused), end when the stream ended. FAKE_PLAYER_LOG: a file
- * it appends what it got to ({"bytes"}, {"ctl"}), for the tests to read. */
+ * it appends what it got to ({"bytes"}, {"ctl"}), for the tests to read. FAKE_PLAYER_BUFFERING: "a-b,c-d", seconds
+ * since it started in which it reports "buffering" (the stream ran dry). */
 const fs = require('fs');
 const net = require('net');
 const out = (o) => process.stdout.write('MGU ' + JSON.stringify(o) + '\n');
@@ -30,9 +31,13 @@ ctl.on('data', (d) => {
 });
 ctl.on('end', () => process.exit(0));
 ctl.on('error', () => process.exit(0));
+const born = Date.now();
+const dry = String(process.env.FAKE_PLAYER_BUFFERING || '').split(',').filter(Boolean).map((w) => w.split('-').map(Number));
 const timer = setInterval(() => {
-    if (!paused && bytes) t += 0.1;
-    out({ ev: 'tick', t: Math.round(t * 1000) / 1000, state: paused ? 'paused' : bytes ? 'playing' : 'starting', shown: Math.round(t * 15), late: 0, decerr: 0,
+    const age = (Date.now() - born) / 1000;
+    const buffering = dry.some((w) => age >= w[0] && age < w[1]);
+    if (!paused && bytes && !buffering) t += 0.1;
+    out({ ev: 'tick', t: Math.round(t * 1000) / 1000, state: paused ? 'paused' : buffering ? 'buffering' : bytes ? 'playing' : 'starting', shown: Math.round(t * 15), late: 0, decerr: 0,
         aplayed: Math.round(t * 47), alate: 0, aunread: 0, axrun: 0, adev: -1, buffered: 1, kbytes: Math.round(bytes / 1024) });
     // the stream ended and "played" for a moment: the end
     if (ended && t >= Number(process.env.FAKE_PLAYER_SECONDS || 0.3)) {

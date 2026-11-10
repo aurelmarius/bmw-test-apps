@@ -36,7 +36,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.3.7';
+const SERVICE_VERSION = '0.3.8';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 // a film is on: playing, paused, starting; not one parked by Stop on the iDrive (its player closed)
@@ -134,8 +134,10 @@ function playRows(s, rows) {
         ? ' (the server converts ' + [sv && String(sv.codec || '').toUpperCase() + ' ' + sv.w + 'x' + sv.h + (sv.hdr && sv.hdr !== 'SDR' ? ' ' + sv.hdr : ''),
             sa && String(sa.codec || '').toUpperCase() + ' ' + sa.channels + 'ch'].filter(Boolean).join(', ') + ')'
         : pb.playMethod === 'Transcode' ? ' (the server converts it)' : pb.playMethod ? ' (as it is)' : '';
+    // the quality asked for, when below the setting (the internet was slow)
+    const q = pb.bitrate ? ', ' + pb.bitrate / 1e6 + ' Mbit/s' + (pb.maxBitrate && pb.bitrate < pb.maxBitrate ? ' (lowered: slow internet)' : '') : '';
     rows.push({ label: 'Playing', state: pb.state === 'error' ? 'bad' : pb.state === 'playing' || pb.state === 'paused' ? 'ok' : 'wait',
-        detail: (it.title || '?') + ' - ' + what + src });
+        detail: (it.title || '?') + ' - ' + what + q + src });
     // the player's numbers are this stream's only once it started (before, they are the last film's)
     const fresh = pb.state !== 'loading' || pb.phase === 'player' || !pb.phase;
     const d = fresh ? pl.decoder : null, open = fresh && pl.open && pl.open.video;
@@ -171,11 +173,21 @@ mgu.run({
         const { ui, log } = ctx;
         let st = null, busy = null, polling = false, askedExit = false, code = null, codeFor = null;
 
+        /** the quality settings to the service (it keeps them for a cast while the app is closed) */
+        function prefsNow() {
+            const q = Number(ctx.settings.get('quality'));
+            return { maxBitrate: ([8, 4, 2, 1].indexOf(q) >= 0 ? q : 8) * 1000000, adaptive: ctx.settings.get('adaptive') !== false };
+        }
         async function poll() {
             if (polling) return;
             polling = true;
             try {
                 st = await ask('status');
+                const want = prefsNow(), have = st && st.prefs;
+                if (st && st.version && (!have || have.maxBitrate !== want.maxBitrate || have.adaptive !== want.adaptive)) {
+                    const r = await ask('prefs', want);
+                    if (r) st = r;
+                }
                 if (st && st.version && older(st.version, SERVICE_VERSION) && !askedExit) {
                     askedExit = true;
                     log.info('emby: service ' + st.version + ' running, ' + SERVICE_VERSION + ' installed: asking it to end');

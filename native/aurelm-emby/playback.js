@@ -117,7 +117,12 @@ function createPlayback(o) {
     const now = o.now || Date.now;
     const api = o.api;           // (method, path, body) -> Promise<json>
     const sink = o.sink;
-    const bitrate = o.bitrate || 8000000;
+    // the quality: the most the car asks for (setting "Streaming quality") and whether it goes lower by itself when
+    // the stream runs dry (setting "Lower the quality when the internet is slow"); see adapt()
+    const prefs = { maxBitrate: o.bitrate || 8000000, adaptive: true };
+    const LADDER = [8000000, 4000000, 2000000, 1000000];
+    const STALLS = 2, STALL_WINDOW_MS = 60000, LONG_STALL_MS = 8000, SWITCH_COOLDOWN_MS = 30000;
+    const UP_AFTER_MS = o.adaptUpMs || 300000;
     const account = () => o.account();
     let streamId = 0;
     const q = { ids: [], index: 0 };
@@ -204,10 +209,56 @@ function createPlayback(o) {
         return true;
     }
 
+    /**
+     * The quality follows the internet (prefs.adaptive): the stream ran dry twice within a minute, or once for 8 s,
+     * and the film goes on from where it is at the next step down (8, 4, 2, 1 Mbit/s: the server transcodes to it);
+     * after 5 minutes without running dry, one step up again (at most the setting). Each step is a new stream: a
+     * moment of "Loading...", as a seek. 30 s at least between two steps.
+     */
+    function adapt(c, state) {
+        const t = now();
+        if (state === 'buffering' && c.lastState !== 'buffering') { c.stalls.push(t); c.stallSince = t; }
+        if (state !== 'buffering') c.stallSince = 0;
+        if (state === 'buffering') c.cleanSince = t;
+        c.lastState = state;
+        c.stalls = c.stalls.filter((x) => t - x < STALL_WINDOW_MS);
+        if (!prefs.adaptive || c.parked || t - c.switchedAt < SWITCH_COOLDOWN_MS) return false;
+        const down = LADDER.filter((b) => b < c.bitrate)[0];
+        if (down && (c.stalls.length >= STALLS || (c.stallSince && t - c.stallSince >= LONG_STALL_MS))) {
+            step(c, down, c.stalls.length >= STALLS ? 'the stream ran dry ' + c.stalls.length + ' times in a minute' : 'the stream ran dry for ' + Math.round((t - c.stallSince) / 1000) + ' s');
+            return true;
+        }
+        const up = LADDER.filter((b) => b > c.bitrate && b <= prefs.maxBitrate).pop();
+        if (up && state === 'playing' && t - c.cleanSince >= UP_AFTER_MS) { step(c, up, Math.round(UP_AFTER_MS / 60000) + ' minutes without running dry'); return true; }
+        return false;
+    }
+    function step(c, bitrate, why) {
+        log('quality: ' + c.bitrate / 1e6 + ' -> ' + bitrate / 1e6 + ' Mbit/s (' + why + ')');
+        c.bitrate = bitrate;
+        c.switchedAt = now(); c.cleanSince = now(); c.stalls = []; c.stallSince = 0;
+        c.retries = 0;
+        openStream(position(c), 'quality ' + bitrate / 1e6 + ' Mbit/s');
+    }
+    /** the settings, from the app (through the service): a film playing above the new most goes down to it now */
+    function setPrefs(p) {
+        const max = LADDER.indexOf(Number(p && p.maxBitrate)) >= 0 ? Number(p.maxBitrate) : prefs.maxBitrate;
+        const adaptive = p && p.adaptive !== undefined ? !!p.adaptive : prefs.adaptive;
+        if (max === prefs.maxBitrate && adaptive === prefs.adaptive) return;
+        prefs.maxBitrate = max; prefs.adaptive = adaptive;
+        log('quality: at most ' + max / 1e6 + ' Mbit/s, ' + (adaptive ? 'lower when the internet is slow' : 'fixed'));
+        const c = cur;
+        if (!c) return;
+        // fixed: the setting itself; adaptive: never above it
+        const want = adaptive ? Math.min(c.bitrate, max) : max;
+        if (want !== c.bitrate && !c.parked) step(c, want, 'the setting');
+        else c.bitrate = want;
+    }
+
     function status() {
         return Object.assign({}, st, {
             serverSays: st.serverSays || null,
             item: cur ? cur.info : null, pos: cur ? position() : null, dur: cur && cur.info ? cur.info.seconds : null,
+            bitrate: cur ? cur.bitrate : null, maxBitrate: prefs.maxBitrate, adaptive: prefs.adaptive,
             posAt: cur ? cur.tAt || null : null,
             subs: cur && cur.subs ? { key: cur.subs.key, count: cur.subs.count, lang: cur.subs.lang, error: cur.subs.error || null } : null,
             paused: cur ? cur.paused : false, parked: cur ? !!cur.parked : false, playMethod: cur ? cur.playMethod : null, volume, muted,
@@ -250,13 +301,13 @@ function createPlayback(o) {
     async function playbackInfo(c, startSec) {
         const acc = account();
         const qs = ['UserId=' + encodeURIComponent(acc.userId), 'StartTimeTicks=' + Math.round(startSec * TICKS), 'IsPlayback=true',
-            'AutoOpenLiveStream=true', 'MaxStreamingBitrate=' + bitrate];
+            'AutoOpenLiveStream=true', 'MaxStreamingBitrate=' + c.bitrate];
         if (c.audioIndex != null) qs.push('AudioStreamIndex=' + c.audioIndex);
         if (c.subtitleIndex != null) qs.push('SubtitleStreamIndex=' + c.subtitleIndex);
         if (c.mediaSourceId) qs.push('MediaSourceId=' + encodeURIComponent(c.mediaSourceId));
         const info = await api('POST', 'Items/' + encodeURIComponent(c.id) + '/PlaybackInfo?' + qs.join('&'), {
-            DeviceProfile: deviceProfile(bitrate), StartTimeTicks: Math.round(startSec * TICKS), IsPlayback: true, AutoOpenLiveStream: true,
-            MaxStreamingBitrate: bitrate, AudioStreamIndex: c.audioIndex, SubtitleStreamIndex: c.subtitleIndex, MediaSourceId: c.mediaSourceId,
+            DeviceProfile: deviceProfile(c.bitrate), StartTimeTicks: Math.round(startSec * TICKS), IsPlayback: true, AutoOpenLiveStream: true,
+            MaxStreamingBitrate: c.bitrate, AudioStreamIndex: c.audioIndex, SubtitleStreamIndex: c.subtitleIndex, MediaSourceId: c.mediaSourceId,
             UserId: acc.userId,
         });
         if (info && info.ErrorCode) throw new Error('the server will not play it: ' + info.ErrorCode);
@@ -415,7 +466,8 @@ function createPlayback(o) {
         const id = q.ids[index];
         if (!id) { set('idle'); return; }
         q.index = index;
-        const c = { id, start: startSec || 0, t: 0, paused: false, reported: false, retries: 0, info: null, type: null,
+        const c = { id, start: startSec || 0, t: 0, paused: false, reported: false, retries: 0, info: null, type: null, bitrate: prefs.maxBitrate,
+            stalls: [], stallSince: 0, cleanSince: now(), switchedAt: 0, lastState: null,
             audioIndex: opts && opts.audioIndex != null ? opts.audioIndex : null,
             subtitleIndex: opts && opts.subtitleIndex != null ? opts.subtitleIndex : null,
             mediaSourceId: opts && opts.mediaSourceId || null, playSessionId: null, playMethod: null, stream: null, streamId: 0 };
@@ -536,6 +588,7 @@ function createPlayback(o) {
         if (ev.ev === 'tick') {
             c.t = ev.t || 0;
             c.tAt = now();
+            if (adapt(c, ev.state)) return;   // a new stream, at another quality
             c.player = Object.assign({}, c.player, { state: ev.state, shown: ev.shown, late: ev.late, decerr: ev.decerr, aplayed: ev.aplayed,
                 alate: ev.alate, aunread: ev.aunread, adev: ev.adev, buffered: ev.buffered, kbytes: ev.kbytes });
             if (st.state !== 'error') set(ev.state === 'starting' ? 'loading' : ev.state);
@@ -575,7 +628,7 @@ function createPlayback(o) {
 
     function stop() { finish('stopped'); set('idle'); }
 
-    return { play, playstate, command, onPlayer, stop, park, status, takeOver, position: () => position() };
+    return { play, playstate, command, onPlayer, stop, park, status, takeOver, setPrefs, position: () => position() };
 }
 
 module.exports = { createPlayback, deviceProfile, setParam, describeUrl, parseSrt, ascii, TICKS };

@@ -33,7 +33,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.3.7';
+const VERSION = '0.3.8';
 const PAGE_PORT = 8490;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -77,6 +77,8 @@ function createService(opts) {
     let device = readJson('device.json');
     if (!device || !device.id) { device = { id: 'aurelm-emby-' + crypto.randomBytes(8).toString('hex'), name: 'BMW iDrive' }; writeJson('device.json', device); }
     let account = readJson('account.json');
+    // the app's quality settings, kept for a cast while the app is closed
+    let prefs = readJson('prefs.json') || null;
     if (account && !account.token) account = null;
 
     const st = {
@@ -106,6 +108,7 @@ function createService(opts) {
         catch (e) { st.error = 'the Emby client did not start: ' + e.message; log(st.error); return; }
         child = c;
         if (c.stdio[4]) player.attach(c.stdio[4]);
+        if (prefs) setTimeout(() => toChild({ op: 'prefs', prefs }), 0);
         c.on('message', onChild);
         c.on('error', (e) => log('client: ' + e.message));
         c.on('exit', (code, sig) => {
@@ -242,7 +245,7 @@ function createService(opts) {
     }
     function status() {
         return Object.assign({}, st, {
-            now: now(), device: device.name, uplink: uplink(), player: player.state(),
+            now: now(), device: device.name, uplink: uplink(), player: player.state(), prefs,
             account: account ? { server: account.server, userName: account.userName, serverName: account.serverName, serverVersion: account.serverVersion } : null,
             page: Object.assign({}, st.page, st.page.open ? { url: pageUrl(), left: Math.max(0, Math.round((st.page.until - now()) / 1000)) } : {}),
             log: lines.slice(-14),
@@ -261,6 +264,13 @@ function createService(opts) {
                 try { fs.unlinkSync(file('account.json')); } catch (e) { /* none */ }
                 st.play = st.playstate = st.command = st.playback = null;
                 st.client = { state: 'signed-out' };
+            }
+        } else if (cmd === 'prefs') {
+            const p = { maxBitrate: Number(m.maxBitrate) || 8000000, adaptive: m.adaptive !== false };
+            if (!prefs || p.maxBitrate !== prefs.maxBitrate || p.adaptive !== prefs.adaptive) {
+                prefs = p;
+                try { writeJson('prefs.json', prefs); } catch (e) { log('prefs: ' + e.message); }
+                toChild({ op: 'prefs', prefs });
             }
         } else if (cmd === 'subs') {
             return { key: subs.key, cues: subs.cues };

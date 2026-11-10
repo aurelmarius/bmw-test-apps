@@ -278,7 +278,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.3.7');
+        assert.strictEqual(s.version, '0.3.8');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -532,6 +532,38 @@ test('the app\'s controls: play / pause, a seek to a position, stop', async () =
         // a Stop from the phone ends it
         srv.send({ MessageType: 'Playstate', Data: { Command: 'Stop' } });
         await until(() => reports('/Sessions/Playing/Stopped').length, 3000, 'stopped from the phone');
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('quality: the setting caps what is asked; the stream running dry goes one step lower, unless that is off', async () => {
+    const srv = await fakeEmby({ seconds: 600 });
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100', FAKE_PLAYER_BUFFERING: '0.6-0.9,1.3-1.6' } });
+    const rate = (i) => [srv.seen.pbinfo[i].query.MaxStreamingBitrate, String(srv.seen.pbinfo[i].body.MaxStreamingBitrate), String(srv.seen.pbinfo[i].body.DeviceProfile.MaxStreamingBitrate)];
+    try {
+        // the default: 8 Mbit/s, adaptive; twice dry within a minute: 4 Mbit/s, on from where it was
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], StartPositionTicks: 100000000, PlayCommand: 'PlayNow' } });
+        await until(() => srv.seen.pbinfo.length === 2, 8000, 'a stream at a lower quality');
+        assert.deepStrictEqual(rate(0), ['8000000', '8000000', '8000000']);
+        assert.deepStrictEqual(rate(1), ['4000000', '4000000', '4000000']);
+        assert.ok(Number(srv.seen.pbinfo[1].query.StartTimeTicks) >= 100000000, 'on from where it was');
+        let s = await statusUntil(svc.sock, (x) => x.playback.bitrate === 4000000, 3000, 'at 4 Mbit/s');
+        assert.strictEqual(s.playback.maxBitrate, 8000000);
+        // 30 s at least between two steps: still at 4 though the new stream runs dry too
+        await wait(2500);
+        assert.strictEqual(srv.seen.pbinfo.length, 2);
+        // the setting: at most 2 Mbit/s, fixed: the film goes on at 2 now
+        s = await ask(svc.sock, 'prefs', { maxBitrate: 2000000, adaptive: false });
+        assert.deepStrictEqual(s.prefs, { maxBitrate: 2000000, adaptive: false });
+        await until(() => srv.seen.pbinfo.length === 3, 5000, 'the setting applied');
+        assert.deepStrictEqual(rate(2), ['2000000', '2000000', '2000000']);
+        // fixed: running dry changes nothing
+        await wait(2500);
+        assert.strictEqual(srv.seen.pbinfo.length, 3);
+        // kept for the next film and the next start of the service
+        assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(svc.tmp, 'state', 'prefs.json'), 'utf8')), { maxBitrate: 2000000, adaptive: false });
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow' } });
+        await until(() => srv.seen.pbinfo.length === 4, 5000, 'the next film');
+        assert.deepStrictEqual(rate(3), ['2000000', '2000000', '2000000']);
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 
