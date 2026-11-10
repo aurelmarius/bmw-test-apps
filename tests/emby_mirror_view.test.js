@@ -12,7 +12,8 @@ const record = require(path.join(__dirname, '..', 'kit', 'runtime', 'record'));
 
 class FakeGpu extends EventEmitter {
     constructor() { super(); this.frames = 0; this.placement = null; }
-    connect() {} mode() {} claim() {} video() {} grab() {} show() {} close() {}
+    connect() {} mode() {} video() {} grab() {} show() {} close() {}
+    claim(r) { this.claims = (this.claims || 0) + 1; this.lastClaim = r; }
     place(p) { this.placement = p; }
     frame(r) { this.frames++; this.lastRec = r; }
 }
@@ -74,6 +75,25 @@ test('the picture placed by the overlay (aspect); touch and the controller to th
     assert.deepStrictEqual([f2[3], f2[4], f2[5], f2[6]], [96, 0, 1728, 720], 'another aspect: drawn again');
     v.hide('the controls');
     assert.strictEqual(v.state().shown, false);
+});
+
+test('the app hears when the picture comes and goes (its page lets go of touch); our touch area claimed again each second', () => {
+    let gpu = null;
+    const seen = [];
+    class RC extends FakeGpu { constructor() { super(); gpu = this; } }
+    const v = createMirrorView({ RenderClient: RC, Recorder: record.Recorder, kit: record, appId: 'aurelm_emby', statIno: () => 7, now: () => clock,
+        onShown: (on) => seen.push(on), onTouch: () => {} });
+    gpu.emit('ready', { w: 1920, h: 720 }, { video: true });
+    const rx = { running: true, videoRunning: true, decoder: { ok: true, path: '/dev/shm/x' }, stream: { shown: 5 } };
+    v.update({ rx, pageVisible: true, driving: false });
+    assert.deepStrictEqual(seen, [true]);
+    const n = gpu.claims;
+    v.update({ rx, pageVisible: true, driving: false });
+    assert.ok(gpu.claims > n, 'claimed again');
+    assert.deepStrictEqual(gpu.lastClaim, [{ x: 0, y: 0, w: 1920, h: 720 }]);
+    v.update({ rx, pageVisible: true, driving: true });
+    assert.deepStrictEqual(seen, [true, false]);
+    assert.deepStrictEqual(gpu.lastClaim, []);
 });
 
 (async () => {

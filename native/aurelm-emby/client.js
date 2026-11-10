@@ -54,9 +54,21 @@ function playbackStatus() {
 setInterval(playbackStatus, 1000);
 
 c.on('status', (status) => send({ ev: 'status', status }));
-c.on('play', (data) => { send({ ev: 'play', data }); pb.play(data); playbackStatus(); });
+let lastPlay = 0, castProbe = null;
+c.on('play', (data) => { lastPlay = Date.now(); send({ ev: 'play', data }); pb.play(data); playbackStatus(); });
 c.on('playstate', (data) => { send({ ev: 'playstate', data }); pb.playstate(data); playbackStatus(); });
-c.on('command', (data) => { send({ ev: 'command', data }); pb.command(data); playbackStatus(); });
+c.on('command', (data) => {
+    send({ ev: 'command', data }); pb.command(data); playbackStatus();
+    // nothing playing and no Play after a command (the phone handing over its film sent only SetVolume in the car):
+    // the server's log says why, once a minute at most
+    if (pb.status().state === 'idle' && !castProbe) {
+        const at = Date.now();
+        castProbe = setTimeout(() => {
+            if (lastPlay < at && pb.status().state === 'idle') pb.castLog(c.status().sessionId).catch((e) => log('server log: ' + e.message));
+            setTimeout(() => { castProbe = null; }, 60000);
+        }, 4000);
+    }
+});
 c.on('signed-out', (why) => { pb.stop(); send({ ev: 'signed-out', why }); });
 
 process.on('message', (m) => {

@@ -36,7 +36,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.3.0';
+const SERVICE_VERSION = '0.3.1';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
@@ -126,7 +126,7 @@ function playRows(s, rows) {
     const src = pb.playMethod === 'Transcode' && (sv || sa)
         ? ' (the server converts ' + [sv && String(sv.codec || '').toUpperCase() + ' ' + sv.w + 'x' + sv.h + (sv.hdr && sv.hdr !== 'SDR' ? ' ' + sv.hdr : ''),
             sa && String(sa.codec || '').toUpperCase() + ' ' + sa.channels + 'ch'].filter(Boolean).join(', ') + ')'
-        : pb.playMethod ? ' (as it is)' : '';
+        : pb.playMethod === 'Transcode' ? ' (the server converts it)' : pb.playMethod ? ' (as it is)' : '';
     rows.push({ label: 'Playing', state: pb.state === 'error' ? 'bad' : pb.state === 'playing' || pb.state === 'paused' ? 'ok' : 'wait',
         detail: (it.title || '?') + ' - ' + what + src });
     // the player's numbers are this stream's only once it started (before, they are the last film's)
@@ -188,8 +188,26 @@ mgu.run({
             log.info('emby: ' + cmd + ' -> ' + (r ? (r.client && r.client.state) : 'no service'));
             return render();
         }
-        ui.onClick('BTN_SIGNIN', () => command('signin-open', 'Opening the sign-in page...'));
-        ui.onClick('BTN_SIGNOUT', () => command('signout', 'Signing out...'));
+        // Sign out, and Sign in while signed in, want a second press within 5 s: a stray press of the controller (or a
+        // touch that went to the page under the film) signed the car out in 0.3.0
+        const confirm = { at: 0, what: null };
+        function confirmed(what, ask_) {
+            if (confirm.what === what && Date.now() < confirm.at) { confirm.what = null; return true; }
+            confirm.what = what; confirm.at = Date.now() + 5000;
+            busy = ask_;
+            setTimeout(() => { if (busy === ask_) { busy = null; render(); } }, 5000);
+            render();
+            return false;
+        }
+        ui.onClick('BTN_SIGNIN', () => {
+            if (st && st.account && !(st.page && st.page.open) && !confirmed('signin', 'Signed in: press "Sign in" again to sign in anew')) return;
+            return command('signin-open', 'Opening the sign-in page...');
+        });
+        ui.onClick('BTN_SIGNOUT', () => {
+            if (!(st && st.account)) return;
+            if (!confirmed('signout', 'Press "Sign out" again to sign out')) return;
+            return command('signout', 'Signing out...');
+        });
         ui.onClick('BTN_SHOW', () => { mirror.wantAgain(); sync(); return render(); });
         ui.onClick('BTN_STOP', () => command('playstate', 'Stopping...', { command: 'Stop' }));
 
@@ -199,8 +217,32 @@ mgu.run({
             hintText: 'Touch the picture or use the iDrive controller for the controls', overlay: () => filmOverlay(),
             onTouch: (phase, x, y, pl) => { if (pl && controls.touch(phase, x, y, pl, barInfo())) mirror.tick(); },
             onCcu: (c) => { const r = controls.ccu(c); mirror.tick(); return r; },
+            onShown: (on) => pageTouch(!on),
             idleText: 'the player is not running', hiddenText: 'hidden: press "Show picture" to show it again',
             statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
+        // The app's page is drawn by the kit on its own connection to mgu-render, which claims the page and its bar for
+        // touch. 0.3.0 in the car: with the film over it, a touch went to the page underneath (its Sign in / Sign out
+        // pressed, unseen), not to the film's controls. While the film shows, the page claims nothing.
+        const disp = ctx.display;
+        let pageClaims = true;
+        if (disp && typeof disp._claimTabs === 'function') {
+            const claimTabs = disp._claimTabs.bind(disp);
+            disp._claimTabs = (rects, r) => {
+                if (pageClaims) return claimTabs(rects, r);
+                disp.tabs = [];
+                if (disp.gpu && disp.gpu.claim) disp.gpu.claim([]);
+                return undefined;
+            };
+        }
+        function pageTouch(on) {
+            if (on === pageClaims) return;
+            pageClaims = on;
+            log.info('emby: the page ' + (on ? 'takes touch again' : 'lets go of touch while the film shows'));
+            try {
+                if (!on) { if (disp && disp.gpu && disp.gpu.claim) disp.gpu.claim([]); }
+                else if (disp) { disp.lastWords = null; if (disp._repaint) disp._repaint(); }
+            } catch (e) { log.warn('emby page touch: ' + e); }
+        }
         const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
         // setting "Picture only while parked" (on by default): off, the picture stays while driving too (the
         // passengers' choice, e.g. cartoons for the children; the driver sees the centre screen)

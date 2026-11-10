@@ -83,8 +83,9 @@ function fakeEmby(opts) {
                 }, o.streamDelay || 0);
             }
             // the server's logs (an administrator's): the newest transcode log says why the stream does not come
-            if (p === '/System/Logs') return json(200, [{ Name: 'embyserver.txt', DateModified: '2026-11-09T12:00:00Z' },
+            if (p === '/System/Logs') return json(200, [{ Name: 'embyserver.txt', DateModified: '2026-11-09T12:00:00Z' }, { Name: 'embyserver-63904.txt', DateModified: '2026-11-01T12:00:00Z' },
                 { Name: 'ffmpeg-transcode-old.txt', DateModified: '2026-11-09T11:00:00Z' }, { Name: 'ffmpeg-transcode-new.txt', DateModified: '2026-11-09T12:37:41Z' }]);
+            if (p === '/System/Logs/embyserver.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('2026-11-10 07:11:37.1 Info Server: http/1.1 POST /Sessions/sess-car/Command. UserAgent: Emby/2.2.59\n2026-11-10 07:11:37.2 Info SessionManager: something else\n'); }
             if (p === '/System/Logs/ffmpeg-transcode-new.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ffmpeg version 6\nStream #0:0: Video: hevc (Main 10), dovi\n[hevc] Error parsing NAL\nConversion failed!\n'); }
             if (p === '/Videos/film2/ms2/Subtitles/2/0/Stream.srt') {
                 seen.subs = (seen.subs || 0) + 1;
@@ -270,7 +271,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.3.0');
+        assert.strictEqual(s.version, '0.3.1');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -505,6 +506,16 @@ test('the app\'s controls: play / pause, a seek to a position, stop', async () =
         assert.strictEqual(srv.seen.streams[1].query.StartTimeTicks, '3125000000');
         await ask(svc.sock, 'playstate', { command: 'Stop' });
         await until(() => reports('/Sessions/Playing/Stopped').length, 3000, 'stopped from the app');
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('a command with no film after it: what the server\'s log says about our session', async () => {
+    const srv = await fakeEmby({ seconds: 60 });
+    const svc = await signedIn(srv);
+    try {
+        srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetVolume', Arguments: { Volume: '50' } } });
+        const s = await statusUntil(svc.sock, (x) => (x.log || []).some((l) => /server log: .*Sessions\/sess-car\/Command/.test(l)), 8000, 'the server log in ours');
+        assert.ok(!(s.log || []).some((l) => /something else/.test(l)), 'only the lines about our session');
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 

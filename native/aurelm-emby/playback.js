@@ -132,10 +132,18 @@ function createPlayback(o) {
     /** the newest transcode log of the server, its error lines (or its last ones); null when there is none to read
      *  (the logs are an administrator's: another account gets a sentence saying so) */
     async function serverLog() {
+        const lines = await serverLogLines(/transcode/i);
+        if (!Array.isArray(lines)) return lines;
+        const bad = lines.filter((l) => /error|fail|invalid|unsupported|not supported|could not|cannot|impossible|no such|conversion/i.test(l));
+        return (bad.length ? bad.slice(-4) : lines.slice(-3)).map((l) => l.slice(0, 300)).join('\n');
+    }
+    /** the lines of the server's newest log whose name matches; a sentence when they cannot be read (an
+     *  administrator's), null when there is none */
+    async function serverLogLines(nameRe) {
         let list;
         try { list = await api('GET', 'System/Logs'); }
         catch (e) { return e.code === 'EAUTH' ? 'its log needs an administrator account to be read from here' : null; }
-        const items = (Array.isArray(list) ? list : (list && list.Items) || []).filter((x) => x && /transcode/i.test(x.Name || ''));
+        const items = (Array.isArray(list) ? list : (list && list.Items) || []).filter((x) => x && nameRe.test(x.Name || ''));
         items.sort((a, b) => Date.parse(b.DateModified || 0) - Date.parse(a.DateModified || 0));
         if (!items[0] || !o.apiText) return null;
         let r = null;
@@ -144,10 +152,16 @@ function createPlayback(o) {
             if (r && r.status === 200 && r.text) break;
             r = null;
         }
-        if (!r) return null;
-        const lines = r.text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-        const bad = lines.filter((l) => /error|fail|invalid|unsupported|not supported|could not|cannot|impossible|no such|conversion/i.test(l));
-        return (bad.length ? bad.slice(-4) : lines.slice(-3)).map((l) => l.slice(0, 300)).join('\n');
+        return r ? r.text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : null;
+    }
+    /** a command came and no film followed (cast during a film on the phone, 0.3.0): what the server's own log says
+     *  about our session in the last minute, in our log */
+    async function castLog(sessionId) {
+        const lines = await serverLogLines(/^embyserver/i);
+        if (!Array.isArray(lines)) { if (lines) log('server log: ' + lines); return; }
+        const ours = lines.slice(-400).filter((l) => (sessionId && l.indexOf(sessionId) >= 0) || /BMW iDrive|PlayMediaSource|\/Playing|Sessions\/[0-9a-f]+\/(Command|Playing)/i.test(l)).slice(-6);
+        if (!ours.length) log('server log: nothing about this session');
+        ours.forEach((l) => log('server log: ' + l.slice(0, 260)));
     }
 
     function status() {
@@ -490,7 +504,7 @@ function createPlayback(o) {
 
     function stop() { finish('stopped'); set('idle'); }
 
-    return { play, playstate, command, onPlayer, stop, status, position: () => position() };
+    return { play, playstate, command, onPlayer, stop, status, castLog, position: () => position() };
 }
 
 module.exports = { createPlayback, deviceProfile, setParam, describeUrl, parseSrt, ascii, TICKS };

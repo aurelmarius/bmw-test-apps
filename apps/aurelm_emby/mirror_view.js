@@ -104,6 +104,8 @@ function createMirrorView(o) {
         gpu.show(want);
         if (want) { shownAt = now(); rec = null; frame(); }
         log.info('mirror: ' + (want ? 'shown' : 'hidden'));
+        // Emby: the app's page (the kit's own connection) lets go of its touch areas while the picture is up
+        if (o.onShown) { try { o.onShown(want); } catch (e) { log.warn('mirror onShown: ' + e); } }
     }
 
     /** s: { rx (the service's status.rx), pageVisible, driving } */
@@ -132,6 +134,8 @@ function createMirrorView(o) {
         }
         apply(want);
         if (shown && (now() - lastFrame >= KEEPALIVE_MS || (hinted && now() - shownAt >= HINT_MS))) frame();
+        // Emby: our touch area again each second while shown (the renderer gives a touch to the latest claim)
+        if (shown && o.onTouch && gpu.placement) gpu.claim([{ x: 0, y: 0, w: gpu.placement.w, h: gpu.placement.h }]);
     }
 
     function wantAgain() { userHid = false; }

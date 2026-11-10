@@ -729,7 +729,9 @@ int main() {
         g_quit = true;
         ctl.detach();
         g_mgvf.close();
-        return 2;
+        fflush(stdout);
+        fflush(stderr);
+        _exit(2);
     }
     for (unsigned i = 0; i < fmt->nb_streams; i++) {
         const AVCodecParameters *cp = fmt->streams[i]->codecpar;
@@ -811,8 +813,12 @@ int main() {
     tt.join();
     ctl.detach();   /* blocked in a read of fd 3: the exit ends it */
     avformat_close_input(&fmt);
-    g_left = 0;
     if (io) { av_freep(&io->buffer); avio_context_free(&io); }
     g_mgvf.close();
-    return 0;
+    /* gone without the libraries' global destructors: 0.3.0 in the car had a player told to end still there after
+     * 6 s, its threads done (the watchdog had stood down at g_left 0, before main returned into the GPU libraries'
+     * exit handlers). The watchdog keeps watching until here. */
+    fflush(stdout);
+    fflush(stderr);
+    _exit(0);
 }
