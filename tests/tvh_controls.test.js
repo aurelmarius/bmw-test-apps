@@ -196,6 +196,22 @@ test('the app: CH+ / CH- go round the list', () => {
     assert.strictEqual(neighbour([], 'a', 1), null);
 });
 
+test("the guide's times in the car's zone (the head unit keeps UTC): Romania by default, EU summer time", () => {
+    const c = require(path.join(__dirname, '..', 'apps', 'aurelm_tvh', 'controls'));
+    const at = (y, mo, d, h, mi) => Date.UTC(y, mo, d, h, mi) / 1000;
+    c.setZone(() => 'eet');
+    assert.strictEqual(c.hm(at(2026, 10, 11, 16, 0)), '18:00', 'winter: UTC+2 (0.1.6 in the car showed 16:00)');
+    assert.strictEqual(c.hm(at(2026, 6, 1, 16, 0)), '19:00', 'summer: UTC+3');
+    assert.strictEqual(c.when(at(2026, 10, 11, 22, 30), at(2026, 10, 11, 16, 0) * 1000), 'Thu 00:30', 'past midnight in the zone: the next day');
+    c.setZone(() => 'cet');
+    assert.strictEqual(c.hm(at(2026, 2, 29, 0, 59)), '01:59');
+    assert.strictEqual(c.hm(at(2026, 2, 29, 1, 0)), '03:00', 'summer time from the last Sunday of March, 01:00 UTC');
+    assert.strictEqual(c.hm(at(2026, 9, 25, 1, 0)), '02:00', 'back on the last Sunday of October');
+    c.setZone(() => 'utc');
+    assert.strictEqual(c.hm(at(2026, 6, 1, 16, 0)), '16:00');
+    c.setZone(() => 'eet');
+});
+
 let failed = 0;
 for (const t of tests) {
     try { t.f(); console.log('ok   ' + t.n); } catch (e) { failed++; console.log('FAIL ' + t.n + '\n     ' + (e && e.stack || e)); }

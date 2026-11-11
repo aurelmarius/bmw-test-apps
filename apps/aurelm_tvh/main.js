@@ -34,7 +34,7 @@ const Parked = require('./kit/parked');
 const qrcode = require('./qrcode');
 const { RenderClient } = require('./mgu_render_client');
 const { createMirrorView } = require('./mirror_view');
-const { createControls, videoRect, hm, when } = require('./controls');
+const { createControls, videoRect, hm, when, setZone } = require('./controls');
 const { createCarAudio } = require('./car_audio');
 const { createLogos, BOX: LOGO } = require('./logos');
 const png = require('./kit/png');
@@ -349,6 +349,7 @@ mgu.run({
             } catch (e) { log.warn('tvh page: ' + e); }
         }
         const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
+        setZone(() => ctx.settings.get('tz') || 'eet');
         const parkedOnly = () => ctx.settings.get('parkedOnly') !== false;
         /** the player as the mirror view knows a receiver: running, its decoder, pictures shown */
         function rxOf(s) {
