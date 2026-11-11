@@ -27,7 +27,7 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const mgu = require('./kit/mgu');
-const { withAlpha } = require('./kit/canvas');
+const { withAlpha, Canvas } = require('./kit/canvas');
 const G = require('./kit/gauges');
 const record = require('./kit/record');
 const Parked = require('./kit/parked');
@@ -38,6 +38,7 @@ const { createControls, videoRect, hm, when, setZone } = require('./controls');
 const { createCarAudio } = require('./car_audio');
 const { createLogos, BOX: LOGO } = require('./logos');
 const png = require('./kit/png');
+const { createClusterCard } = require('./cluster_card');
 
 const W = 1600, H = 520;
 const SOCK = process.env.TVH_SOCK || '/run/aurelm-tvh.sock';
@@ -123,6 +124,9 @@ function steps(s) {
     const pb = s.playback;
     if (pb && (channelOn(pb) || pb.state === 'error')) playRows(s, rows);
     else rows.push({ label: 'Playing', state: 'off', detail: 'nothing: press "Watch"' });
+    // the card on the instrument cluster (cluster_card.js, through cluster-render)
+    const cl = s.cluster;
+    if (cl) rows.push({ label: 'Cluster', state: cl.state === 'shown' ? 'ok' : cl.state === 'error' ? 'bad' : cl.state === 'off' || cl.state === 'missing' ? 'off' : 'wait', detail: cl.detail });
     return rows;
 }
 
@@ -426,6 +430,22 @@ mgu.run({
         }
         setInterval(() => { if (mirror.state().shown) mirror.tick(); }, 200);
 
+        /* ---------- the channel on the instrument cluster: a card over the media widget (cluster_card.js) ---------- */
+        const offsetOf = (k) => { const v = Number(ctx.settings.get(k)); return isFinite(v) ? Math.max(-160, Math.min(160, v)) : 0; };
+        const card = createClusterCard({ log, ask, png, hm, Canvas,
+            enabled: () => ctx.settings.get('cluster') !== false,
+            offset: () => ({ dx: offsetOf('clusterX'), dy: offsetOf('clusterY') }),
+            hmKey: () => ctx.settings.get('tz') || '',
+            info: () => {
+                const pb = st && st.playback;
+                if (!channelOn(pb) || !pb.channel) return null;
+                const uuid = pb.channel.uuid, e = chans.epg[uuid] || {};
+                const g = guideOf(uuid), now = Date.now() / 1000;
+                const next = g && g.events ? g.events.filter((x) => x.start >= (e.stop || now))[0] || null : null;
+                return { uuid, name: chName(pb.channel), title: e.title || '', start: e.start, stop: e.stop, next: next ? { start: next.start, title: next.title } : null };
+            } });
+        setInterval(() => { try { card.update(); } catch (e) { log.warn('cluster: ' + (e && e.stack || e)); } }, 1000);
+
         let soundUntil = 0;
         function sync() {
             const pb = st && st.playback;
@@ -437,7 +457,7 @@ mgu.run({
             if (on) soundUntil = Date.now() + 5000;
             carAudio.want(on || Date.now() < soundUntil);
         }
-        if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => { mirror.close(); carAudio.want(false); ask('stop'); });
+        if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => { card.close(); mirror.close(); carAudio.want(false); ask('stop'); });
 
         /* ---------- the page: TV (the channels, the selected one's programme) and Status (the diagnosis) ---------- */
         let tab = 0;                 // 0 TV, 1 Status
@@ -549,7 +569,7 @@ mgu.run({
                 : pb && pb.state === 'loading' && pb.retrySince ? { text: 'RECONNECTING', color: 'accent' } : pb && pb.state === 'buffering' ? { text: 'BUFFERING' }
                 : pb && channelOn(pb) ? { text: pb.state === 'playing' ? 'LIVE ' + (QUALITY[pb.profile] || pb.profile || '') : 'TUNING', color: 'cold' } : null;
             G.frame(cv, t, ['TV', 'Status'], tab, [busy && { text: busy, color: 'accent' }, page && { text: 'SIGN-IN ' + Math.ceil((page.left || 0) / 60) + ' MIN' }, live]);
-            if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); st.logoStats = logos.stats(); }
+            if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); st.logoStats = logos.stats(); st.cluster = card.state(); }
             if (tab === 1) drawStatus(cv, t, page); else drawTv(cv, t, page);
             return ui.image('MAIN_GFX', cv);
         }
