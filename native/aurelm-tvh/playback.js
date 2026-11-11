@@ -17,14 +17,27 @@
  * "lower the quality by itself" on, the stream running dry (the player "buffering") twice within a minute, or for 8 s
  * at once, goes on with the next profile down (a new stream of the same channel); 5 minutes without running dry, one
  * back up, never above the setting; 30 s at least between two steps. A profile the server does not have is passed
- * over. A stream that ends or breaks (live TV never ends) is opened again, 3 times, 2 s apart.
+ * over.
+ *
+ * Reconnecting (0.1.6 in the car: through a weak LTE area the stream froze, "Tuning..." and the player was gone: 3
+ * tries 2 s apart were over before the signal came back). A stream that breaks, ends, or brings nothing for 10 s (a
+ * connection LTE dropped without closing it: 15 s for its first bytes) is opened again for 2 minutes from the break,
+ * 1, 2, 4, 8, then every 10 s; with "lower the quality" on, a stream that had played comes back one profile down (the
+ * ladder takes it up again after 5 clean minutes). The status says since when (`retrySince`) and the next try
+ * (`retryAt`); after 2 minutes, an error with `lost: true` (the app keeps its screen, a press tries again). What
+ * trying again does not mend is said at once (refused, no channel or profile); no free tuner (503) and a player that
+ * crashed are tried 3 times.
  */
 const LADDER = ['mgu-hd', 'mgu-sd', 'mgu-low'];
 const STALL_WINDOW_MS = 60000;
 const STALLS = 2;
 const STALL_LONG_MS = 8000;
 const SWITCH_COOLDOWN_MS = 30000;
-const RETRIES = 3;
+const RETRIES = 3;                 // no free tuner (503), the player crashed
+const OUTAGE_MS = 120000;          // the connection: tried for this long from the break
+const BACKOFF = [1000, 2000, 4000, 8000, 10000];
+const DATA_MS = 10000;             // nothing from the server for this long: the connection is gone
+const FIRST_DATA_MS = 15000;       // ... before its first bytes (the server tunes and starts transcoding)
 
 /** the kit's fonts have ASCII only: Romanian and other accented letters as ASCII (ș -> s) */
 const ASCII = { 'ș': 's', 'ş': 's', 'Ș': 'S', 'Ş': 'S', 'ț': 't', 'ţ': 't', 'Ț': 'T', 'Ţ': 'T', '„': '"', '“': '"', '”': '"', '«': '"', '»': '"',
@@ -47,13 +60,16 @@ function createPlayback(o) {
     const log = o.log || (() => {});
     const now = o.now || Date.now;
     const tvh = o.tvh, sink = o.sink;
-    const retryMs = o.retryMs != null ? o.retryMs : 2000;
+    const retryMs = o.retryMs != null ? o.retryMs : null;   // tests: one wait instead of the backoff
+    const outageMs = o.outageMs || OUTAGE_MS;
+    const dataMs = o.dataMs || DATA_MS, firstDataMs = o.firstDataMs || Math.max(FIRST_DATA_MS, o.dataMs || 0);
     const upAfterMs = o.adaptUpMs || 300000;
     const prefs = { profile: 'mgu-hd', adaptive: true, subs: true };
     let cur = null, ids = 0;
-    const st = { state: 'idle', phase: null, phaseAt: null, error: null, at: now() };
+    const st = { state: 'idle', phase: null, phaseAt: null, error: null, at: now(), retrySince: null, retryAt: null, lost: false };
 
-    function set(state, error) { st.state = state; st.error = error || null; st.at = now(); if (state !== 'loading') st.phase = null; }
+    function set(state, error) { st.state = state; st.error = error || null; st.at = now(); st.lost = false; if (state !== 'loading') st.phase = null; }
+    function recovered(c) { c.outageSince = 0; c.outageStepped = false; c.tries = 0; c.busy = 0; c.crashes = 0; st.retrySince = null; st.retryAt = null; }
     function phase(p) { st.phase = p; st.phaseAt = now(); }
 
     function ladder() { const l = ladderFor(prefs.profile, o.profiles ? o.profiles() : null); return l.length ? l : [prefs.profile]; }
@@ -61,7 +77,7 @@ function createPlayback(o) {
     /* ---------- the stream ---------- */
     async function open(c, why) {
         const id = ++ids;
-        c.id = id; c.stream = null; c.player = { state: 'starting', fields: 0, interlaced: false };
+        c.id = id; c.stream = null; c.player = { state: 'starting', fields: 0, interlaced: false }; c.played = false;
         c.openedAt = now();
         set('loading'); phase('stream');
         log('stream ' + id + ': ' + c.ch.name + ' with ' + c.profile + (why ? ' (' + why + ')' : ''));
@@ -75,7 +91,8 @@ function createPlayback(o) {
                 : r.status === 404 ? 'the server has no such channel, or no profile "' + c.profile + '"'
                     : r.status === 503 ? 'no free tuner for this channel (503)' : 'HTTP ' + r.status;
             log('stream ' + id + ': ' + why2);
-            if (r.status === 503 || r.status >= 500) return broke(c, id, why2);
+            if (r.status === 503) return broke(c, id, why2, 'busy');
+            if (r.status >= 500) return broke(c, id, why2);
             return fail(c, why2);
         }
         c.stream = r;
@@ -84,11 +101,24 @@ function createPlayback(o) {
         sink.start(id);
         if (!prefs.subs) sink.ctl(id, 'subs off');   // the player lays the channel's DVB subtitles over the picture unless told
         const res = r.res;
+        c.lastData = now(); c.gotData = false; c.held = false;
         res.on('data', (d) => {
             if (cur !== c || c.id !== id) return;
             c.bytes += d.length;
-            if (!sink.data(id, d)) { res.pause(); sink.drain(id, () => { if (cur === c && c.id === id) res.resume(); }); }
+            c.lastData = now(); c.gotData = true;
+            if (!sink.data(id, d)) {
+                // held back by the player's pipe, not by the server: the watch below waits
+                res.pause(); c.held = true;
+                sink.drain(id, () => { if (cur === c && c.id === id) { c.held = false; c.lastData = now(); res.resume(); } });
+            }
         });
+        // a connection the network dropped without closing it brings nothing: closed and opened again
+        c.watch = setInterval(() => {
+            if (cur !== c || c.id !== id) return;
+            if (c.held) { c.lastData = now(); return; }
+            const lim = c.gotData ? dataMs : firstDataMs;
+            if (now() - c.lastData >= lim) ended('nothing from the server for ' + Math.round(lim / 1000) + ' s');
+        }, Math.min(1000, Math.max(50, Math.round(dataMs / 4))));
         const ended = (what) => {
             if (cur !== c || c.id !== id || c.closing) return;
             sink.end(id);
@@ -98,24 +128,46 @@ function createPlayback(o) {
         res.on('error', (e) => ended('the stream broke: ' + e.message));
         res.on('aborted', () => ended('the server closed the stream'));
     }
-    /** a stream that could not open or broke: opened again (3 times), then an error */
-    function broke(c, id, why) {
+    /** a stream that could not open or broke: opened again for 2 minutes from the break (kind 'busy': no free tuner,
+     *  'player': the player crashed, each 3 times), then an error */
+    function broke(c, id, why, kind) {
         if (cur !== c || c.id !== id) return;
+        const played = c.played;
         close(c);
-        if (c.tries >= RETRIES) return fail(c, why);
+        const t = now();
+        if (!c.outageSince) { c.outageSince = t; c.tries = 0; c.busy = 0; c.crashes = 0; c.outageStepped = false; }
+        if (kind === 'busy' && ++c.busy > RETRIES) return fail(c, why);
+        if (kind === 'player' && ++c.crashes > RETRIES) return fail(c, why);
+        if (t - c.outageSince >= outageMs) {
+            log('stream ' + id + ': ' + why + '; given up after ' + Math.round((t - c.outageSince) / 1000) + ' s');
+            return fail(c, 'no connection to the server for ' + Math.round((t - c.outageSince) / 60000 * 10) / 10 + ' min (' + why + ')', true);
+        }
+        // the internet went away under a stream that played: it comes back a profile lower (once a break)
+        if (!kind && played && prefs.adaptive && !c.outageStepped) {
+            const l = ladder(), i = l.indexOf(c.profile), down = i >= 0 && i + 1 < l.length ? l[i + 1] : null;
+            if (down) {
+                log('quality: ' + c.profile + ' -> ' + down + ' (the stream broke)');
+                c.profile = down; c.switchedAt = t; c.cleanSince = t; c.stalls = []; c.stallSince = 0;
+            }
+            c.outageStepped = true;
+        }
+        const wait = retryMs != null ? retryMs : BACKOFF[Math.min(c.tries, BACKOFF.length - 1)];
         c.tries++;
         c.reconnects++;
-        log('stream ' + id + ': ' + why + '; again in ' + retryMs / 1000 + ' s (' + c.tries + '/' + RETRIES + ')');
+        log('stream ' + id + ': ' + why + '; again in ' + wait / 1000 + ' s (try ' + c.tries + ', ' + Math.round((t - c.outageSince) / 1000) + ' s since the break)');
         set('loading'); phase('retry'); st.error = why;
-        setTimeout(() => { if (cur === c && !c.closing) open(c, 'again: ' + why); }, retryMs);
+        st.retrySince = c.outageSince; st.retryAt = t + wait;
+        c.retry = setTimeout(() => { c.retry = null; if (cur === c && !c.closing) open(c, 'again: ' + why); }, wait);
     }
-    function fail(c, why) {
+    function fail(c, why, lost) {
         if (cur !== c) return;
         close(c);
         set('error', why);
+        st.lost = !!lost; st.retrySince = null; st.retryAt = null;
     }
     /** the stream and its player end (the stream id is left: its bytes still in the pipe are dropped) */
     function close(c) {
+        if (c.watch) { clearInterval(c.watch); c.watch = null; }
         if (c.stream) { try { c.stream.abort(); } catch (e) { /* gone */ } c.stream = null; }
         if (c.id) sink.stop(c.id);
         c.id = 0;   // its player's last events (its exit) are no longer ours
@@ -141,7 +193,7 @@ function createPlayback(o) {
     }
     function step(c, profile, why) {
         log('quality: ' + c.profile + ' -> ' + profile + ' (' + why + ')');
-        c.profile = profile; c.switchedAt = now(); c.cleanSince = now(); c.stalls = []; c.stallSince = 0; c.tries = 0;
+        c.profile = profile; c.switchedAt = now(); c.cleanSince = now(); c.stalls = []; c.stallSince = 0;
         close(c);
         open(c, why);
     }
@@ -168,7 +220,8 @@ function createPlayback(o) {
     /* ---------- what plays ---------- */
     function play(ch) {
         if (!ch || !ch.uuid) return;
-        if (cur) { cur.closing = true; close(cur); }
+        if (cur) { cur.closing = true; if (cur.retry) clearTimeout(cur.retry); close(cur); }
+        st.retrySince = null; st.retryAt = null;
         const l = ladder();
         const c = { ch: { uuid: ch.uuid, name: ascii(ch.name), number: ch.number != null ? ch.number : null }, profile: l[0], tries: 0, reconnects: 0,
             stalls: [], stallSince: 0, cleanSince: now(), switchedAt: 0, lastState: null, startedAt: now(), id: 0 };
@@ -178,7 +231,8 @@ function createPlayback(o) {
     function stop() {
         const c = cur;
         cur = null;
-        if (c) { c.closing = true; close(c); log('stopped ' + c.ch.name); }
+        if (c) { c.closing = true; if (c.retry) clearTimeout(c.retry); close(c); log('stopped ' + c.ch.name); }
+        st.retrySince = null; st.retryAt = null;
         set('idle');
     }
 
@@ -197,7 +251,7 @@ function createPlayback(o) {
             if (ev.fields > 0) c.player.interlaced = true;
             if (s === 'playing' || s === 'buffering') {
                 if (st.state !== s) set(s);
-                if (s === 'playing') c.tries = 0;
+                if (s === 'playing') { c.played = true; if (c.outageSince) { log('stream ' + id + ': playing again after ' + Math.round((now() - c.outageSince) / 1000) + ' s'); } recovered(c); }
                 adapt(c, s);
             }
         } else if (ev.ev === 'end' || ev.ev === 'exit') {
@@ -205,7 +259,7 @@ function createPlayback(o) {
             if (c.closing) return;
             const why = c.player.error || (ev.ev === 'exit' ? 'the player ended (' + (ev.signal || 'code ' + ev.code) + ')' : 'the player ended');
             if (c.player.error) return fail(c, why);
-            if (ev.ev === 'exit') broke(c, id, why);
+            if (ev.ev === 'exit') broke(c, id, why, 'player');
         }
     }
 

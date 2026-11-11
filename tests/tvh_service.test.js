@@ -119,6 +119,7 @@ function fakeTvh(opts) {
             seen.streams.push(s);
             if (o.missing && o.missing.indexOf(q.profile) >= 0) { res.writeHead(404); return res.end(); }
             if (o.busy) { res.writeHead(503); return res.end(); }
+            if (o.down) { res.socket.destroy(); return undefined; }   // no internet: the connection goes
             res.writeHead(200, { 'Content-Type': 'video/mp2t' });
             // live: the fixture's bytes at the stream's pace (or o.media), then on and on, until the client leaves
             const media = o.media || fs.readFileSync(path.join(FIXTURES, 'tvh_sample.ts'));
@@ -126,6 +127,7 @@ function fakeTvh(opts) {
             const chunk = o.chunk || 188 * 40;
             const t = setInterval(() => {
                 if (o.breakAfter && s.bytes >= o.breakAfter && !s.broke) { s.broke = true; clearInterval(t); res.socket.destroy(); return; }
+                if (o.stallAfter && s.bytes >= o.stallAfter && !s.stalled) { s.stalled = true; clearInterval(t); return; }   // open, silent
                 const part = media.slice(i % media.length, (i % media.length) + chunk);
                 i += part.length;
                 s.bytes += part.length;
@@ -339,6 +341,33 @@ test('service: a broken stream is opened again; a missing channel or profile is 
         await ask(s.sock, { cmd: 'play', uuid: CH[0].uuid });
         const p = await until(() => { const x = s.svc.status().playback; return x && x.state === 'error' && x; }, 5000, 'error');
         assert.ok(/no profile "mgu-hd"/.test(p.error), p.error);
+    } finally { s.close(); srv.close(); }
+});
+
+test('service: a connection that goes silent is opened again, a profile lower; the server away for longer than the outage: lost, then played again', async () => {
+    const srv = await fakeTvh({ stallAfter: 188 * 400 });
+    const s = await signedIn(srv, { childEnv: { TVH_STREAM_DATA_MS: '1000', TVH_OUTAGE_MS: '2500' } });
+    try {
+        await ask(s.sock, { cmd: 'play', uuid: CH[0].uuid });
+        await until(() => srv.seen.streams.length >= 2, 10000, 'opened again after 1 s of silence');
+        srv.set('stallAfter', 0);
+        const p = await until(() => { const x = s.svc.status().playback; return x && x.state === 'playing' && x.reconnects >= 1 && x; }, 10000, 'playing again');
+        assert.strictEqual(srv.seen.streams[0].profile, 'mgu-hd');
+        assert.strictEqual(srv.seen.streams[1].profile, 'mgu-sd', 'back a profile lower');
+        assert.ok(p.lowered && p.retrySince === null, 'the outage over');
+        assert.ok(srv.seen.open[0].closed, 'the silent connection closed');
+        // no internet: tried for the outage (2.5 s here), then lost
+        srv.set('down', true);
+        srv.set('breakAfter', 1);
+        await until(() => { const x = s.svc.status().playback; return x && x.state === 'loading' && x.phase === 'retry' && x.retrySince; }, 5000, 'reconnecting');
+        const n0 = srv.seen.streams.length;
+        const lost = await until(() => { const x = s.svc.status().playback; return x && x.state === 'error' && x; }, 10000, 'lost');
+        assert.ok(lost.lost && /no connection to the server/.test(lost.error), lost.error);
+        assert.ok(srv.seen.streams.length - n0 >= 3, 'tried again and again: ' + (srv.seen.streams.length - n0));
+        // back: the app's press plays it again
+        srv.set('down', false); srv.set('breakAfter', 0);
+        await ask(s.sock, { cmd: 'play', uuid: CH[0].uuid });
+        await until(() => { const x = s.svc.status().playback; return x && x.state === 'playing' && !x.lost; }, 10000, 'played again');
     } finally { s.close(); srv.close(); }
 });
 
