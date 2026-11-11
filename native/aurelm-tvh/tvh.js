@@ -98,6 +98,25 @@ function parsePlaylist(text) {
     return out;
 }
 
+/** what a browser sends for a picture: some sites answer other clients differently (or not at all) */
+const BROWSER = {
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+    // PNG asked for by name (image/* or image/webp would let a CDN send WebP, which the head unit cannot draw)
+    Accept: 'image/png,*/*;q=0.5',
+};
+/** github.com/<owner>/<repo>/blob/<ref>/<path> (a web page) -> raw.githubusercontent.com/<owner>/<repo>/<ref>/<path> (the file) */
+function githubRaw(u) {
+    const m = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:blob|raw)\/(.+?)(\?.*)?$/i.exec(u);
+    return m ? 'https://raw.githubusercontent.com/' + m[1] + '/' + m[2] + '/' + m[3] : u;
+}
+/** "static.wikia.nocookie.net/...Pro_TV_HD.png" (the site and the address's end, for the Status tab) */
+function shortUrl(u) {
+    const m = /^https?:\/\/([^/?#]+)([^?#]*)/i.exec(u);
+    if (!m) return String(u).slice(0, 60);
+    const tail = m[2].length > 34 ? '...' + m[2].slice(-34) : m[2];
+    return m[1] + tail;
+}
+
 const byNumber = (a, b) => (a.number == null) - (b.number == null) || (a.number || 0) - (b.number || 0) || String(a.name).localeCompare(String(b.name));
 
 function createTvh(o) {
@@ -248,13 +267,27 @@ function createTvh(o) {
     async function logo(icon) {
         const s = String(icon || '').trim();
         if (!s) throw new Error('no logo');
-        await prime();
         let r;
         const own = acc.server + '/';
-        if (/^https?:\/\//i.test(s) && s.indexOf(own) !== 0) r = await nx.request({ url: s, maxBytes: 512 * 1024, timeoutMs: 15000 });
+        let where = 'logo';
+        if (/^https?:\/\//i.test(s) && s.indexOf(own) !== 0) {
+            // another site's logo (the server's image cache off: Tvheadend gives the channel's own address). 0.1.2 in the
+            // car: HTTP 404 from it, while the iPhone's apps had the same logos; and with the cache on, Tvheadend's own
+            // fetch failed too. So asked for as a browser asks (its User-Agent, images accepted), redirects followed, and a
+            // GitHub page's address (github.com/.../blob/...) taken as the picture's (raw.githubusercontent.com).
+            let u = githubRaw(s);
+            for (let hop = 0; ; hop++) {
+                where = 'logo ' + shortUrl(u);
+                r = await nx.request({ url: u, headers: BROWSER, maxBytes: 512 * 1024, timeoutMs: 15000 });
+                const loc = r.headers && r.headers.location;
+                if (r.status >= 300 && r.status < 400 && loc && hop < 3) { u = require('url').resolve(u, loc); continue; }
+                break;
+            }
+        }
         else {
             const p = s.indexOf(own) === 0 ? s.slice(own.length) : s.replace(/^\/+/, '');
             if (!/^imagecache\/\d+$/.test(p)) throw new Error('not a logo the car can fetch: ' + s.slice(0, 60));
+            await prime();   // the server's image cache answers the user (another site's logo needs no challenge)
             const get = () => send(acc, 'GET', p, { maxBytes: 512 * 1024, timeoutMs: 15000 });
             r = await get();
             // 0.1.1 in the car: the server's log had /imagecache/<n> -- 403 (a user given, not accepted: Tvheadend answers
@@ -267,12 +300,12 @@ function createTvh(o) {
                 r = await get();
             }
         }
-        check(r, 'logo');
-        if (r.body.toString('hex', 0, 8) !== '89504e470d0a1a0a') throw new Error('not a PNG (' + (r.headers['content-type'] || '?') + ')');
+        check(r, where);
+        if (r.body.toString('hex', 0, 8) !== '89504e470d0a1a0a') throw new Error(where + ': not a PNG (' + (r.headers['content-type'] || '?') + ')');
         return r.body;
     }
 
     return { signIn, use, info, channels, profiles, epgNow, epg, stream, logo, account: () => acc };
 }
 
-module.exports = { createTvh, candidates, challenges, pick, authorization, parsePlaylist };
+module.exports = { createTvh, candidates, challenges, pick, authorization, parsePlaylist, githubRaw, shortUrl };
