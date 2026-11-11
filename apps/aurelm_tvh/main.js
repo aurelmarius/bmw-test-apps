@@ -306,13 +306,33 @@ mgu.run({
                 return undefined;
             };
         }
+        // 0.1.0 in the car: the page was drawn OVER the picture (the picture showed only right of the header's tabs, where
+        // the page draws nothing). mgu-render stacks each connection's layer when it is put on the screen (its first
+        // show, or put back after the HMI set the screen's layers), not at each SHOW (mgu-store native/mgu-render
+        // src/main.c, layer_put): the page's layer could come back above the picture's, and a SHOW of the picture does
+        // not raise it. So while the picture is up the page's layer is hidden altogether (SHOW off; the picture covers the
+        // whole screen anyway): whatever their order, the picture shows, and the controller is the picture's alone.
+        if (disp && typeof disp._syncVisible === 'function') {
+            const syncVisible = disp._syncVisible.bind(disp);
+            disp._syncVisible = () => {
+                if (!pageClaims && disp.gpu) { disp.gpu.show(false); return undefined; }
+                return syncVisible();
+            };
+        }
         function pageTouch(on) {
             if (on === pageClaims) return;
             pageClaims = on;
+            log.info('tvh: the page ' + (on ? 'shows again' : 'is hidden while the picture shows'));
             try {
-                if (!on) { if (disp && disp.gpu && disp.gpu.claim) disp.gpu.claim([]); }
-                else if (disp) { disp.lastWords = null; if (disp._repaint) disp._repaint(); }
-            } catch (e) { log.warn('tvh page touch: ' + e); }
+                if (!on) {
+                    if (disp && disp.gpu && disp.gpu.claim) disp.gpu.claim([]);
+                    if (disp && disp.gpu && disp.gpu.show) disp.gpu.show(false);
+                } else if (disp) {
+                    if (disp._syncVisible) disp._syncVisible();
+                    disp.lastWords = null;
+                    if (disp._repaint) disp._repaint();
+                }
+            } catch (e) { log.warn('tvh page: ' + e); }
         }
         const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
         const parkedOnly = () => ctx.settings.get('parkedOnly') !== false;
