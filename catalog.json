@@ -24,7 +24,7 @@
     {
       "id": "aurelm-emby",
       "kind": "tool",
-      "version": "0.3.9",
+      "version": "0.3.10",
       "title": "Emby cast service",
       "description": "For the app Emby: the head unit as a cast target in the Emby phone app (Emby's remote control, as Kodi's Emby add-on), and the film's player: the server sends H.264 up to 1080p with AAC or AC-3, decoded on the GPU into mgu-render's frame file (the app shows it while parked) and played into SmartXbar's CarLife input. Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code); keeps only the access token. Its internet goes through mgu-uplink, as uid 13101 only; the player runs as nobody (as AirPlay Test's receiver).",
       "author": "aurelmarius",
@@ -32,10 +32,10 @@
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm-emby@0.3.9.tgz",
-        "size": 911043,
-        "sha256": "39de0ff8113ffed1b4d621c4aa0d6df587fd811480c82cc1b78392f67e3b67d7",
-        "url": "packages/aurelm-emby@0.3.9.tgz"
+        "name": "aurelm-emby@0.3.10.tgz",
+        "size": 911113,
+        "sha256": "8bee2f006300258471210be47e8e169ecb4fbb0f4b3ee680de04eacfd8a5d744",
+        "url": "packages/aurelm-emby@0.3.10.tgz"
       },
       "requires": {
         "mgu-deploy": "0.7.0",
@@ -46,7 +46,7 @@
     {
       "id": "aurelm-tvh",
       "kind": "tool",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "title": "TVH service",
       "description": "For the app TVH: Tvheadend's channels on the head unit. The channel comes with one of the server's transcoding profiles (mgu-hd, mgu-sd, mgu-low: H.264 deinterlaced by the server, AAC, MPEG-TS), is decoded on the GPU into mgu-render's frame file (the app shows it while parked) and played into SmartXbar's CarLife input. Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code); keeps the server, the user and the password (root's, 0600). Its internet goes through mgu-uplink, as uid 13103 only; the player runs as nobody.",
       "author": "aurelmarius",
@@ -54,10 +54,10 @@
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm-tvh@0.1.0.tgz",
-        "size": 902309,
-        "sha256": "0e2a2c1205ec5648e2441c23d8a117f6a5856db4009d588b409206224bd55312",
-        "url": "packages/aurelm-tvh@0.1.0.tgz"
+        "name": "aurelm-tvh@0.1.1.tgz",
+        "size": 902391,
+        "sha256": "e007eaee2414bc725773d4670dcae77a047e2c58e208833879c2ba9aaacc0815",
+        "url": "packages/aurelm-tvh@0.1.1.tgz"
       },
       "requires": {
         "mgu-deploy": "0.7.0",
