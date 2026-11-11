@@ -15,6 +15,7 @@
  *   logos.draw(rec, uuid, x, y)   draws the logo in its BOX at x, y (the tile, then the logo); false: none (yet)
  *   logos.version()               changes each time a logo arrives (a frame's key)
  *   logos.state(uuid)             'ok' | 'loading' | 'none' | undefined
+ *   logos.stats()                 { ok, loading, none, why }: how many, and the last reason one is missing (the Status tab)
  *
  * A logo that is not a PNG (JPEG, SVG), too large, or missing is 'none': the channel shows its name only.
  */
@@ -22,6 +23,7 @@ const BOX = { w: 64, h: 36 };
 const TILE = [0x22, 0x28, 0x2f];     // the tile behind a logo: transparent parts show it
 const PARALLEL = 2;
 const RETRY_MS = 10 * 60 * 1000;
+const RETRY_LOST_MS = 60 * 1000;   // the service did not answer in time (the first fetch over LTE): again sooner
 
 const hex = (r, g, b) => ((r << 24) | (g << 16) | (b << 8) | 0xff) >>> 0;
 
@@ -68,7 +70,9 @@ function createLogos(o) {
             load(uuid).then(() => { running--; pump(); }, () => { running--; pump(); });
         }
     }
+    let lastWhy = null;   // the last reason a logo is missing
     function done(uuid, e) {
+        if (e.state === 'none' && e.why) lastWhy = e.why;
         map.set(uuid, e);
         ver++;
         if (o.onChange) { try { o.onChange(uuid); } catch (x) { /* the app's */ } }
@@ -76,12 +80,13 @@ function createLogos(o) {
     async function load(uuid) {
         const r = await o.ask('logo', { uuid });
         if (!r || !r.png) {
-            log.info('tvh logo ' + uuid.slice(0, 6) + ': ' + (r ? r.why || 'none' : 'no answer'));
-            return done(uuid, { state: 'none', at: Date.now(), why: r ? r.why || 'none' : 'no service' });
+            const why = r ? r.why || 'none' : 'no answer from the service in time';
+            log.info('tvh logo ' + uuid.slice(0, 6) + ': ' + why);
+            return done(uuid, { state: 'none', at: Date.now(), why, retry: r ? RETRY_MS : RETRY_LOST_MS });
         }
         const buf = Buffer.from(r.png, 'base64');
         await new Promise((res) => png.decodeAsync(buf, (err, img) => {
-            if (err) { log.info('tvh logo ' + uuid.slice(0, 6) + ': ' + err.message); done(uuid, { state: 'none', at: Date.now(), why: err.message }); return res(); }
+            if (err) { log.info('tvh logo ' + uuid.slice(0, 6) + ': ' + err.message); done(uuid, { state: 'none', at: Date.now(), why: err.message, retry: RETRY_MS }); return res(); }
             const f = fitBox(png, img);
             done(uuid, { state: 'ok', runs: toRuns(f), w: f.w, h: f.h, at: Date.now() });
             res();
@@ -89,7 +94,7 @@ function createLogos(o) {
     }
     function want(uuid) {
         const e = map.get(uuid);
-        if (e && (e.state !== 'none' || Date.now() - e.at < RETRY_MS)) return e;
+        if (e && (e.state !== 'none' || Date.now() - e.at < (e.retry || RETRY_MS))) return e;
         map.set(uuid, { state: 'loading', at: Date.now() });
         queue.push(uuid);
         pump();
@@ -105,7 +110,12 @@ function createLogos(o) {
         for (let i = 0; i < e.runs.length; i++) { const r = e.runs[i]; rec.fillRect(ox + r[0], oy + r[1], r[2], 1, r[3]); }
         return true;
     }
-    return { draw, version: () => ver, state: (uuid) => (map.get(uuid) || {}).state, want };
+    function stats() {
+        const n = { ok: 0, loading: 0, none: 0, why: lastWhy };
+        map.forEach((e) => { n[e.state] = (n[e.state] || 0) + 1; });
+        return n;
+    }
+    return { draw, version: () => ver, state: (uuid) => (map.get(uuid) || {}).state, want, stats };
 }
 
 module.exports = { createLogos, toRuns, fitBox, BOX, TILE };

@@ -42,7 +42,7 @@ Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md), the pla
 ### 📺 TVH (`aurelm_tvh`) + TVH service (`aurelm-tvh`)
 *Tvheadend's TV channels on the centre screen, over Tvheadend's HTTP interface (as Kodi's `pvr.hts` shows them).*
 
-**Status:** 0.1.1, in the car. 0.1.0 in the car: sign-in, the channels, the logos, the guide, the page's touch and controller targets, a channel playing at 3 Mbit/s all work; the picture stayed under the page (only its top edge showed, right of the header's tabs). 0.1.1: while the picture is up, the page's layer is hidden (mgu-render stacks the layers when they are put on the screen, not at each show), so the picture shows whatever their order, and the controller is the picture's alone.
+**Status:** 0.1.2, in the car. 0.1.1 in the car: the picture over the whole screen, the controls, the channel list and the guide over it all work; no logos yet (the server's log had /imagecache/<n> -- 403). 0.1.2: the Status tab has a **Logos** row (how many shown and missing, how many channels the server gives one, and the last reason one is missing); a logo answered 403 is asked for once more with a fresh challenge; a logo's first fetch gets 20 s (5 s gave it up for 10 minutes), and one lost to a timeout is asked for again a minute later.
 
 The server **transcodes** each channel with a stream profile made for the car: H.264 **deinterlaced by the server**
 (VAAPI), AAC, MPEG-TS. A channel as the satellite sends it (`pass`: 1080i, MP2, 12 Mbit/s) is not for the car. The

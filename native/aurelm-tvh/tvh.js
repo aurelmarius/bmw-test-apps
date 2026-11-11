@@ -255,7 +255,17 @@ function createTvh(o) {
         else {
             const p = s.indexOf(own) === 0 ? s.slice(own.length) : s.replace(/^\/+/, '');
             if (!/^imagecache\/\d+$/.test(p)) throw new Error('not a logo the car can fetch: ' + s.slice(0, 60));
-            r = await send(acc, 'GET', p, { maxBytes: 512 * 1024, timeoutMs: 15000 });
+            const get = () => send(acc, 'GET', p, { maxBytes: 512 * 1024, timeoutMs: 15000 });
+            r = await get();
+            // 0.1.1 in the car: the server's log had /imagecache/<n> -- 403 (a user given, not accepted: Tvheadend answers
+            // 403, not 401, on a path anonymous may ask for), while the API answered the same client. Once more, with a
+            // challenge asked for anew (as at the start), before giving the logo up.
+            if (r.status === 403 && acc.user) {
+                log('logo ' + p + ': 403, again with a fresh challenge');
+                auth.ch = null; auth.primed = false;
+                await prime();
+                r = await get();
+            }
         }
         check(r, 'logo');
         if (r.body.toString('hex', 0, 8) !== '89504e470d0a1a0a') throw new Error('not a PNG (' + (r.headers['content-type'] || '?') + ')');
