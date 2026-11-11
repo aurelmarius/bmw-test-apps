@@ -71,17 +71,17 @@
     {
       "id": "aurelm_tvh",
       "kind": "app",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "title": "TVH",
       "description": "Tvheadend's TV channels on the centre screen: sign in once from the phone (QR code), then Watch, Channel + / -, or the channel list over the picture. The picture shows while parked, the sound plays on the car's speakers. The server transcodes (profiles mgu-hd, mgu-sd, mgu-low: H.264 deinterlaced, AAC) and the profile goes down by itself when the internet is slow. Needs the TVH service.",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_tvh@0.1.6.tgz",
-        "size": 600868,
-        "sha256": "ce4e4238b568fb1f2bcbad59c8b5d115d4385ab92dfe0f8c4eea31909043edf7",
-        "url": "packages/aurelm_tvh@0.1.6.tgz"
+        "name": "aurelm_tvh@0.1.7.tgz",
+        "size": 601688,
+        "sha256": "813eb0ab880a13fa162947f728f94461f1379cfc71464fb9c01791b988f2bdb5",
+        "url": "packages/aurelm_tvh@0.1.7.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_tvh.png",
