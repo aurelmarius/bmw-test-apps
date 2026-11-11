@@ -27,7 +27,8 @@
  *   ctl.key(info)                                // changes when the bar must be drawn again
  *   ctl.draw(rec, placement, info)               // info: { title, now: { title, start, stop }, aspect, profile, note,
  *                                                //         channels: [{ uuid, t, n (the name alone) }], current: uuid,
- *                                                //         drawLogo(rec, uuid, x, y) -> bool (64x36; false: none), logoVer }
+ *                                                //         drawLogo(rec, uuid, x, y, label) -> bool (60x36: the logo, or a plate
+ *                                                //         with label; false: nothing), logoVer }
  *   ctl.height(placement)
  */
 const BUTTONS = ['chdown', 'chup', 'list', 'epg', 'stop', 'aspect', 'exit'];
@@ -36,7 +37,7 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const TILT = { 1: 'N', 2: 'N', 4: 'E', 5: 'E', 7: 'S', 8: 'S', 10: 'W', 11: 'W' };
 const ASPECT_NAME = { fit: 'FIT', zoom: 'ZOOM', fill: 'FILL' };
 const ACCENT = 0x2f8fd8ff;
-const LOGO = { w: 64, h: 36 };   // logos.js BOX
+const LOGO = { w: 60, h: 36 };   // logos.js BOX (5:3, the server's logos)
 
 /** seconds since 1970 -> "21:05" (the head unit's local time) */
 const hm = (t) => { const d = new Date(t * 1000); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
@@ -97,7 +98,7 @@ function createControls(o) {
     }
 
     function openList() {
-        const items = (lastInfo.channels || []).map((c) => ({ i: c.uuid, t: c.t }));
+        const items = (lastInfo.channels || []).map((c) => ({ i: c.uuid, t: c.t, n: c.n }));
         if (!items.length) items.push({ i: null, t: 'No channels yet' });
         const at = Math.max(0, items.findIndex((x) => x.i === lastInfo.current));
         menu = { items, focus: at, first: Math.max(0, at - 2), cur: lastInfo.current, until: now() + MENU_MS };
@@ -265,7 +266,7 @@ function createControls(o) {
             if (on) rec.circle(r.x + r.h * 0.5, r.y + r.h / 2, r.h * 0.13, ACCENT);
             // the channel's logo before its name (a column: the names line up, logo or not)
             const lx = r.x + r.h, logos = !!lastInfo.drawLogo;
-            if (logos && it.i != null) lastInfo.drawLogo(rec, it.i, lx, Math.round(r.y + (r.h - LOGO.h) / 2));
+            if (logos && it.i != null) lastInfo.drawLogo(rec, it.i, lx, Math.round(r.y + (r.h - LOGO.h) / 2), it.n);
             const tx = logos ? lx + LOGO.w + 14 : lx;
             rec.text(fit(rec, it.t, r.x + r.w - tx - r.h * 0.3, fs), tx, r.y + r.h / 2 + fs * 0.36, fs, on ? 0xffffffff : 0xffffffc8, { font: 'bold', literal: true });
         }
@@ -303,7 +304,7 @@ function createControls(o) {
         const playing = guide.uuid === lastInfo.current;
         rec.text('<', G.prev.x + G.prev.w / 2, cy + hs * 0.36, hs, 0xffffffb0, { align: 'center', font: 'bold', literal: true });
         rec.text('>', G.next.x + G.next.w / 2, cy + hs * 0.36, hs, 0xffffffb0, { align: 'center', font: 'bold', literal: true });
-        const logo = !!(lastInfo.drawLogo && lastInfo.drawLogo(rec, guide.uuid, G.prev.x + G.prev.w, Math.round(cy - LOGO.h / 2)));
+        const logo = !!(lastInfo.drawLogo && lastInfo.drawLogo(rec, guide.uuid, G.prev.x + G.prev.w, Math.round(cy - LOGO.h / 2), ch ? ch.n || ch.t : ''));
         const nx = G.prev.x + G.prev.w + (logo ? LOGO.w + 16 : 0);
         rec.text(fit(rec, name, G.next.x - nx - 300, hs), nx, cy + hs * 0.36, hs, 0xffffffff, { font: 'bold', literal: true });
         rec.text(playing ? 'EPG - PLAYING' : 'EPG - PRESS TO WATCH', G.next.x - 10, cy + hs * 0.36, Math.round(hs * 0.62), playing ? 0xffffff80 : ACCENT,
@@ -366,7 +367,7 @@ function createControls(o) {
         const rw = right && rec.textWidth ? rec.textWidth(right, fs, { font: 'bold', literal: true }) : 0;
         const left = (i.title || '') + (n && n.title ? '  -  ' + n.title : '') + (i.note ? '  (' + i.note + ')' : '');
         // the channel's logo before its name
-        const logo = !!(i.drawLogo && i.current && i.drawLogo(rec, i.current, L.title.x, Math.round(L.title.y - fs * 0.36 - LOGO.h / 2)));
+        const logo = !!(i.drawLogo && i.current && i.drawLogo(rec, i.current, L.title.x, Math.round(L.title.y - fs * 0.36 - LOGO.h / 2), i.title));
         const tx = L.title.x + (logo ? LOGO.w + 16 : 0);
         rec.text(fit(rec, left, pl.w - L.pad - tx - rw - 30, fs), tx, L.title.y, fs, 0xffffffff, { font: 'bold', literal: true });
         if (right) rec.text(right, pl.w - L.pad, L.title.y, fs, 0xffffffc0, { align: 'right', font: 'bold', literal: true });

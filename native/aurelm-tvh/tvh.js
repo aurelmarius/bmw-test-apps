@@ -93,7 +93,9 @@ function parsePlaylist(text) {
         for (let j = i + 1; j < lines.length && !url; j++) if (lines[j] && lines[j][0] !== '#') url = lines[j].trim();
         const id = /tvg-id="([0-9a-f]{32})"/.exec(l) || /\/stream\/channel\/([0-9a-f]{32})/.exec(url);
         if (!id) continue;
-        out.push({ uuid: id[1], name, number: num && num[1] ? Number(num[1]) || null : null, icon: null, tags: [] });
+        // the logo: Tvheadend writes the channel's own address when its image cache is off (logo= or tvg-logo=)
+        const logo = /\b(?:tvg-)?logo="([^"]*)"/.exec(l) || /\blogo=(\S+?)(?:\s|,|$)/.exec(l);
+        out.push({ uuid: id[1], name, number: num && num[1] ? Number(num[1]) || null : null, icon: logo ? logo[1] : null, tags: [] });
     }
     return out;
 }
@@ -270,7 +272,10 @@ function createTvh(o) {
         let r;
         const own = acc.server + '/';
         let where = 'logo';
-        if (/^https?:\/\//i.test(s) && s.indexOf(own) !== 0) {
+        // the server's own image cache (imagecache/<n>, relative or on its address) answers the user; any other address,
+        // on whatever host (tvlogo.sandu.casa: public PNGs), is fetched as it is
+        const viaServer = !/^https?:\/\//i.test(s) || (s.indexOf(own) === 0 && /^imagecache\/\d+$/.test(s.slice(own.length)));
+        if (!viaServer) {
             // another site's logo (the server's image cache off: Tvheadend gives the channel's own address). 0.1.2 in the
             // car: HTTP 404 from it, while the iPhone's apps had the same logos; and with the cache on, Tvheadend's own
             // fetch failed too. So asked for as a browser asks (its User-Agent, images accepted), redirects followed, and a

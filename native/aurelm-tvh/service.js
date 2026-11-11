@@ -22,8 +22,9 @@
  * {"cmd":"channels"}: the channels and what is on now instead ({ at, channels: [{ uuid, name, number }], epg }).
  * {"cmd":"epg","uuid":...}: a channel's programme for the next 24 hours instead ({ uuid, events: [{ start, stop, title,
  * subtitle, episode, text }] } or { uuid, error }); kept 3 minutes.
- * {"cmd":"logo","uuid":...}: a channel's logo instead ({ uuid, png: base64 } or { uuid, none: true, why }); the
- * client fetches it once, it is kept a week in state/logos; one that is not there is asked again after 30 minutes.
+ * {"cmd":"logo","uuid":...}: a channel's logo instead ({ uuid, png: base64 } or { uuid, none: true, why, quiet: the server
+ * gives it no public logo }); fetched once per address (the logo's ?v=), kept in state/logos (<uuid>.png, <uuid>.url) for as
+ * long as that address stays; one not to be had is asked again after 30 minutes.
  *
  * The app's watch: while a channel plays, the app asks every second or two; 90 s without a request (the app was
  * closed, or crashed) and the channel stops, so the internet is not used for a picture and a sound nobody gets.
@@ -40,7 +41,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.1.3';
+const VERSION = '0.1.4';
 const PAGE_PORT = 8491;   // Emby's page is 8490: both may be open at once
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -48,7 +49,6 @@ const WATCH_MS = 90 * 1000;
 const NET_UID = 13103;    // component.json "uids": the only uid of this tool mgu-uplink routes
 const LOG_LINES = 40;
 const PLAYING = ['loading', 'playing', 'buffering'];
-const LOGO_KEEP_MS = 7 * 24 * 3600 * 1000;
 const LOGO_NONE_MS = 30 * 60 * 1000;
 
 function createService(opts) {
@@ -124,31 +124,46 @@ function createService(opts) {
         if (logoStats.last !== why) log('logo ' + name + ': ' + why + (logoStats.failed > 1 ? ' (' + logoStats.failed + ' logos so far)' : ''));
         logoStats.last = why;
     }
+    /** a channel's logo: kept by its address (the server's ?v= changes with the logo), for as long as that address stays,
+     *  on the disk (the list has its logos without the internet too); a channel without a public logo (no icon, or the
+     *  server's imagecache/<n>, which asks for a user: the image cache is to stay off) is no failure (quiet) */
     function logo(uuid) {
         if (!/^[0-9a-f]{32}$/.test(uuid)) return Promise.resolve({ uuid, none: true, why: 'not a channel' });
-        const f = path.join(logoDir, uuid + '.png');
-        try {
-            const s = fs.statSync(f);
-            if (now() - s.mtime.getTime() < LOGO_KEEP_MS) return Promise.resolve({ uuid, png: fs.readFileSync(f).toString('base64') });
-        } catch (e) { /* not kept yet */ }
-        if (logoNone[uuid] && logoNone[uuid].until > now()) return Promise.resolve({ uuid, none: true, why: logoNone[uuid].why });
         const ch = chans.channels.filter((c) => c.uuid === uuid)[0];
-        const none = (why) => { logoNone[uuid] = { until: now() + LOGO_NONE_MS, why }; return { uuid, none: true, why }; };
-        if (!ch || !ch.icon) return Promise.resolve(none(ch ? 'the server has no logo for it' : 'not a channel of the list'));
+        if (!ch) return Promise.resolve({ uuid, none: true, why: 'not a channel of the list' });
+        const icon = String(ch.icon || '');
+        if (!/^https?:\/\//i.test(icon)) return Promise.resolve({ uuid, none: true, quiet: true, why: icon ? 'no public logo (' + icon.slice(0, 40) + ')' : 'no logo' });
+        const f = path.join(logoDir, uuid + '.png'), fu = path.join(logoDir, uuid + '.url');
+        const kept = () => { try { return fs.readFileSync(f).toString('base64'); } catch (e) { return null; } };
+        let keptUrl = null;
+        try { keptUrl = fs.readFileSync(fu, 'utf8'); } catch (e) { /* none kept */ }
+        if (keptUrl === icon) { const png = kept(); if (png) return Promise.resolve({ uuid, png }); }
+        const key = uuid + '|' + icon;
+        // not to be had now: the one kept for an earlier address (better than none), else none for a while
+        const none = (why) => {
+            const old = kept();
+            if (old) return { uuid, png: old, stale: true };
+            logoNone[key] = { until: now() + LOGO_NONE_MS, why };
+            return { uuid, none: true, why };
+        };
+        if (logoNone[key] && logoNone[key].until > now()) return Promise.resolve(none(logoNone[key].why));
         startChild();
         if (!child) return Promise.resolve({ uuid, none: true, why: 'no client' });
         return new Promise((res) => {
             const id = crypto.randomBytes(6).toString('hex');
-            const t = setTimeout(() => { if (logoWait[id]) { delete logoWait[id]; res({ uuid, none: true, why: 'the server did not answer in time' }); } }, 20000);
+            const t = setTimeout(() => { if (logoWait[id]) { delete logoWait[id]; res(none('the server did not answer in time')); } }, 20000);
             logoWait[id] = (m) => {
                 clearTimeout(t);
                 if (!m.ok) { logoFailed(ch.name, m.error); return res(none(m.error)); }
                 if (!logoStats.fetched++) log('logo ' + ch.name + ': fetched (' + Math.round(m.png.length * 0.75 / 1024) + ' KiB)');
                 try { fs.mkdirSync(logoDir, 0o700); } catch (e) { /* there */ }
-                try { fs.writeFileSync(f, Buffer.from(m.png, 'base64'), { mode: 0o600 }); } catch (e) { log('logo: ' + e.message); }
+                try {
+                    fs.writeFileSync(f, Buffer.from(m.png, 'base64'), { mode: 0o600 });
+                    fs.writeFileSync(fu, icon, { mode: 0o600 });
+                } catch (e) { log('logo: ' + e.message); }
                 res({ uuid, png: m.png });
             };
-            toChild({ op: 'logo', id, icon: ch.icon });
+            toChild({ op: 'logo', id, icon });
         });
     }
 
@@ -306,7 +321,7 @@ function createService(opts) {
         return Object.assign({}, st, {
             now: now(), uplink: uplink(), player: player.state(), prefs,
             account: account ? { server: account.server, user: account.user, serverName: account.serverName, serverVersion: account.serverVersion } : null,
-            channels: { at: chans.at, count: chans.channels.length, icons: chans.channels.filter((c) => c.icon).length },
+            channels: { at: chans.at, count: chans.channels.length, icons: chans.channels.filter((c) => /^https?:\/\//i.test(c.icon || '')).length },
             logos: logoStats,
             page: Object.assign({}, st.page, st.page.open ? { url: pageUrl(), left: Math.max(0, Math.round((st.page.until - now()) / 1000)) } : {}),
             log: lines.slice(-14),

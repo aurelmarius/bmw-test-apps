@@ -36,7 +36,7 @@ async function until(fn, ms, what) {
 }
 
 const CH = [
-    { uuid: 'a'.repeat(32), name: 'PRO TV HD', number: 1, enabled: true, icon_public_url: 'imagecache/1' },
+    { uuid: 'a'.repeat(32), name: 'PRO TV HD', number: 1, enabled: true, icon_public_url: '@/logos/pro-tv-hd.png?v=' },
     { uuid: 'b'.repeat(32), name: 'Știrile Pro TV', number: 2, enabled: true, icon_public_url: 'imagecache/2' },
     { uuid: 'c'.repeat(32), name: 'Hidden', number: 3, enabled: false },
     { uuid: 'd'.repeat(32), name: 'Radio ZU', number: 0, enabled: true },
@@ -87,7 +87,10 @@ function fakeTvh(opts) {
         const user = who(req);
         if (p === '/api/serverinfo') return json({ sw_version: '4.3-2735~gfcd987f0b', api_version: 19, name: 'Tvheadend' });
         // anonymous paths: an anonymous request sees nothing
-        if (p === '/api/channel/grid') return json({ entries: user ? CH : [], total: user ? CH.length : 0 });
+        // the logos: public (tvlogo.sandu.casa's kind), no user asked for; their address in the grid, ?v= the logo's version
+        if (p === '/logos/pro-tv-hd.png') { seen.logos = (seen.logos || 0) + 1; seen.logoV = q.v; res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' }); return res.end(LOGO_PNG); }
+        const pub = (c) => Object.assign({}, c, c.icon_public_url && c.icon_public_url[0] === '@' ? { icon_public_url: 'http://127.0.0.1:' + server.address().port + c.icon_public_url.slice(1) + (o.logoV || 1) } : {});
+        if (p === '/api/channel/grid') return json({ entries: user ? CH.map(pub) : [], total: user ? CH.length : 0 });
         if (p === '/api/epg/events/grid' && q.channel) {
             seen.epg = (seen.epg || 0) + 1;
             const t = Math.floor(Date.now() / 1000);
@@ -103,7 +106,7 @@ function fakeTvh(opts) {
         if (p === '/api/profile/list') return json({ entries: (o.profiles || ['htsp', 'pass', 'matroska', 'mgu-hd', 'mgu-sd', 'mgu-low']).map((n, i) => ({ key: 'k' + i, val: n })) });
         if (!user) return challenge(res);
         if (p === '/imagecache/1' && o.logo403) { o.logo403--; seen.logo403 = (seen.logo403 || 0) + 1; res.writeHead(403); return res.end(); }
-        if (p === '/imagecache/1') { seen.logos = (seen.logos || 0) + 1; res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(LOGO_PNG); }
+        if (p === '/imagecache/1') { seen.imagecache = (seen.imagecache || 0) + 1; res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(LOGO_PNG); }
         if (p === '/imagecache/2') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(Buffer.from('ffd8ffe000104a464946', 'hex')); }
         if (p === '/playlist/channels') {
             res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl' });
@@ -350,38 +353,62 @@ test('service: no free tuner (503): tried 3 times, then said', async () => {
     } finally { s.close(); srv.close(); }
 });
 
-test('service: the channels\' logos: fetched once from the imagecache as the user, kept; none when not a PNG or none given', async () => {
+test('service: the channels\' logos: public addresses fetched without a user, kept by address (a new ?v= fetched anew); imagecache/<n> and none are no logo', async () => {
     const srv = await fakeTvh();
     const s = await signedIn(srv);
     try {
         const r = await ask(s.sock, { cmd: 'logo', uuid: CH[0].uuid });
-        assert.ok(r.png && Buffer.from(r.png, 'base64').equals(LOGO_PNG), 'the PNG as the server has it');
-        assert.ok(fs.existsSync(path.join(s.tmp, 'state', 'logos', CH[0].uuid + '.png')), 'kept');
+        assert.ok(r.png && Buffer.from(r.png, 'base64').equals(LOGO_PNG), 'the PNG as the site has it: ' + JSON.stringify(r).slice(0, 300));
+        const dir = path.join(s.tmp, 'state', 'logos');
+        assert.ok(/\/logos\/pro-tv-hd\.png\?v=1$/.test(fs.readFileSync(path.join(dir, CH[0].uuid + '.url'), 'utf8')), 'kept with its address');
         await ask(s.sock, { cmd: 'logo', uuid: CH[0].uuid });
         assert.strictEqual(srv.seen.logos, 1, 'fetched once');
+        // the logo changes: a new ?v=; the channels again (refresh): fetched anew
+        srv.set('logoV', 2);
+        await ask(s.sock, { cmd: 'refresh' });
+        await until(() => srv.seen.logos >= 1 && s.svc.status().channels && true, 1000);
+        const before = srv.seen.logos;
+        await until(async () => false, 1).catch(() => null);
+        let r2 = null;
+        for (let k = 0; k < 40 && srv.seen.logos === before; k++) { r2 = await ask(s.sock, { cmd: 'logo', uuid: CH[0].uuid }); if (srv.seen.logos === before) await wait(100); }
+        assert.strictEqual(srv.seen.logos, 2, 'fetched for the new address');
+        assert.strictEqual(srv.seen.logoV, '2');
+        assert.ok(r2 && r2.png);
+        // imagecache/<n> (the server's cache on: a user asked for) and no icon: no logo, quiet, nothing asked
         const j = await ask(s.sock, { cmd: 'logo', uuid: CH[1].uuid });
-        assert.ok(j.none && /not a PNG \(image\/jpeg\)/.test(j.why), JSON.stringify(j));
+        assert.ok(j.none && j.quiet && /no public logo \(imagecache\/2\)/.test(j.why), JSON.stringify(j));
         const n = await ask(s.sock, { cmd: 'logo', uuid: CH[3].uuid });
-        assert.ok(n.none && /no logo/.test(n.why), JSON.stringify(n));
+        assert.ok(n.none && n.quiet, JSON.stringify(n));
         assert.ok((await ask(s.sock, { cmd: 'logo', uuid: '../../etc/passwd' })).none);
-        // the app's side: decoded, fitted into 64x36, drawn as runs of one colour over the tile
+        const st = s.svc.status();
+        assert.strictEqual(st.channels.icons, 1, 'the channels with a public logo');
+        assert.strictEqual(st.logos.failed, 0);
+        // the app's side: decoded, fitted into 60x36 (5:3), runs of one colour, the transparent corners left out;
+        // no logo: a plate with the channel's name
         const logos = require(path.join(__dirname, '..', 'apps', 'aurelm_tvh', 'logos'));
         const png = require(path.join(__dirname, '..', 'kit', 'runtime', 'png'));
         let changed = 0;
-        const L = logos.createLogos({ ask: (cmd, x) => ask(s.sock, Object.assign({ cmd }, x)), png, onChange: () => { changed++; } });
-        const rects = [];
-        const rec = { fillRect: (x, y, w, h, c) => rects.push([x, y, w, h, c]) };
-        assert.strictEqual(L.draw(rec, CH[0].uuid, 100, 10), false, 'not yet');
-        assert.strictEqual(L.draw(rec, CH[1].uuid, 100, 10), false);
+        const icons = { [CH[0].uuid]: 'x?v=2', [CH[1].uuid]: 'imagecache/2' };
+        const L = logos.createLogos({ ask: (cmd, x) => ask(s.sock, Object.assign({ cmd }, x)), png, iconOf: (u) => icons[u], onChange: () => { changed++; } });
+        const rects = [], plates = [], texts = [];
+        const rec = { fillRect: (x, y, w, h, c) => rects.push([x, y, w, h, c]), roundRect: (x, y, w, h) => plates.push([x, y, w, h]),
+            text: (t) => texts.push(t), textWidth: (t, z) => String(t).length * z * 0.55 };
+        assert.strictEqual(L.draw(rec, CH[0].uuid, 100, 10), false, 'not yet, and no name: nothing');
+        assert.strictEqual(L.draw(rec, CH[1].uuid, 100, 10, 'Stirile Pro TV'), true, 'a plate meanwhile');
         await until(() => changed >= 2, 5000, 'both answered');
-        assert.strictEqual(L.state(CH[1].uuid), 'none');
-        assert.strictEqual(L.draw(rec, CH[1].uuid, 100, 10), false, 'a JPEG: the name only');
-        assert.strictEqual(L.draw(rec, CH[0].uuid, 100, 10), true);
-        assert.deepStrictEqual(rects[0].slice(0, 4), [100, 10, 64, 36], 'the tile');
-        const body = rects.slice(1);
-        assert.ok(body.length > 30 && body.length < 200, body.length + ' runs');
-        assert.ok(body.every((r) => r[0] >= 100 && r[0] + r[2] <= 164 && r[1] >= 10 && r[1] < 46 && r[3] === 1), 'inside the box');
-        assert.ok(body.some((r) => r[4] === 0xe00018ff) && body.some((r) => r[4] === 0xffffffff), 'red and white, rounded to 32 levels');
+        assert.strictEqual(L.state(CH[1].uuid), 'nologo');
+        assert.strictEqual(L.stats().none, 0, 'no logo is no failure');
+        rects.length = 0; plates.length = 0; texts.length = 0;
+        assert.strictEqual(L.draw(rec, CH[1].uuid, 100, 10, '2  Stirile Pro TV'), true);
+        assert.deepStrictEqual(plates[0], [100, 10, 60, 36]);
+        assert.ok(/^Stirile/.test(texts[0]) && texts[0].length < 14, texts[0]);
+        assert.strictEqual(L.draw(rec, CH[0].uuid, 100, 10, 'PRO TV HD'), true);
+        assert.ok(rects.length > 20 && rects.length < 200, rects.length + ' runs');
+        assert.ok(rects.every((r) => r[0] >= 100 && r[0] + r[2] <= 160 && r[1] >= 10 && r[1] < 46 && r[3] === 1), 'inside the 60x36 box');
+        assert.ok(rects.some((r) => r[4] === 0xe00018ff) && rects.some((r) => r[4] === 0xffffffff), 'red and white, rounded to 32 levels');
+        // a logo whose address changes is another logo: asked for again
+        icons[CH[0].uuid] = 'x?v=3';
+        assert.strictEqual(L.state(CH[0].uuid), undefined);
     } finally { s.close(); srv.close(); }
 });
 
@@ -399,26 +426,16 @@ test('service: a channel\'s programme for the guide: from now, 24 hours, in orde
     } finally { s.close(); srv.close(); }
 });
 
-test('service: a logo answered 403 is asked for once more with a fresh challenge; the status counts the logos', async () => {
+test('client: a logo from the server\'s image cache answered 403 is asked for once more with a fresh challenge', async () => {
     const srv = await fakeTvh({ logo403: 1 });
-    const s = await signedIn(srv);
+    const { createNet } = require(path.join(DIR, 'netx'));
     try {
-        const r = await ask(s.sock, { cmd: 'logo', uuid: CH[0].uuid });
-        assert.ok(r.png, JSON.stringify(r).slice(0, 200));
+        const t = tvhm.createTvh({ nx: createNet({ systemDns: true }) });
+        t.use({ server: srv.url, user: 'car', password: 'pw' });
+        const b = await t.logo('imagecache/1');
+        assert.ok(b.equals(LOGO_PNG));
         assert.strictEqual(srv.seen.logo403, 1);
-        assert.strictEqual(srv.seen.logos, 1);
-        await ask(s.sock, { cmd: 'logo', uuid: CH[1].uuid });   // a JPEG: missing, and why
-        const st = s.svc.status();
-        assert.strictEqual(st.logos.fetched, 1);
-        assert.strictEqual(st.logos.failed, 1);
-        assert.ok(/not a PNG/.test(st.logos.last), st.logos.last);
-        assert.strictEqual(st.channels.icons, 2, 'channels the server gives a logo');
-        // always 403 (the user not accepted): given up after the second try, and said
-        srv.set('logo403', 5);
-        try { fs.unlinkSync(path.join(s.tmp, 'state', 'logos', CH[0].uuid + '.png')); } catch (e) { /* none */ }
-        const s2 = await ask(s.sock, { cmd: 'logo', uuid: CH[2].uuid });
-        assert.ok(s2.none);
-    } finally { s.close(); srv.close(); }
+    } finally { srv.close(); }
 });
 
 test('client: another site\'s logo is asked for as a browser asks, redirects followed; a GitHub page\'s address taken as its file\'s', async () => {
