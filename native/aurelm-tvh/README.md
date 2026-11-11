@@ -118,7 +118,7 @@ nice 10, idle I/O, 2 cores at most, 256 MiB, 48 tasks. `tvh-player` runs with th
 ## Control
 
 One JSON object per line on `/run/aurelm-tvh.sock`: `{"cmd":"status"}`, `{"cmd":"channels"}` (the list and EPG now),
-`{"cmd":"logo","uuid":"..."}` (a logo's PNG), `{"cmd":"epg","uuid":"..."}` (the guide), `{"cmd":"play","uuid":"..."}`, `{"cmd":"stop"}`, `{"cmd":"prefs","profile":"mgu-hd","adaptive":true,"subs":true}`,
+`{"cmd":"logo","uuid":"..."}` (a logo's PNG), `{"cmd":"epg","uuid":"..."}` (the guide), `{"cmd":"play","uuid":"..."}`, `{"cmd":"stop"}`, `{"cmd":"prefs","profile":"mgu-hd","adaptive":true,"subs":true,"gain":9,"even":false}` (gain: the sound raised by 0-15 dB, the player limiting its peaks; even: its compressor; both at once on the channel playing),
 `{"cmd":"refresh"}`, `{"cmd":"signin-open"}`, `{"cmd":"signin-close"}`, `{"cmd":"signout"}`, `{"cmd":"exit"}`.
 
 Tests: `node tests/tvh_service.test.js` (a fake Tvheadend: Digest SHA-256 and MD5 with expiring nonces, Basic, the

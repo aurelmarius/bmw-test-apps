@@ -44,7 +44,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.TVH_SOCK || '/run/aurelm-tvh.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the socket
 // starts the new one at the next request
-const SERVICE_VERSION = '0.1.6';
+const SERVICE_VERSION = '0.1.7';
 // a channel is on: the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'buffering'];
 const channelOn = (pb) => !!(pb && ACTIVE.indexOf(pb.state) >= 0);
@@ -165,9 +165,12 @@ function playRows(s, rows) {
     else if (!a.ok) snd = { state: 'bad', detail: a.error };
     else {
         const n = String(a.codec).toUpperCase() + ' ' + a.channels + 'ch' + (tk.aplayed ? ', ' + tk.aplayed + ' played' : '') + (tk.aunread ? ', ' + tk.aunread + ' unread' : '');
-        if (ca.taken) snd = { state: 'bad', detail: n + '; the speakers are in use by AirPlay Test or Emby: stop it there' };
+        // the level: raised by the setting, the peaks held under -1 dBFS (the share of samples the limiter lowered)
+        const lim = tk.limited && tk.aplayed ? Math.round(tk.limited / (tk.aplayed * 1024) * 1000) / 10 : 0;
+        const lvl = pb.gain != null ? '; +' + pb.gain + ' dB' + (pb.even ? ', even volume' : '') + (lim ? ', ' + lim + '% limited' : '') : '';
+        if (ca.taken) snd = { state: 'bad', detail: n + lvl + '; the speakers are in use by AirPlay Test or Emby: stop it there' };
         else if (ca.error) snd = { state: 'bad', detail: n + '; route: ' + ca.error };
-        else snd = { state: ca.connected ? 'ok' : 'wait', detail: n + (ca.connected ? ', on the speakers' : ', connecting the speakers') };
+        else snd = { state: ca.connected ? 'ok' : 'wait', detail: n + (ca.connected ? ', on the speakers' : ', connecting the speakers') + lvl };
     }
     rows.push(Object.assign({ label: 'Sound' }, snd));
 }
@@ -218,7 +221,9 @@ mgu.run({
 
         function prefsNow() {
             const p = ctx.settings.get('profile');
-            return { profile: PROFILES.indexOf(p) >= 0 ? p : 'mgu-hd', adaptive: ctx.settings.get('adaptive') !== false, subs: ctx.settings.get('subs') !== false };
+            const g = Number(ctx.settings.get('gain'));
+            return { profile: PROFILES.indexOf(p) >= 0 ? p : 'mgu-hd', adaptive: ctx.settings.get('adaptive') !== false, subs: ctx.settings.get('subs') !== false,
+                gain: isFinite(g) ? g : 9, even: ctx.settings.get('even') === true };
         }
         async function poll() {
             if (polling) return;
@@ -226,7 +231,7 @@ mgu.run({
             try {
                 st = await ask('status');
                 const want = prefsNow(), have = st && st.prefs;
-                if (st && st.version && (!have || have.profile !== want.profile || have.adaptive !== want.adaptive || have.subs !== want.subs)) {
+                if (st && st.version && (!have || have.profile !== want.profile || have.adaptive !== want.adaptive || have.subs !== want.subs || have.gain !== want.gain || have.even !== want.even)) {
                     const r = await ask('prefs', want);
                     if (r) st = r;
                 }

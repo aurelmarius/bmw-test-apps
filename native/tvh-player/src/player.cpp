@@ -27,7 +27,13 @@
  *   the clock            the monotonic clock from the first picture's timestamp; stopped while paused or while
  *                        the stream runs dry (buffering)
  *
- * Control (fd 3, one per line): pause | resume | volume <0..1> | subs on | subs off | quit
+ * Control (fd 3, one per line): pause | resume | volume <0..1> | gain <dB 0..15> | even on | even off | subs on | subs off | quit
+ *
+ * The sound's level: TV is quiet beside the radio (EBU R128: the server's mgu-hd -25.7 LUFS, peaks -10 dBFS; HBO's
+ * films -29 LUFS; FM radio about -12): `gain` raises it (MGU_GAIN_DB, default 0; the service gives the app's setting),
+ * a peak limiter keeps it under -1 dBFS (instant attack, 150 ms release: the gain is only taken back on peaks).
+ * `even` (MGU_EVEN=1) adds a gentle compressor before it (above -30 dBFS 2.5:1, 5 ms / 250 ms, +8 dB made up): speech
+ * up, explosions down, for a car's road noise. The ticks count the samples the limiter lowered (`limited`).
  * Events (stdout, one per line): MGU {json}: open, decoder, audio, tick (each 500 ms), end, error
  *
  * MGU_VIDEO_PATH   the frame file (default /dev/shm/mgu-video-aurelm-tvh)
@@ -39,6 +45,8 @@
  * MGU_PREBUFFER_MS what is queued before the clock starts, and again after the stream ran dry (default 1500)
  * MGU_ANALYZE_MS   how far the stream is analysed for its streams (default 2500: past the next key frame)
  * MGU_SUBS         0: the subtitles off from the start (default on)
+ * MGU_GAIN_DB      the sound raised by this many dB, 0..15 (default 0), with the limiter
+ * MGU_EVEN         1: the compressor on from the start
  * MGU_SUB_DUMP     <path>: with MGU_VIDEO_OFF, the first pictures a subtitle is on are written as I420 (a grey picture
  *                  with the subtitle laid over), <path>-<n>.yuv, the picture's size: tests
  */
@@ -231,7 +239,7 @@ void starved() {
 
 /* ---------- stats ---------- */
 std::atomic<unsigned long long> s_fields(0), s_shown(0), s_late(0), s_decerr(0), s_vpk(0), s_apk(0), s_aplayed(0), s_alate(0),
-    s_aunread(0), s_axrun(0), s_aerr(0), s_bytes(0);
+    s_aunread(0), s_axrun(0), s_aerr(0), s_bytes(0), s_limited(0);
 std::atomic<int> s_adev_ms(-1);
 double g_first_pts = NAN;   /* the stream's first timestamp: positions are counted from it */
 std::mutex g_first_mu;
@@ -533,6 +541,38 @@ struct Alsa {
 } A;
 const int kPlayback = 0, kS16LE = 2, kRwInterleaved = 3, kNonblock = 1;
 std::atomic<int> g_volume_milli(1000);
+std::atomic<int> g_gain_cdb(0);        /* centi-dB, 0..1500 */
+std::atomic<bool> g_even(false);
+
+/* the level: the compressor (even), the gain and the volume, the limiter; on interleaved stereo floats, in place */
+struct Dsp {
+    float env = 0, lim = 0;
+    void run(float *lr, int n, int rate) {
+        const float CEIL = 0.891f;                                   /* -1 dBFS; pow, exp, log10 in double: their float versions need GLIBC_2.27 */
+        const bool even = g_even.load();
+        const float g = (float) pow(10.0, (g_gain_cdb.load() / 100.0 + (even ? 8.0 : 0.0)) / 20.0) * (g_volume_milli.load() / 1000.0f);
+        const float r = rate > 0 ? (float) rate : 48000.0f;
+        const float att = (float) exp(-1.0 / (0.005 * r)), rel = (float) exp(-1.0 / (0.25 * r)), lrel = (float) exp(-1.0 / (0.15 * r));
+        const float T = -30.0f, k = 1.0f - 1.0f / 2.5f;
+        unsigned long long limited = 0;
+        for (int i = 0; i < n; i++) {
+            float L = lr[2 * i], R = lr[2 * i + 1];
+            float cg = 1.0f;
+            if (even) {
+                const float x = std::max(fabsf(L), fabsf(R));
+                env = x > env ? att * env + (1 - att) * x : rel * env + (1 - rel) * x;
+                const float db = 20.0f * (float) log10((double) env + 1e-9);
+                if (db > T) cg = (float) pow(10.0, (double) (-(db - T) * k / 20.0f));
+            }
+            L *= g * cg; R *= g * cg;
+            const float p = std::max(fabsf(L), fabsf(R));
+            lim = p > lim ? p : lrel * lim + (1 - lrel) * p;
+            if (lim > CEIL) { const float lg = CEIL / lim; L *= lg; R *= lg; limited++; }
+            lr[2 * i] = L; lr[2 * i + 1] = R;
+        }
+        s_limited += limited;
+    }
+} g_dsp;
 
 enum Out { NUL, WAV, ALSA };
 struct AudioOut {
@@ -649,7 +689,8 @@ void to_stereo(const AVFrame *f, std::vector<int16_t> *out) {
         const float norm = sl > 1 ? 1.0f / sqrtf(sl) : 1.0f;   /* louder than a plain sum's normalisation, clipped */
         for (int c = 0; c < ch; c++) { wl[c] *= norm; wr[c] *= norm; }
     }
-    const float v = g_volume_milli.load() / 1000.0f;
+    static std::vector<float> fl;
+    fl.resize((size_t) n * 2);
     out->resize((size_t) n * 2);
     for (int i = 0; i < n; i++) {
         float L = 0, R = 0;
@@ -666,9 +707,12 @@ void to_stereo(const AVFrame *f, std::vector<int16_t> *out) {
             }
             L += x * wl[c]; R += x * wr[c];
         }
-        L *= v; R *= v;
-        (*out)[(size_t) i * 2] = L >= 1 ? 32767 : L <= -1 ? -32768 : (int16_t) lrintf(L * 32767.0f);
-        (*out)[(size_t) i * 2 + 1] = R >= 1 ? 32767 : R <= -1 ? -32768 : (int16_t) lrintf(R * 32767.0f);
+        fl[(size_t) i * 2] = L; fl[(size_t) i * 2 + 1] = R;
+    }
+    g_dsp.run(fl.data(), n, f->sample_rate);   /* the gain, the volume, the limiter */
+    for (size_t i = 0; i < (size_t) n * 2; i++) {
+        const float x = fl[i];
+        (*out)[i] = x >= 1 ? 32767 : x <= -1 ? -32768 : (int16_t) lrintf(x * 32767.0f);
     }
 }
 
@@ -788,7 +832,12 @@ void control_thread() {
             else if (!line.compare(0, 7, "volume ")) {
                 const double v = atof(line.c_str() + 7);
                 g_volume_milli = (int) ((v < 0 ? 0 : v > 1 ? 1 : v) * 1000);
-            } else if (line == "quit") { g_quit = true; g_vq.wake(); g_aq.wake(); return; }
+            } else if (!line.compare(0, 5, "gain ")) {
+                const double db = atof(line.c_str() + 5);
+                g_gain_cdb = (int) lrint((db < 0 ? 0 : db > 15 ? 15 : db) * 100);
+            } else if (line == "even on") g_even = true;
+            else if (line == "even off") g_even = false;
+            else if (line == "quit") { g_quit = true; g_vq.wake(); g_aq.wake(); return; }
         }
         if (buf.size() > 4096) buf.clear();
     }
@@ -840,9 +889,10 @@ void tick_thread() {
         if (g_quit) break;
         const double t = g_clock.started() ? g_clock.now() - first_pts() : 0;
         event("{\"ev\":\"tick\",\"t\":%.3f,\"state\":\"%s\",\"shown\":%llu,\"late\":%llu,\"decerr\":%llu,\"aplayed\":%llu,"
-              "\"alate\":%llu,\"aunread\":%llu,\"axrun\":%llu,\"adev\":%d,\"buffered\":%.2f,\"kbytes\":%llu,\"fields\":%llu,\"subs\":%llu,\"subshown\":%llu}",
+              "\"alate\":%llu,\"aunread\":%llu,\"axrun\":%llu,\"adev\":%d,\"buffered\":%.2f,\"kbytes\":%llu,\"fields\":%llu,\"subs\":%llu,\"subshown\":%llu,\"limited\":%llu,\"gain\":%.1f,\"even\":%d}",
               t < 0 ? 0 : t, state(), s_shown.load(), s_late.load(), s_decerr.load(), s_aplayed.load(), s_alate.load(),
-              s_aunread.load(), s_axrun.load(), s_adev_ms.load(), std::max(g_vq.span(), g_aq.span()), s_bytes.load() / 1024, s_fields.load(), s_subpages.load(), s_subshown.load());
+              s_aunread.load(), s_axrun.load(), s_adev_ms.load(), std::max(g_vq.span(), g_aq.span()), s_bytes.load() / 1024, s_fields.load(), s_subpages.load(), s_subshown.load(),
+              s_limited.load(), g_gain_cdb.load() / 100.0, g_even.load() ? 1 : 0);
     }
 }
 
@@ -920,6 +970,8 @@ int main() {
     }
     if (const char *pb = getenv("MGU_PREBUFFER_MS")) if (atoi(pb) >= 0 && atoi(pb) <= 10000) g_pre = atoi(pb) / 1000.0;
     if (const char *sb = getenv("MGU_SUBS")) if (!strcmp(sb, "0")) g_subs_on = false;
+    if (const char *gd = getenv("MGU_GAIN_DB")) { const double db = atof(gd); g_gain_cdb = (int) lrint((db < 0 ? 0 : db > 15 ? 15 : db) * 100); }
+    if (const char *ev = getenv("MGU_EVEN")) if (!strcmp(ev, "1")) g_even = true;
     drop_root();
     std::thread(watchdog).detach();
     std::thread ctl;

@@ -16,6 +16,7 @@ the AirPlay receiver's NAL framing, frame file, MSDK headers, ABI lists and chec
 | picture | `src/decoder_msdk.cpp` (VA-API on `/dev/dri/renderD128`): display order, the picture fitted whole into its own shape (at most 1920x1080), each picture into the frame file (`/dev/shm/mgu-video-aurelm-tvh`, MGVF, 3 slots, I420) when the clock reaches it; the app places it (fit, zoom, fill). Each decoded picture's structure (`PicStruct`) is counted: field pictures (an interlaced stream) show in each tick as `fields`. |
 | sound | libavcodec's aac, ac3 and eac3 decoders, mixed down to stereo S16 at the volume, written to ALSA `plug:smartx:CarLifeMedia_CF_48_STEREO` (libasound opened at run time, the device non-blocking). Kept on the clock. Any other sound (MP2 from a DVB "pass" stream) is told: `audio` `ok:false` "choose a profile that transcodes". |
 | subtitles | the first DVB subtitle stream (`dvb_subtitle`: what a profile passes on with "Subtitle codec profile: Copy"), decoded by libavcodec's `dvbsub` into bitmaps with their palette, kept by their time (until the next one or its own timeout; 30 s without one), scaled to the picture (from the stream's display definition, 1920x1080, or 720x576 without one) and blended into each picture before it goes to the frame file. `open` is followed by `subs` (`ok`, `codec`, `lang`, `on`); the ticks count them (`subs` decoded, `subshown` pictures with one). `subs off` / `subs on` on the control line; `MGU_SUBS=0` starts without them. |
+| level | TV is quiet beside the radio (EBU R128 programmes: the server's `mgu-hd` measured -25.5 LUFS, peaks -10 dBFS; HBO -29 LUFS; FM radio about -12), and the CarLife input adds nothing. `gain` raises it (0-15 dB; `MGU_GAIN_DB`; the service sends the app's setting, +9 by default), then a peak limiter holds it under -1 dBFS (instant attack, 150 ms release: only the peaks are taken back, never clipped). `even on` (`MGU_EVEN=1`) puts a gentle compressor first (above -30 dBFS 2.5:1, 5/250 ms, +8 dB made up). Measured through the player into a WAV: `mgu-hd` +9 dB -16.5 LUFS, peak -1.1, nothing limited; +12 dB -13.7 LUFS, 2.5% of samples limited; HBO +12 dB -16.8 LUFS; HBO +9 dB even -15.6 LUFS, LRA 6.8 -> 3.2. The ticks count the samples limited (`limited`) and say `gain` and `even`. |
 | clock | monotonic, from the first picture's timestamp; stops while paused and while the stream runs dry. |
 
 **Interlaced.** The server's profiles deinterlace (VAAPI), so nothing is deinterlaced here. A stream that is
@@ -29,7 +30,7 @@ mgu-render takes). It has the service's limits (cgroup, nice 10, `LimitCORE=1`; 
 
 **Ending.** Told to end (`quit`, SIGTERM, the service gone), it closes the sound device first and is gone within 2.5 s.
 
-**Control** (fd 3, one per line): `pause`, `resume`, `volume <0..1>`, `subs on|off`, `quit`. **Events** (stdout): `MGU {json}`
+**Control** (fd 3, one per line): `pause`, `resume`, `volume <0..1>`, `gain <dB 0..15>`, `even on|off`, `subs on|off`, `quit`. **Events** (stdout): `MGU {json}`
 with `open` (the streams; the video's `fps` and `interlaced`), `decoder`, `audio`, `tick` (every 500 ms: position,
 state, pictures shown and late, field pictures, sound played, dropped and unread, buffered seconds), `end`, `error`.
 

@@ -64,7 +64,8 @@ function createPlayback(o) {
     const outageMs = o.outageMs || OUTAGE_MS;
     const dataMs = o.dataMs || DATA_MS, firstDataMs = o.firstDataMs || Math.max(FIRST_DATA_MS, o.dataMs || 0);
     const upAfterMs = o.adaptUpMs || 300000;
-    const prefs = { profile: 'mgu-hd', adaptive: true, subs: true };
+    // gain: dB the sound is raised (TV is 10-15 dB quieter than the radio; the player limits the peaks); even: its compressor
+    const prefs = { profile: 'mgu-hd', adaptive: true, subs: true, gain: 9, even: false };
     let cur = null, ids = 0;
     const st = { state: 'idle', phase: null, phaseAt: null, error: null, at: now(), retrySince: null, retryAt: null, lost: false };
 
@@ -99,7 +100,9 @@ function createPlayback(o) {
         c.bytes = 0;
         phase('player');
         sink.start(id);
-        if (!prefs.subs) sink.ctl(id, 'subs off');   // the player lays the channel's DVB subtitles over the picture unless told
+        if (!prefs.subs) sink.ctl(id, 'subs off');
+        sink.ctl(id, 'gain ' + prefs.gain);
+        if (prefs.even) sink.ctl(id, 'even on');   // the player lays the channel's DVB subtitles over the picture unless told
         const res = r.res;
         c.lastData = now(); c.gotData = false; c.held = false;
         res.on('data', (d) => {
@@ -201,6 +204,13 @@ function createPlayback(o) {
         const profile = p && p.profile ? String(p.profile) : prefs.profile;
         const adaptive = p && p.adaptive !== undefined ? !!p.adaptive : prefs.adaptive;
         const subs = p && p.subs !== undefined ? !!p.subs : prefs.subs;
+        const gain = p && p.gain !== undefined && isFinite(Number(p.gain)) ? Math.max(0, Math.min(15, Number(p.gain))) : prefs.gain;
+        const even = p && p.even !== undefined ? !!p.even : prefs.even;
+        if (gain !== prefs.gain || even !== prefs.even) {
+            prefs.gain = gain; prefs.even = even;
+            log('sound: +' + gain + ' dB' + (even ? ', even' : ''));
+            if (cur && cur.id) { sink.ctl(cur.id, 'gain ' + gain); sink.ctl(cur.id, even ? 'even on' : 'even off'); }
+        }
         if (subs !== prefs.subs) {
             prefs.subs = subs;
             log('subtitles ' + (subs ? 'on' : 'off'));
@@ -272,6 +282,7 @@ function createPlayback(o) {
             video: c && c.player.video ? c.player.video : null, interlaced: !!(c && c.player.interlaced), fields: c ? c.player.fields : 0,
             audioError: c ? c.player.audioError || null : null, buffered: c ? c.player.buffered : null,
             subs: c && c.player.subs ? Object.assign({ on: prefs.subs }, c.player.subs) : null,
+            gain: prefs.gain, even: prefs.even,
         });
     }
 
