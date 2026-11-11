@@ -53,11 +53,14 @@ test('the channel list: LIST opens it on the channel playing; a touch on a row p
     const M = c.menuLayout(PL);
     const r = M.row(2 - m.first);
     c.touch('down', r.x + 20, r.y + r.h / 2, PL, info);
+    assert.deepStrictEqual(acts, [], 'not on the way down: it may be a drag');
+    c.touch('up', r.x + 20, r.y + r.h / 2, PL, info);
     assert.deepStrictEqual(acts, [{ channel: 'u2' }]);
     assert.strictEqual(c.menu(), null, 'closed');
     // the channel playing chosen again: nothing
     c.openList();
     c.touch('down', M.row(0 - c.menu().first).x + 20, M.row(0 - c.menu().first).y + 10, PL, info);
+    c.touch('up', M.row(0 - c.menu().first).x + 20, M.row(0 - c.menu().first).y + 10, PL, info);
     assert.strictEqual(acts.length, 1);
 });
 
@@ -120,14 +123,42 @@ test('the guide: EPG opens it on the channel playing; the knob moves along, a pu
     c.touch('down', G.prev.x + 10, G.prev.y + 10, PL, info);
     assert.strictEqual(c.guide().uuid, 'u0');
     const r1 = G.row(1);
-    c.touch('down', r1.x + 50, r1.y + 10, PL, info);
+    c.touch('down', r1.x + 50, r1.y + 10, PL, info); c.touch('up', r1.x + 50, r1.y + 10, PL, info);
     assert.strictEqual(c.guide().focus, 1);
-    c.touch('down', r1.x + 50, r1.y + 10, PL, info);
+    c.touch('down', r1.x + 50, r1.y + 10, PL, info); c.touch('up', r1.x + 50, r1.y + 10, PL, info);
     assert.strictEqual(c.guide(), null, 'the channel playing: closed, nothing played');
     assert.strictEqual(acts.length, 1);
     c.openGuide('u0');
     clock += 30001;
     assert.strictEqual(c.guide(), null, '30 s idle');
+});
+
+test('a finger dragged along the channel list scrolls it, and plays nothing', () => {
+    const many = [];
+    for (let i = 0; i < 40; i++) many.push({ uuid: 'c' + i, t: (i + 1) + '  Channel ' + (i + 1), n: (i + 1) + '  Channel ' + (i + 1) });
+    const inf = Object.assign({}, info, { channels: many, current: 'c0' });
+    const acts = [];
+    const c = createControls({ now: () => clock, act: (a) => acts.push(a) });
+    c.key(inf); c.show(); c.openList();
+    const M = c.menuLayout(PL), r = M.row(2);
+    assert.strictEqual(c.menu().first, 0);
+    // up the screen by three rows and a bit: the list goes three rows on
+    c.touch('down', r.x + 30, r.y + 5, PL, inf);
+    for (let d = 0; d <= M.ih * 3 + 10; d += 10) c.touch('move', r.x + 30, r.y + 5 - d, PL, inf);
+    c.touch('up', r.x + 30, r.y + 5 - M.ih * 3 - 10, PL, inf);
+    c.menuLayout(PL);
+    assert.strictEqual(c.menu().first, 3, 'three rows on');
+    assert.deepStrictEqual(acts, [], 'a drag plays nothing');
+    // and back down
+    c.touch('down', r.x + 30, r.y, PL, inf);
+    for (let d = 0; d <= M.ih * 2 + 10; d += 10) c.touch('move', r.x + 30, r.y + d, PL, inf);
+    c.touch('up', r.x + 30, r.y + M.ih * 2 + 10, PL, inf);
+    c.menuLayout(PL);
+    assert.strictEqual(c.menu().first, 1);
+    // a tap still plays the row under it
+    const r0 = c.menuLayout(PL).row(0);
+    c.touch('down', r0.x + 30, r0.y + 10, PL, inf); c.touch('up', r0.x + 30, r0.y + 10, PL, inf);
+    assert.deepStrictEqual(acts, [{ channel: 'c1' }]);
 });
 
 test('drawn: the bar, the programme, the list', () => {

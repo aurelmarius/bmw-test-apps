@@ -2,8 +2,9 @@
 /**
  * controls.js - the channel's controls over the picture: a bar at the bottom with the channel, what is on now and
  * how far it is (from the EPG), and the buttons  CH-, CH+, LIST, EPG, stop, aspect (fit, zoom, fill), exit. LIST opens
- * the channels above the bar (the one playing marked, each with what is on now): a touch on one, or the knob (or a push
- * up / down) and a press, plays it; a push left / right, a touch outside or 10 s idle closes it.
+ * the channels above the bar (the one playing marked, each with what is on now): a tap on one, or the knob (or a push
+ * up / down) and a press, plays it; a finger dragged along it scrolls it (the guide's programme too); a push left /
+ * right, a touch outside or 10 s idle closes it.
  *
  * EPG opens the guide over the picture: a channel's programme for the next 24 hours, on the left (now marked, with how
  * far it is), and the chosen one's details on the right (its time, subtitle, description). The knob (or a push up /
@@ -137,8 +138,33 @@ function createControls(o) {
     }
     function height(pl) { return Math.round(pl.h * 0.3); }
 
+    // a finger on the channel list or the guide: a tap (it lifts where it came down) chooses, a drag scrolls the list
+    let drag = null;   // { kind: 'menu' | 'guide', y0, lastY, acc, ih, moved, tap }
+    function scrollList(kind, n) {
+        if (kind === 'menu' && menu) {
+            menu.first = Math.max(0, Math.min(menu.items.length - 1, menu.first + n));
+            menu.focus = Math.max(0, Math.min(menu.items.length - 1, menu.focus + n));
+        } else if (kind === 'guide' && guide) {
+            guide.first = Math.max(0, guide.first + n);
+            guide.focus = Math.max(0, guide.focus + n);
+            guideEvents();   // the focus kept on the programme
+        }
+    }
     function touch(phase, x, y, pl) {
-        if (phase !== 'down') return true;   // the picture keeps its touches; a tap acts on its way down
+        if (drag && (phase === 'move' || phase === 'up')) {
+            // the list follows the finger from where it came down (once it moved more than a tap does)
+            if (!drag.moved && Math.abs(y - drag.y0) > 14) { drag.moved = true; drag.acc = drag.y0 - y; }
+            else if (drag.moved) drag.acc += drag.lastY - y;
+            if (drag.moved) {
+                const n = drag.acc > 0 ? Math.floor(drag.acc / drag.ih) : Math.ceil(drag.acc / drag.ih);
+                if (n) { drag.acc -= n * drag.ih; scrollList(drag.kind, n); }
+            }
+            drag.lastY = y;
+            if (phase === 'up') { const d = drag; drag = null; if (!d.moved && d.tap) d.tap(); }
+            show();
+            return true;
+        }
+        if (phase !== 'down') return true;   // the picture keeps its touches; a tap acts on its way down (a list's, on its way up)
         if (!visible()) { show(); return true; }
         if (guideOpen()) {
             const G = guideLayout(pl);
@@ -151,11 +177,12 @@ function createControls(o) {
                 for (let k = 0; k < G.rows; k++) {
                     const r = G.row(k), n = guide.first + k;
                     if (n < ev.length && inside(r)) {
-                        if (n === guide.focus) guidePlay();   // a second touch on the chosen one
-                        else guide.focus = n;
+                        drag = { kind: 'guide', y0: y, lastY: y, acc: 0, ih: G.ih, moved: false,
+                            tap: () => { if (!guide) return; if (n === guide.focus) guidePlay(); else guide.focus = n; } };   // a second tap on the chosen one: watch
                         return true;
                     }
                 }
+                drag = { kind: 'guide', y0: y, lastY: y, acc: 0, ih: G.ih, moved: false, tap: null };
                 return true;
             }
             guide = null;
@@ -165,12 +192,13 @@ function createControls(o) {
             const M = menuLayout(pl);
             if (x >= M.x && x <= M.x + M.w && y >= M.y && y <= M.y + M.h) {
                 for (let k = 0; k < M.rows; k++) {
-                    const r = M.row(k);
-                    if (y >= r.y && y < r.y + r.h) { choose(menu.first + k); return true; }
+                    const r = M.row(k), n = menu.first + k;
+                    if (y >= r.y && y < r.y + r.h) { drag = { kind: 'menu', y0: y, lastY: y, acc: 0, ih: M.ih, moved: false, tap: () => { if (menu) choose(n); } }; return true; }
                 }
-                // the list's title row: a page up; below the last row: a page down
-                const step = Math.max(1, M.rows - 1);
-                menu.focus = Math.max(0, Math.min(menu.items.length - 1, menu.focus + (y < M.y + M.pad + M.ih ? -step : step)));
+                // the list's title row: a page up; below the last row: a page down (a tap); a drag scrolls
+                const step = Math.max(1, M.rows - 1), up = y < M.y + M.pad + M.ih;
+                drag = { kind: 'menu', y0: y, lastY: y, acc: 0, ih: M.ih, moved: false,
+                    tap: () => { if (menu) menu.focus = Math.max(0, Math.min(menu.items.length - 1, menu.focus + (up ? -step : step))); } };
                 show();
                 return true;
             }
