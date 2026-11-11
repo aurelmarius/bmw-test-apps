@@ -1,7 +1,7 @@
 {
   "id": "aurelm-emby",
   "kind": "tool",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "license": "GPL-3.0-or-later",
   "title": "Emby cast service",
   "description": "For the app Emby: the head unit as a cast target in the Emby phone app (Emby's remote control, as Kodi's Emby add-on), and the film's player: the server sends H.264 up to 1080p with AAC or AC-3, decoded on the GPU into mgu-render's frame file (the app shows it while parked) and played into SmartXbar's CarLife input. Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code); keeps only the access token. Its internet goes through mgu-uplink, as uid 13101 only; the player runs as nobody (as AirPlay Test's receiver).",

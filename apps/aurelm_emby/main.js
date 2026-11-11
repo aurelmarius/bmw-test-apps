@@ -36,7 +36,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.3.9';
+const SERVICE_VERSION = '0.3.11';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 // a film is on: playing, paused, starting; not one parked by Stop on the iDrive (its player closed)
