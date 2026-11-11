@@ -421,6 +421,37 @@ test('service: a logo answered 403 is asked for once more with a fresh challenge
     } finally { s.close(); srv.close(); }
 });
 
+test('client: another site\'s logo is asked for as a browser asks, redirects followed; a GitHub page\'s address taken as its file\'s', async () => {
+    // a logo site that answers 404 to other clients than a browser, and redirects to the picture
+    let asked = [];
+    const site = http.createServer((req, res) => {
+        asked.push({ url: req.url, ua: req.headers['user-agent'], accept: req.headers.accept });
+        if (!/Safari/.test(req.headers['user-agent'] || '')) { res.writeHead(404); return res.end(); }
+        if (req.url === '/images/pro.png/revision/latest') { res.writeHead(302, { Location: '/images/pro.png' }); return res.end(); }
+        if (req.url === '/images/pro.png') { res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(LOGO_PNG); }
+        if (req.url === '/svg') { res.writeHead(200, { 'Content-Type': 'image/svg+xml' }); return res.end('<svg/>'); }
+        res.writeHead(404); res.end();
+    });
+    await new Promise((r) => site.listen(0, '127.0.0.1', r));
+    const base = 'http://127.0.0.1:' + site.address().port;
+    const { createNet } = require(path.join(DIR, 'netx'));
+    const t = tvhm.createTvh({ nx: createNet({ systemDns: true }) });
+    t.use({ server: 'http://127.0.0.1:1', user: 'car', password: 'pw' });
+    try {
+        const b = await t.logo(base + '/images/pro.png/revision/latest');
+        assert.ok(b.equals(LOGO_PNG));
+        assert.ok(asked.every((a) => /Safari/.test(a.ua) && /^image\/png/.test(a.accept)), JSON.stringify(asked));
+        let e = null;
+        try { await t.logo(base + '/missing.png'); } catch (x) { e = x; }
+        assert.ok(e && /127\.0\.0\.1:\d+\/missing\.png: HTTP 404/.test(e.message), String(e));
+        e = null;
+        try { await t.logo(base + '/svg'); } catch (x) { e = x; }
+        assert.ok(e && /\/svg: not a PNG \(image\/svg\+xml\)/.test(e.message), String(e));
+        assert.strictEqual(tvhm.githubRaw('https://github.com/picons/picons/blob/master/logos/hbo.png'), 'https://raw.githubusercontent.com/picons/picons/master/logos/hbo.png');
+        assert.strictEqual(tvhm.githubRaw('https://static.wikia.nocookie.net/x.png'), 'https://static.wikia.nocookie.net/x.png');
+    } finally { site.close(); }
+});
+
 test('service: sign-out forgets the password', async () => {
     const srv = await fakeTvh();
     const s = await signedIn(srv);
