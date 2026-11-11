@@ -212,6 +212,49 @@ test("the guide's times in the car's zone (the head unit keeps UTC): Romania by 
     c.setZone(() => 'eet');
 });
 
+test('the cluster card: drawn on cluster-render\'s panel while a channel plays, its programme, hidden when it stops', () => {
+    const fs = require('fs'), os = require('os');
+    const { createClusterCard, CARD, PLACE } = require(path.join(__dirname, '..', 'apps', 'aurelm_tvh', 'cluster_card'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvh-cluster-'));
+    const calls = [];
+    const fake = path.join(dir, 'client.js');
+    fs.writeFileSync(fake, "const E = require('events'); let calls = null;\n" +
+        "class ClusterRender extends E { constructor(app) { super(); calls = global.__clusterCalls; calls.push(['new', app]); }\n" +
+        "  connect() { calls.push(['connect']); } image(o) { calls.push(['image', o]); return 7; } set(r, o) { calls.push(['set', r, o]); }\n" +
+        "  pixels(r, rects, px) { calls.push(['pixels', r, px.length]); return true; } close() { calls.push(['close']); } }\n" +
+        'module.exports = { ClusterRender };\n');
+    global.__clusterCalls = calls;
+    let playing = null, on = true;
+    const { Canvas } = require(path.join(__dirname, '..', 'kit', 'runtime', 'canvas'));
+    const card = createClusterCard({ Canvas, clientPath: fake, socketPath: path.join(dir, 'none.sock'), hm: (t) => String(t), png: {},
+        ask: () => new Promise(() => {}), enabled: () => on, offset: () => ({ dx: 40, dy: 0 }), info: () => playing });
+    card.update();
+    assert.strictEqual(calls.length, 0, 'nothing playing: cluster-render not asked');
+    const now = Date.now() / 1000;
+    playing = { uuid: 'u1', name: '4  PRO TV HD', title: 'Batem palma?', start: now - 600, stop: now + 3000, next: { start: now + 3000, title: 'Stirile Pro TV' } };
+    card.update();
+    const img = calls.filter((c) => c[0] === 'image')[0];
+    assert.ok(img, 'an image layer');
+    assert.strictEqual(img[1].target, 'panel');
+    assert.strictEqual(img[1].x, PLACE.x + 40, 'moved by the setting');
+    assert.deepStrictEqual([img[1].w, img[1].h, img[1].iw, img[1].ih], [CARD.w, CARD.h, CARD.w, CARD.h]);
+    assert.ok(calls.some((c) => c[0] === 'pixels' && c[2] === CARD.w * CARD.h * 4), 'the card\'s pixels');
+    assert.ok(calls.some((c) => c[0] === 'set' && c[2].visible === 1), 'shown');
+    const n = calls.length;
+    card.update();
+    assert.strictEqual(calls.length, n, 'nothing changed: nothing sent');
+    playing = null;
+    card.update();
+    assert.deepStrictEqual(calls[calls.length - 1], ['set', 7, { visible: 0 }], 'hidden when the channel stops');
+    on = false; card.update();
+    assert.strictEqual(card.state().state, 'off');
+    // the card itself: opaque inside, transparent at the corners
+    const cv = card.render(Object.assign({ now: Date.now(), logo: null }, { uuid: 'u1', name: '4  PRO TV HD', title: 'Batem palma?', start: now - 600, stop: now + 3000, next: null }));
+    assert.strictEqual(cv.d[3], 0, 'a rounded corner: transparent');
+    assert.ok(cv.d[((CARD.h >> 1) * CARD.w + 4) * 4 + 3] > 200, 'inside: opaque');
+    card.close();
+});
+
 let failed = 0;
 for (const t of tests) {
     try { t.f(); console.log('ok   ' + t.n); } catch (e) { failed++; console.log('FAIL ' + t.n + '\n     ' + (e && e.stack || e)); }

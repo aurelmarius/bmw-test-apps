@@ -2,7 +2,7 @@
   "id": "aurelm_tvh",
   "title": "TVH",
   "description": "Tvheadend's TV channels on the centre screen: sign in once from the phone (QR code), then Watch, Channel + / -, or the channel list over the picture. The picture shows while parked, the sound plays on the car's speakers. The server transcodes (profiles mgu-hd, mgu-sd, mgu-low: H.264 deinterlaced, AAC) and the profile goes down by itself when the internet is slow. Needs the TVH service.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "vendor": "custom",
   "loggingId": "OA9V",
   "iconGlyph": "TV",
@@ -153,6 +153,100 @@
         [
           "system",
           "The head unit's own"
+        ]
+      ]
+    },
+    {
+      "key": "cluster",
+      "label": "The channel on the instrument cluster (a card over the media widget; needs cluster-render from the Store, as Waze on cluster)",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "clusterX",
+      "label": "Cluster card: left / right",
+      "type": "choice",
+      "default": "0",
+      "options": [
+        [
+          "-160",
+          "left 160 px"
+        ],
+        [
+          "-120",
+          "left 120 px"
+        ],
+        [
+          "-80",
+          "left 80 px"
+        ],
+        [
+          "-40",
+          "left 40 px"
+        ],
+        [
+          "0",
+          "as placed"
+        ],
+        [
+          "40",
+          "right 40 px"
+        ],
+        [
+          "80",
+          "right 80 px"
+        ],
+        [
+          "120",
+          "right 120 px"
+        ],
+        [
+          "160",
+          "right 160 px"
+        ]
+      ]
+    },
+    {
+      "key": "clusterY",
+      "label": "Cluster card: up / down",
+      "type": "choice",
+      "default": "0",
+      "options": [
+        [
+          "-160",
+          "up 160 px"
+        ],
+        [
+          "-120",
+          "up 120 px"
+        ],
+        [
+          "-80",
+          "up 80 px"
+        ],
+        [
+          "-40",
+          "up 40 px"
+        ],
+        [
+          "0",
+          "as placed"
+        ],
+        [
+          "40",
+          "down 40 px"
+        ],
+        [
+          "80",
+          "down 80 px"
+        ],
+        [
+          "120",
+          "down 120 px"
+        ],
+        [
+          "160",
+          "down 160 px"
         ]
       ]
     },
