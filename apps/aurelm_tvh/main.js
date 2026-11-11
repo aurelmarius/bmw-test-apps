@@ -43,7 +43,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.TVH_SOCK || '/run/aurelm-tvh.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the socket
 // starts the new one at the next request
-const SERVICE_VERSION = '0.1.4';
+const SERVICE_VERSION = '0.1.5';
 // a channel is on: the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'buffering'];
 const channelOn = (pb) => !!(pb && ACTIVE.indexOf(pb.state) >= 0);
@@ -144,7 +144,9 @@ function playRows(s, rows) {
         const il = pb.interlaced ? '; INTERLACED: profile ' + pb.profile + ' does not deinterlace (Tvheadend: its codec profile, Deinterlace)' : '';
         pic = { state: pb.interlaced ? 'wait' : v.shown ? 'ok' : 'wait',
             detail: 'H.264 ' + open.w + 'x' + open.h + (open.fps ? ' ' + Math.round(open.fps) + 'p' : '') + ', ' + (tk.shown || 0) + ' shown' + (tk.late ? ', ' + tk.late + ' late' : '') +
-                (tk.buffered != null ? ', ' + tk.buffered.toFixed(1) + ' s buffered' : '') + (v.why ? '; ' + v.why : '') + il };
+                (tk.buffered != null ? ', ' + tk.buffered.toFixed(1) + ' s buffered' : '') + (v.why ? '; ' + v.why : '') + il +
+                // the channel's DVB subtitles (the profile copies them), laid over the picture by the player
+                (pb.subs ? (pb.subs.error ? '; subtitles: ' + pb.subs.error : '; subtitles ' + (pb.subs.lang || '?') + (pb.subs.on ? (tk.subs ? ', ' + tk.subs + ' received' : '') : ' (off)')) : '') };
     }
     rows.push(Object.assign({ label: 'Picture' }, pic));
     const a = fresh ? pl.audio : null, ca = s.carAudio || {};
@@ -207,7 +209,7 @@ mgu.run({
 
         function prefsNow() {
             const p = ctx.settings.get('profile');
-            return { profile: PROFILES.indexOf(p) >= 0 ? p : 'mgu-hd', adaptive: ctx.settings.get('adaptive') !== false };
+            return { profile: PROFILES.indexOf(p) >= 0 ? p : 'mgu-hd', adaptive: ctx.settings.get('adaptive') !== false, subs: ctx.settings.get('subs') !== false };
         }
         async function poll() {
             if (polling) return;
@@ -215,7 +217,7 @@ mgu.run({
             try {
                 st = await ask('status');
                 const want = prefsNow(), have = st && st.prefs;
-                if (st && st.version && (!have || have.profile !== want.profile || have.adaptive !== want.adaptive)) {
+                if (st && st.version && (!have || have.profile !== want.profile || have.adaptive !== want.adaptive || have.subs !== want.subs)) {
                     const r = await ask('prefs', want);
                     if (r) st = r;
                 }

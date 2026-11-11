@@ -49,7 +49,7 @@ function createPlayback(o) {
     const tvh = o.tvh, sink = o.sink;
     const retryMs = o.retryMs != null ? o.retryMs : 2000;
     const upAfterMs = o.adaptUpMs || 300000;
-    const prefs = { profile: 'mgu-hd', adaptive: true };
+    const prefs = { profile: 'mgu-hd', adaptive: true, subs: true };
     let cur = null, ids = 0;
     const st = { state: 'idle', phase: null, phaseAt: null, error: null, at: now() };
 
@@ -82,6 +82,7 @@ function createPlayback(o) {
         c.bytes = 0;
         phase('player');
         sink.start(id);
+        if (!prefs.subs) sink.ctl(id, 'subs off');   // the player lays the channel's DVB subtitles over the picture unless told
         const res = r.res;
         res.on('data', (d) => {
             if (cur !== c || c.id !== id) return;
@@ -147,6 +148,12 @@ function createPlayback(o) {
     function setPrefs(p) {
         const profile = p && p.profile ? String(p.profile) : prefs.profile;
         const adaptive = p && p.adaptive !== undefined ? !!p.adaptive : prefs.adaptive;
+        const subs = p && p.subs !== undefined ? !!p.subs : prefs.subs;
+        if (subs !== prefs.subs) {
+            prefs.subs = subs;
+            log('subtitles ' + (subs ? 'on' : 'off'));
+            if (cur && cur.id) sink.ctl(cur.id, subs ? 'subs on' : 'subs off');
+        }
         if (profile === prefs.profile && adaptive === prefs.adaptive) return;
         prefs.profile = profile; prefs.adaptive = adaptive;
         log('quality: ' + profile + (adaptive ? ', lower when the internet is slow' : ', fixed'));
@@ -182,6 +189,7 @@ function createPlayback(o) {
             c.player.video = ev.video || null; c.player.audioCodec = ev.audio ? ev.audio.codec : null;
             if (ev.video && ev.video.interlaced) { c.player.interlaced = true; log('stream ' + id + ': interlaced: profile ' + c.profile + ' does not deinterlace'); }
         } else if (ev.ev === 'audio' && ev.ok === false) c.player.audioError = ev.error;
+        else if (ev.ev === 'subs') c.player.subs = ev.ok ? { lang: ev.lang || '' } : { error: ev.error };
         else if (ev.ev === 'error') c.player.error = ev.error;
         else if (ev.ev === 'tick') {
             const s = ev.state === 'starting' ? 'loading' : ev.state;
@@ -209,6 +217,7 @@ function createPlayback(o) {
             kbytes: c && c.bytes ? Math.round(c.bytes / 1024) : 0,
             video: c && c.player.video ? c.player.video : null, interlaced: !!(c && c.player.interlaced), fields: c ? c.player.fields : 0,
             audioError: c ? c.player.audioError || null : null, buffered: c ? c.player.buffered : null,
+            subs: c && c.player.subs ? Object.assign({ on: prefs.subs }, c.player.subs) : null,
         });
     }
 

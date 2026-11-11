@@ -28,6 +28,11 @@ progressive, no B frames, a key frame each second, 3.0 Mbit/s, AAC-LC stereo 130
 A profile that does not deinterlace (or `pass`) still plays: the player says the stream is interlaced, and the
 app's page says which profile does not deinterlace. An MP2 sound is refused with "choose a profile that transcodes".
 
+**Subtitles.** A channel with its own subtitle stream (HBO: DVB subtitles, Romanian then Hungarian) has them only
+if the profile passes them on: each `mgu-*` profile's **Subtitle codec profile: Copy** (Tvheadend copies the first
+subtitle stream). The player lays them over the picture; the app's setting "Subtitles" (on by default) turns them off
+(`{"cmd":"prefs",...,"subs":false}`, at once on the channel playing).
+
 **Quality.** The app's setting "Stream profile" (mgu-hd, mgu-sd, mgu-low) is the best one asked for. With "Lower the
 profile by itself when the internet is slow" on (the default), the stream running dry (the player "buffering")
 twice within a minute, or for 8 s at once, makes the channel go on with the next profile down (a new stream); 5
@@ -113,7 +118,7 @@ nice 10, idle I/O, 2 cores at most, 256 MiB, 48 tasks. `tvh-player` runs with th
 ## Control
 
 One JSON object per line on `/run/aurelm-tvh.sock`: `{"cmd":"status"}`, `{"cmd":"channels"}` (the list and EPG now),
-`{"cmd":"logo","uuid":"..."}` (a logo's PNG), `{"cmd":"epg","uuid":"..."}` (the guide), `{"cmd":"play","uuid":"..."}`, `{"cmd":"stop"}`, `{"cmd":"prefs","profile":"mgu-hd","adaptive":true}`,
+`{"cmd":"logo","uuid":"..."}` (a logo's PNG), `{"cmd":"epg","uuid":"..."}` (the guide), `{"cmd":"play","uuid":"..."}`, `{"cmd":"stop"}`, `{"cmd":"prefs","profile":"mgu-hd","adaptive":true,"subs":true}`,
 `{"cmd":"refresh"}`, `{"cmd":"signin-open"}`, `{"cmd":"signin-close"}`, `{"cmd":"signout"}`, `{"cmd":"exit"}`.
 
 Tests: `node tests/tvh_service.test.js` (a fake Tvheadend: Digest SHA-256 and MD5 with expiring nonces, Basic, the

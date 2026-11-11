@@ -2,7 +2,7 @@
 # Builds build/tvh-player for the head unit, in ubuntu:18.04 (glibc 2.27, as the unit). Needs git, python3 and
 # Docker. FFmpeg n6.1.2 (the same pinned commit as the other players), configured with only what a channel from a
 # Tvheadend transcoding profile needs: the mpegts demuxer, the h264 / aac / ac3 parsers, the aac, ac3 and eac3
-# decoders. Everything else is in this folder: nothing is read from another player's.
+# decoders, and the DVB subtitle decoder. Everything else is in this folder: nothing is read from another player's.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 work="$here/build"
@@ -19,14 +19,16 @@ docker run --rm -v "$here:/n/tvh-player" -w /n/tvh-player ubuntu:18.04 sh -c '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null
     apt-get install -y -qq --no-install-recommends build-essential python3 python3-pyelftools >/dev/null
-    if [ ! -f build/ffmpeg/lib/libavformat.a ]; then
+    # rebuilt when the configuration below changes (the DVB subtitle decoder came in 0.1.6)
+    if [ ! -f build/ffmpeg/lib/libavformat.a ] || [ "$(cat build/ffmpeg/.flags 2>/dev/null)" != "dvbsub-1" ]; then
         rm -rf build/ffmpeg-bld && cp -r build/ffmpeg-src build/ffmpeg-bld
         (cd build/ffmpeg-bld && ./configure --prefix=/n/tvh-player/build/ffmpeg --disable-everything --disable-programs --disable-doc \
             --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample --disable-postproc \
             --disable-network --disable-x86asm --disable-autodetect --disable-iconv \
             --enable-avformat --enable-demuxer=mpegts --enable-parser=h264 --enable-parser=aac --enable-parser=ac3 \
             --enable-decoder=aac --enable-decoder=ac3 --enable-decoder=eac3 \
-            --enable-static --disable-shared --enable-pic >/dev/null && make -s -j"$(nproc)" >/dev/null 2>&1 && make -s install >/dev/null)
+            --enable-decoder=dvbsub --enable-parser=dvbsub \
+            --enable-static --disable-shared --enable-pic >/dev/null && make -s -j"$(nproc)" >/dev/null 2>&1 && make -s install >/dev/null) && echo dvbsub-1 > build/ffmpeg/.flags
     fi
     make -s OUT=build/out FFMPEG=/n/tvh-player/build/ffmpeg -j"$(nproc)"
     chown -R '"$(id -u):$(id -g)"' build
