@@ -54,6 +54,29 @@ function toRuns(img) {
     return runs;
 }
 
+/** runs -> rectangles [x, y, w, h, colour]: the same run (x, length, colour) on the rows below grows one rectangle down.
+ *  0.1.3 in the car: a rectangle a row high each showed the page's background between the rows as thin lines (the page
+ *  is scaled, 1.164, so rows fall between the screen's pixels and the renderer covers their edges in part). Fewer,
+ *  taller rectangles, each drawn a pixel wider and taller than it is (the next one drawn over the overlap), leave no
+ *  gap: a coverage model of the renderer at 1, 1.164 and 1.5 left none with 1 (0.5 left 169 of 1080 pixels part-covered). */
+function toRects(runs) {
+    const open = new Map();   // 'x,len,colour' -> the rectangle growing down, while the row above had the same run
+    const rects = [];
+    let row = -1, seen = new Set();
+    const closeRow = () => { open.forEach((r, k) => { if (!seen.has(k)) open.delete(k); }); seen = new Set(); };
+    for (let i = 0; i < runs.length; i++) {
+        const [x, y, len, c] = runs[i];
+        if (y !== row) { if (row >= 0) closeRow(); if (y !== row + 1) open.clear(); row = y; }
+        const k = x + ',' + len + ',' + c;
+        const r = open.get(k);
+        if (r && r[1] + r[3] === y) r[3]++;
+        else { const n = [x, y, len, 1, c]; rects.push(n); open.set(k, n); }
+        seen.add(k);
+    }
+    return rects;
+}
+const OVERLAP = 1;
+
 /** a decoded picture fitted into the box (never up) */
 function fitBox(png, img) {
     const k = Math.min(BOX.w / img.w, BOX.h / img.h, 1);
@@ -96,7 +119,7 @@ function createLogos(o) {
         await new Promise((res) => png.decodeAsync(buf, (err, img) => {
             if (err) { log.info('tvh logo ' + uuid.slice(0, 6) + ': ' + err.message); done(key, { state: 'none', at: Date.now(), why: err.message, retry: RETRY_MS }); return res(); }
             const f = fitBox(png, img);
-            done(key, { state: 'ok', runs: toRuns(f), w: f.w, h: f.h, at: Date.now() });
+            done(key, { state: 'ok', rects: toRects(toRuns(f)), w: f.w, h: f.h, at: Date.now() });
             res();
         }));
     }
@@ -129,7 +152,7 @@ function createLogos(o) {
             return true;
         }
         const ox = x + Math.floor((BOX.w - e.w) / 2), oy = y + Math.floor((BOX.h - e.h) / 2);
-        for (let i = 0; i < e.runs.length; i++) { const r = e.runs[i]; rec.fillRect(ox + r[0], oy + r[1], r[2], 1, r[3]); }
+        for (let i = 0; i < e.rects.length; i++) { const r = e.rects[i]; rec.fillRect(ox + r[0], oy + r[1], r[2] + OVERLAP, r[3] + OVERLAP, r[4]); }
         return true;
     }
     function stats() {
@@ -140,4 +163,4 @@ function createLogos(o) {
     return { draw, version: () => ver, state: (uuid) => (map.get(keyOf(uuid)) || {}).state, want, stats };
 }
 
-module.exports = { createLogos, toRuns, fitBox, BOX, BACK };
+module.exports = { createLogos, toRuns, toRects, fitBox, BOX, BACK };
