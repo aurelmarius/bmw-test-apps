@@ -51,7 +51,8 @@ const st = { state: 'signed-out', error: null, server: null, profiles: null, cha
 let running = false, timer = null, backoff = RETRY_MIN, channelsAt = 0, chans = [], epg = {};
 
 const pb = createPlayback({ tvh, log, sink, profiles: () => st.profiles, retryMs: process.env.TVH_STREAM_RETRY_MS != null ? Number(process.env.TVH_STREAM_RETRY_MS) : undefined,
-    adaptUpMs: Number(process.env.TVH_ADAPT_UP_MS) || undefined });
+    adaptUpMs: Number(process.env.TVH_ADAPT_UP_MS) || undefined, outageMs: Number(process.env.TVH_OUTAGE_MS) || undefined,
+    dataMs: Number(process.env.TVH_STREAM_DATA_MS) || undefined });
 
 function status() { send({ ev: 'status', status: JSON.parse(JSON.stringify(st)) }); }
 function setState(state, error) { st.state = state; st.error = error || null; st.since = Date.now(); status(); }

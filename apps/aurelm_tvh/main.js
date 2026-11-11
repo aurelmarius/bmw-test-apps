@@ -43,10 +43,14 @@ const W = 1600, H = 520;
 const SOCK = process.env.TVH_SOCK || '/run/aurelm-tvh.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the socket
 // starts the new one at the next request
-const SERVICE_VERSION = '0.1.5';
+const SERVICE_VERSION = '0.1.6';
 // a channel is on: the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'buffering'];
 const channelOn = (pb) => !!(pb && ACTIVE.indexOf(pb.state) >= 0);
+/** the service gave up on the connection (2 minutes without the internet): the picture's screen stays, a press tries again */
+const lostOf = (pb) => !!(pb && pb.state === 'error' && pb.lost);
+/** "0:23" */
+const mmss = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
 const PROFILES = ['mgu-hd', 'mgu-sd', 'mgu-low'];
 // the quality each profile is made for (README: the server's profiles), as Emby shows its quality; another profile by name
 const QUALITY = { 'mgu-hd': '3 Mbit/s', 'mgu-sd': '1.5 Mbit/s', 'mgu-low': '0.7 Mbit/s' };
@@ -129,6 +133,7 @@ function playRows(s, rows) {
     const PHASE = { stream: 'asking the server for the stream', player: 'starting the player', retry: 'the stream broke: opening it again' };
     const waited = pb.phaseAt ? Math.max(0, Math.round((s.now - pb.phaseAt) / 1000)) : 0;
     const what = pb.state === 'error' ? pb.error
+        : pb.state === 'loading' && pb.retrySince ? 'reconnecting for ' + mmss(s.now - pb.retrySince) + (pb.error ? ' (' + pb.error + ')' : '')
         : pb.state === 'loading' && PHASE[pb.phase] ? PHASE[pb.phase] + (waited >= 3 ? ' (' + waited + ' s)' : '') + (pb.phase === 'retry' && pb.error ? ': ' + pb.error : '')
             : STATE[pb.state];
     const prof = pb.profile ? ', ' + quality(pb.profile) + (pb.lowered ? ' (lowered: slow internet)' : '') : '';
@@ -299,11 +304,20 @@ mgu.run({
         const parked = Parked.watch(ctx, log, { strict: true });
         const mirror = createMirrorView({ RenderClient, Recorder: record.Recorder, kit: record, appId: ctx.spec.id, log,
             hintText: 'Touch the picture or use the iDrive controller for the controls', overlay: () => overlay(),
-            onTouch: (phase, x, y, pl) => { if (pl && controls.touch(phase, x, y, pl, barInfo())) mirror.tick(); },
-            onCcu: (c) => { const r = controls.ccu(c); mirror.tick(); return r; },
+            onTouch: (phase, x, y, pl) => {
+                if (lostOf(st && st.playback)) { if (phase === 'up') tryAgain('a touch'); return; }
+                if (pl && controls.touch(phase, x, y, pl, barInfo())) mirror.tick();
+            },
+            onCcu: (c) => {
+                // lost: a press tries again; a push (tilt) leaves the picture as ever
+                if (lostOf(st && st.playback)) { const p = c.press && c.press !== lastPress; lastPress = c.press; if (p) tryAgain('the controller'); return !c.tilt; }
+                lastPress = c.press;
+                const r = controls.ccu(c); mirror.tick(); return r;
+            },
             onShown: (on) => pageTouch(!on),
             // another channel: a new player; the picture stays up (black, "Tuning...") meanwhile
-            hold: () => channelOn(st && st.playback),
+            // and while the connection is lost: its message stays, a press tries again
+            hold: () => channelOn(st && st.playback) || lostOf(st && st.playback),
             holdText: 'between two channels',
             idleText: 'the player is not running', hiddenText: 'hidden: press "Watch" to show it again',
             statIno: (p) => { const f = fs.statSync(p); return f.isFile() ? f.ino : null; } });
@@ -363,6 +377,11 @@ mgu.run({
         /* ---------- the controls over the picture ---------- */
         const ASPECTS = ['fit', 'zoom', 'fill'];
         const aspect = () => (ASPECTS.indexOf(ctx.settings.get('aspect')) >= 0 ? ctx.settings.get('aspect') : 'fit');
+        let lastPress = 0;
+        function tryAgain(by) {
+            const pb = st && st.playback;
+            if (pb && pb.channel) playChannel(pb.channel.uuid, 'again (' + by + ')');
+        }
         const controls = createControls({
             guide: guideOf,
             act: (a) => {
@@ -390,8 +409,12 @@ mgu.run({
             const info = barInfo();
             const bar = controls.key(info);
             const pb = st && st.playback;
-            const loading = !!(pb && (pb.state === 'loading' || pb.state === 'buffering') && !(pl && pl.running && pl.tick && pl.tick.shown > 0));
-            const word = pb && pb.state === 'loading' ? 'Tuning ' + info.title + '...' : 'Buffering...';
+            const lost = lostOf(pb);
+            const loading = lost || !!(pb && (pb.state === 'loading' || pb.state === 'buffering') && !(pl && pl.running && pl.tick && pl.tick.shown > 0));
+            // reconnecting: since the break, by the second (the key changes each second: the overlay is drawn again)
+            const word = lost ? 'No connection to the server. Press to try again'
+                : pb && pb.state === 'loading' && pb.retrySince ? 'Reconnecting... ' + mmss(Date.now() - pb.retrySince)
+                    : pb && pb.state === 'loading' ? 'Tuning ' + info.title + '...' : 'Buffering...';
             return {
                 key: [mode, fw, fh, bar, loading, word].join('#'),
                 rect: (p) => videoRect(mode, fw, fh, p),
@@ -522,7 +545,8 @@ mgu.run({
             const cv = ctx.canvas(W, H).clear(t.bg);
             const page = st && st.page && st.page.open ? st.page : null;
             const pb = st && st.playback;
-            const live = pb && pb.state === 'error' ? { text: 'ERROR', color: 'accent' } : pb && pb.state === 'buffering' ? { text: 'BUFFERING' }
+            const live = lostOf(pb) ? { text: 'NO CONNECTION', color: 'accent' } : pb && pb.state === 'error' ? { text: 'ERROR', color: 'accent' }
+                : pb && pb.state === 'loading' && pb.retrySince ? { text: 'RECONNECTING', color: 'accent' } : pb && pb.state === 'buffering' ? { text: 'BUFFERING' }
                 : pb && channelOn(pb) ? { text: pb.state === 'playing' ? 'LIVE ' + (QUALITY[pb.profile] || pb.profile || '') : 'TUNING', color: 'cold' } : null;
             G.frame(cv, t, ['TV', 'Status'], tab, [busy && { text: busy, color: 'accent' }, page && { text: 'SIGN-IN ' + Math.ceil((page.left || 0) / 60) + ' MIN' }, live]);
             if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); st.logoStats = logos.stats(); }
