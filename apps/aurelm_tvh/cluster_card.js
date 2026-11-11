@@ -11,7 +11,8 @@
  *
  * Its place (PLACE): the media widget in a 2020s G-series cluster with the map in the middle (a photo of the car,
  * 2026-11-11: the cover at about 1320-1460 x 195-330, its three lines to y 490, from 1210 to 1630 at the widest);
- * the settings move it by up to 160 px. The client is the one cluster-render installs beside itself
+ * the settings move it by up to 160 px. Drawn as BMW's widget is: the logo in the cover's place, the lines centred
+ * under it, on a dark field that fades out into the dial (no frame). The client is the one cluster-render installs beside itself
  * (/var/opt/cluster-render/current/cluster_render_client.js, MPL-2.0, Node 8), so it speaks the service's protocol.
  *
  *   const card = createClusterCard({ log, ask, png, Canvas (the kit's), info, enabled, offset, hm });
@@ -23,12 +24,15 @@ const fs = require('fs');
 
 const CLIENT = '/var/opt/cluster-render/current/cluster_render_client.js';
 const SOCKET = '/dev/shm/cluster-render/render.sock';
-const CARD = { w: 440, h: 330 };
-const PLACE = { x: 1170, y: 180 };      // panel pixels (1920x720): the right dial's media widget
-const LOGO = { w: 200, h: 120 };        // the server's logos are 5:3
+const CARD = { w: 520, h: 420 };
+const PLACE = { x: 1130, y: 140 };      // panel pixels (1920x720): centred on the right dial's media widget (1390, 345)
+const LOGO = { w: 190, h: 114 };        // in the cover's place; the server's logos are 5:3
 const MIN_MS = 5000;
 
-const BG = [16, 20, 26, 255], TEXT = [255, 255, 255, 255], DIM = [255, 255, 255, 170], BLUE = [64, 160, 235, 255], TRACK = [255, 255, 255, 50];
+// as BMW's widget: no frame, the lines centred under the cover, white and a softer white; behind them a dark field
+// that fades out to the dial (an ellipse, opaque inside FADE_IN of its radius: it hides the widget underneath)
+const FIELD = [10, 12, 16], FADE_IN = 0.7;
+const TEXT = [255, 255, 255, 255], SOFT = [255, 255, 255, 205], DIM = [255, 255, 255, 150], BLUE = [64, 160, 235, 255], TRACK = [255, 255, 255, 46];
 
 function clip(cv, s, size, w, font) {
     s = String(s || '');
@@ -37,33 +41,47 @@ function clip(cv, s, size, w, font) {
     return s.trim() + '...';
 }
 
+/** the dark field: opaque in the middle, smoothly transparent at the ellipse's edge */
+function field(cv) {
+    const rx = CARD.w / 2 - 2, ry = CARD.h / 2 - 2, cx = CARD.w / 2, cy = CARD.h / 2, d = cv.d;
+    for (let y = 0; y < CARD.h; y++) {
+        for (let x = 0; x < CARD.w; x++) {
+            const ex = (x + 0.5 - cx) / rx, ey = (y + 0.5 - cy) / ry, r = Math.sqrt(ex * ex + ey * ey);
+            if (r >= 1) continue;
+            const t = r <= FADE_IN ? 1 : 1 - (r - FADE_IN) / (1 - FADE_IN), a = t * t * (3 - 2 * t);
+            const i = (y * CARD.w + x) * 4;
+            d[i] = FIELD[0]; d[i + 1] = FIELD[1]; d[i + 2] = FIELD[2]; d[i + 3] = Math.round(a * 255);
+        }
+    }
+}
+
 /** the card: i = { name, title, start, stop, next: { start, title } | null, logo: { w, h, d } | null, now (ms) } */
 function render(i, hm, Canvas) {
     const cv = new Canvas(CARD.w, CARD.h).clear([0, 0, 0, 0]);
-    cv.roundRect(0, 0, CARD.w, CARD.h, 22, BG);
-    const cx = CARD.w / 2, pad = 24, w = CARD.w - 2 * pad;
-    if (i.logo) cv.blit(i.logo, Math.round(cx - i.logo.w / 2), 16 + Math.round((LOGO.h - i.logo.h) / 2));
+    field(cv);
+    const cx = CARD.w / 2, w = 360, top = 52;
+    if (i.logo) cv.blit(i.logo, Math.round(cx - i.logo.w / 2), top + Math.round((LOGO.h - i.logo.h) / 2));
     else {
-        cv.roundRect(cx - LOGO.w / 2, 16, LOGO.w, LOGO.h, 14, [42, 48, 56, 255]);
-        cv.text(clip(cv, String(i.name).replace(/^\d+\s+/, ''), 30, LOGO.w - 16, 'bold'), cx, 16 + LOGO.h / 2 + 11, 30, TEXT, { align: 'center', font: 'bold', literal: true });
+        cv.roundRect(cx - LOGO.w / 2, top, LOGO.w, LOGO.h, 12, [44, 50, 58, 255]);
+        cv.text(clip(cv, String(i.name).replace(/^\d+\s+/, ''), 30, LOGO.w - 16, 'bold'), cx, top + LOGO.h / 2 + 11, 30, TEXT, { align: 'center', font: 'bold', literal: true });
     }
-    let y = 16 + LOGO.h + 38;
-    cv.text(clip(cv, i.name, 30, w, 'bold'), cx, y, 30, TEXT, { align: 'center', font: 'bold', literal: true });
-    y += 38;
+    let y = top + LOGO.h + 50;
+    cv.text(clip(cv, i.name, 34, w, 'label'), cx, y, 34, TEXT, { align: 'center', literal: true });
+    y += 42;
     if (i.title) {
-        cv.text(clip(cv, i.title, 28, w, 'label'), cx, y, 28, TEXT, { align: 'center', literal: true });
-        y += 32;
+        cv.text(clip(cv, i.title, 30, w, 'label'), cx, y, 30, SOFT, { align: 'center', literal: true });
+        y += 40;
         if (i.start && i.stop && i.stop > i.start) {
             const left = Math.max(0, Math.round((i.stop * 1000 - i.now) / 60000));
-            cv.text(hm(i.start) + ' - ' + hm(i.stop) + (left ? '   ' + left + ' min left' : ''), cx, y, 21, DIM, { align: 'center', literal: true });
-            y += 14;
-            const f = Math.max(0, Math.min(1, (i.now / 1000 - i.start) / (i.stop - i.start)));
-            cv.roundRect(pad, y, w, 6, 3, TRACK);
-            if (f > 0) cv.roundRect(pad, y, Math.max(6, w * f), 6, 3, BLUE);
-            y += 32;
+            cv.text(hm(i.start) + ' - ' + hm(i.stop) + (left ? '  (' + left + ' min)' : ''), cx, y, 26, TEXT, { align: 'center', literal: true });
+            y += 16;
+            const bw = 240, f = Math.max(0, Math.min(1, (i.now / 1000 - i.start) / (i.stop - i.start)));
+            cv.roundRect(cx - bw / 2, y, bw, 4, 2, TRACK);
+            if (f > 0) cv.roundRect(cx - bw / 2, y, Math.max(4, bw * f), 4, 2, BLUE);
+            y += 34;
         }
-        if (i.next && i.next.title) cv.text(clip(cv, hm(i.next.start) + '  ' + i.next.title, 20, w, 'label'), cx, y, 20, DIM, { align: 'center', literal: true });
-    } else cv.text('No programme', cx, y, 24, DIM, { align: 'center', literal: true });
+        if (i.next && i.next.title) cv.text(clip(cv, hm(i.next.start) + '  ' + i.next.title, 22, 300, 'label'), cx, y, 22, DIM, { align: 'center', literal: true });
+    } else cv.text('No programme', cx, y, 28, DIM, { align: 'center', literal: true });
     return cv;
 }
 

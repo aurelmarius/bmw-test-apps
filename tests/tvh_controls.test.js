@@ -250,8 +250,10 @@ test('the cluster card: drawn on cluster-render\'s panel while a channel plays, 
     assert.strictEqual(card.state().state, 'off');
     // the card itself: opaque inside, transparent at the corners
     const cv = card.render(Object.assign({ now: Date.now(), logo: null }, { uuid: 'u1', name: '4  PRO TV HD', title: 'Batem palma?', start: now - 600, stop: now + 3000, next: null }));
-    assert.strictEqual(cv.d[3], 0, 'a rounded corner: transparent');
-    assert.ok(cv.d[((CARD.h >> 1) * CARD.w + 4) * 4 + 3] > 200, 'inside: opaque');
+    assert.strictEqual(cv.d[3], 0, 'a corner: transparent');
+    assert.strictEqual(cv.d[((CARD.h >> 1) * CARD.w + (CARD.w >> 1)) * 4 + 3], 255, 'the middle: opaque (hides the widget underneath)');
+    const edge = cv.d[((CARD.h >> 1) * CARD.w + 8) * 4 + 3];
+    assert.ok(edge > 0 && edge < 128, 'the edge: fading out (' + edge + ')');
     card.close();
 });
 
