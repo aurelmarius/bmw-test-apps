@@ -43,7 +43,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.TVH_SOCK || '/run/aurelm-tvh.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the socket
 // starts the new one at the next request
-const SERVICE_VERSION = '0.1.2';
+const SERVICE_VERSION = '0.1.4';
 // a channel is on: the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'buffering'];
 const channelOn = (pb) => !!(pb && ACTIVE.indexOf(pb.state) >= 0);
@@ -110,10 +110,10 @@ function steps(s) {
     // the logos: how many shown, missing (and why), on the way; the channels the server gives one
     const lg = s.logoStats, sl = s.logos || {};
     if (lg && cs === 'connected' && s.channels) {
-        const icons = s.channels.icons != null ? s.channels.icons : null;
+        const icons = s.channels.icons != null ? s.channels.icons : null;   // the channels with a public logo (http(s))
         const why = lg.why || sl.last;
         rows.push({ label: 'Logos', state: icons === 0 ? 'off' : lg.none && !lg.ok ? 'bad' : lg.loading && !lg.ok ? 'wait' : lg.ok ? 'ok' : 'off',
-            detail: icons === 0 ? 'the server gives no channel a logo' : lg.ok + ' shown, ' + lg.none + ' missing' + (lg.loading ? ', ' + lg.loading + ' loading' : '') +
+            detail: icons === 0 ? 'the server gives no channel a public logo' : lg.ok + ' shown, ' + lg.none + ' missing' + (lg.loading ? ', ' + lg.loading + ' loading' : '') +
                 (icons != null ? ' (' + icons + ' of ' + s.channels.count + ' channels have one)' : '') + (why && lg.none ? '; last: ' + why : '') });
     }
     const pb = s.playback;
@@ -191,7 +191,9 @@ mgu.run({
         }
         // the channels' logos, asked for when a row with them is drawn
         // a logo's first fetch goes over LTE through the service: 20 s for it (5 s gave it up in the car, for 10 minutes)
-        const logos = createLogos({ ask: (cmd, x) => ask(cmd, x, 20000), png, log, onChange: () => { if (mirror && mirror.state().shown) mirror.tick(); } });
+        // kept by the channel's logo address (a new ?v= is a new logo): iconOf gives it
+        const iconOf = (uuid) => { const c = chans.channels.filter((x) => x.uuid === uuid)[0]; return c ? c.icon || '' : ''; };
+        const logos = createLogos({ ask: (cmd, x) => ask(cmd, x, 20000), png, log, iconOf, onChange: () => { if (mirror && mirror.state().shown) mirror.tick(); } });
 
         /* ---------- the last channel, kept for "Watch" ---------- */
         const lastFile = ctx.dataDir ? path.join(ctx.dataDir, 'last-channel.json') : null;
@@ -516,7 +518,7 @@ mgu.run({
                 const y = top + 34 + k * rowH, isSel = c.uuid === cur, e = chans.epg[c.uuid];
                 if (isSel) cv.fillRect(x0 - 8, y, w + 16, rowH - 4, withAlpha(BLUE, 0.28));
                 if (c.uuid === on) cv.quad([[x0, y + 13], [x0 + 14, y + 23], [x0, y + 33], [x0, y + 33]], GREEN);
-                logos.draw(cv, c.uuid, x0 + 22, y + 5);
+                logos.draw(cv, c.uuid, x0 + 22, y + 5, c.name);
                 const nx = x0 + 22 + lw, ny = y + 26;
                 cv.text(clip(cv, chName(c), 22, 250, 'label'), nx, ny, 22, t.text, { font: isSel || c.uuid === on ? 'bold' : undefined, literal: true });
                 if (e && e.title) {
@@ -534,7 +536,7 @@ mgu.run({
             const x0 = 808, w = 768, top = 52;
             const uuid = selected(), ch = chans.channels.filter((c) => c.uuid === uuid)[0];
             cv.fillRect(x0 - 22, top, 1, 456, withAlpha('#ffffff', 0.12));
-            const lw = logos.draw(cv, uuid, x0, top + 2) ? LOGO.w + 14 : 0;
+            const lw = logos.draw(cv, uuid, x0, top + 2, ch && ch.name) ? LOGO.w + 14 : 0;
             cv.text(clip(cv, chName(ch), 26, w - lw - 230, 'label'), x0 + lw, top + 30, 26, t.text, { font: 'bold', literal: true });
             const watching = uuid === playing();
             const hint = watching ? 'WATCHING' : touch ? 'PRESS AGAIN TO WATCH' : '"WATCH" TO WATCH';
