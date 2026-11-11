@@ -102,6 +102,7 @@ function fakeTvh(opts) {
             { channelUuid: CH[1].uuid, title: 'Vremea', start: 1, stop: Math.floor(Date.now() / 1000) + 3600 }] : [] });
         if (p === '/api/profile/list') return json({ entries: (o.profiles || ['htsp', 'pass', 'matroska', 'mgu-hd', 'mgu-sd', 'mgu-low']).map((n, i) => ({ key: 'k' + i, val: n })) });
         if (!user) return challenge(res);
+        if (p === '/imagecache/1' && o.logo403) { o.logo403--; seen.logo403 = (seen.logo403 || 0) + 1; res.writeHead(403); return res.end(); }
         if (p === '/imagecache/1') { seen.logos = (seen.logos || 0) + 1; res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(LOGO_PNG); }
         if (p === '/imagecache/2') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(Buffer.from('ffd8ffe000104a464946', 'hex')); }
         if (p === '/playlist/channels') {
@@ -395,6 +396,28 @@ test('service: a channel\'s programme for the guide: from now, 24 hours, in orde
         await ask(s.sock, { cmd: 'epg', uuid: CH[0].uuid });
         assert.strictEqual(srv.seen.epg, 1, 'kept');
         assert.ok((await ask(s.sock, { cmd: 'epg', uuid: 'nope' })).error);
+    } finally { s.close(); srv.close(); }
+});
+
+test('service: a logo answered 403 is asked for once more with a fresh challenge; the status counts the logos', async () => {
+    const srv = await fakeTvh({ logo403: 1 });
+    const s = await signedIn(srv);
+    try {
+        const r = await ask(s.sock, { cmd: 'logo', uuid: CH[0].uuid });
+        assert.ok(r.png, JSON.stringify(r).slice(0, 200));
+        assert.strictEqual(srv.seen.logo403, 1);
+        assert.strictEqual(srv.seen.logos, 1);
+        await ask(s.sock, { cmd: 'logo', uuid: CH[1].uuid });   // a JPEG: missing, and why
+        const st = s.svc.status();
+        assert.strictEqual(st.logos.fetched, 1);
+        assert.strictEqual(st.logos.failed, 1);
+        assert.ok(/not a PNG/.test(st.logos.last), st.logos.last);
+        assert.strictEqual(st.channels.icons, 2, 'channels the server gives a logo');
+        // always 403 (the user not accepted): given up after the second try, and said
+        srv.set('logo403', 5);
+        try { fs.unlinkSync(path.join(s.tmp, 'state', 'logos', CH[0].uuid + '.png')); } catch (e) { /* none */ }
+        const s2 = await ask(s.sock, { cmd: 'logo', uuid: CH[2].uuid });
+        assert.ok(s2.none);
     } finally { s.close(); srv.close(); }
 });
 

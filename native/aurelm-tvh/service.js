@@ -40,7 +40,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 const PAGE_PORT = 8491;   // Emby's page is 8490: both may be open at once
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -117,6 +117,13 @@ function createService(opts) {
     /* ---------- the channels' logos (state/logos/<uuid>.png) ---------- */
     const logoDir = file('logos');
     const logoNone = {}, logoWait = {};
+    // how the logos went (the app's Status tab shows it): fetched, not had (and why, the last time), each new reason logged
+    const logoStats = { fetched: 0, failed: 0, last: null };
+    function logoFailed(name, why) {
+        logoStats.failed++;
+        if (logoStats.last !== why) log('logo ' + name + ': ' + why + (logoStats.failed > 1 ? ' (' + logoStats.failed + ' logos so far)' : ''));
+        logoStats.last = why;
+    }
     function logo(uuid) {
         if (!/^[0-9a-f]{32}$/.test(uuid)) return Promise.resolve({ uuid, none: true, why: 'not a channel' });
         const f = path.join(logoDir, uuid + '.png');
@@ -135,7 +142,8 @@ function createService(opts) {
             const t = setTimeout(() => { if (logoWait[id]) { delete logoWait[id]; res({ uuid, none: true, why: 'the server did not answer in time' }); } }, 20000);
             logoWait[id] = (m) => {
                 clearTimeout(t);
-                if (!m.ok) { log('logo ' + ch.name + ': ' + m.error); return res(none(m.error)); }
+                if (!m.ok) { logoFailed(ch.name, m.error); return res(none(m.error)); }
+                if (!logoStats.fetched++) log('logo ' + ch.name + ': fetched (' + Math.round(m.png.length * 0.75 / 1024) + ' KiB)');
                 try { fs.mkdirSync(logoDir, 0o700); } catch (e) { /* there */ }
                 try { fs.writeFileSync(f, Buffer.from(m.png, 'base64'), { mode: 0o600 }); } catch (e) { log('logo: ' + e.message); }
                 res({ uuid, png: m.png });
@@ -298,7 +306,8 @@ function createService(opts) {
         return Object.assign({}, st, {
             now: now(), uplink: uplink(), player: player.state(), prefs,
             account: account ? { server: account.server, user: account.user, serverName: account.serverName, serverVersion: account.serverVersion } : null,
-            channels: { at: chans.at, count: chans.channels.length },
+            channels: { at: chans.at, count: chans.channels.length, icons: chans.channels.filter((c) => c.icon).length },
+            logos: logoStats,
             page: Object.assign({}, st.page, st.page.open ? { url: pageUrl(), left: Math.max(0, Math.round((st.page.until - now()) / 1000)) } : {}),
             log: lines.slice(-14),
         });

@@ -43,7 +43,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.TVH_SOCK || '/run/aurelm-tvh.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the socket
 // starts the new one at the next request
-const SERVICE_VERSION = '0.1.0';
+const SERVICE_VERSION = '0.1.2';
 // a channel is on: the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'buffering'];
 const channelOn = (pb) => !!(pb && ACTIVE.indexOf(pb.state) >= 0);
@@ -54,12 +54,12 @@ const quality = (p) => (QUALITY[p] ? QUALITY[p] + ' (' + p + ')' : p || '');
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#52b54b', AMBER = '#ffb020', RED = '#ef2b2d', BLUE = '#2f8fd8';
 
-function ask(cmd, extra) {
+function ask(cmd, extra, timeoutMs) {
     return new Promise((res) => {
         let buf = '', done = false;
         const end = (v) => { if (!done) { done = true; clearTimeout(t); try { c.destroy(); } catch (e) { /* gone */ } res(v); } };
         const c = net.connect(SOCK);
-        const t = setTimeout(() => end(null), 5000);
+        const t = setTimeout(() => end(null), timeoutMs || 5000);
         c.setEncoding('utf8');
         c.on('connect', () => c.write(JSON.stringify(Object.assign({ cmd }, extra || {})) + '\n'));
         c.on('data', (d) => {
@@ -107,6 +107,15 @@ function steps(s) {
         detail: cs === 'connected' ? 'Tvheadend ' + ((c.server && c.server.version) || '') + ', ' + (s.channels ? s.channels.count : 0) + ' channels' +
             (prof ? ', profiles ' + (prof.length ? prof.join(' ') : 'none named mgu-* (create them on the server)') : '')
             : cs === 'connecting' || cs === 'starting' ? 'connecting...' : (c.error || cs || '') + (c.retries ? ' (' + c.retries + ' tries)' : '') });
+    // the logos: how many shown, missing (and why), on the way; the channels the server gives one
+    const lg = s.logoStats, sl = s.logos || {};
+    if (lg && cs === 'connected' && s.channels) {
+        const icons = s.channels.icons != null ? s.channels.icons : null;
+        const why = lg.why || sl.last;
+        rows.push({ label: 'Logos', state: icons === 0 ? 'off' : lg.none && !lg.ok ? 'bad' : lg.loading && !lg.ok ? 'wait' : lg.ok ? 'ok' : 'off',
+            detail: icons === 0 ? 'the server gives no channel a logo' : lg.ok + ' shown, ' + lg.none + ' missing' + (lg.loading ? ', ' + lg.loading + ' loading' : '') +
+                (icons != null ? ' (' + icons + ' of ' + s.channels.count + ' channels have one)' : '') + (why && lg.none ? '; last: ' + why : '') });
+    }
     const pb = s.playback;
     if (pb && (channelOn(pb) || pb.state === 'error')) playRows(s, rows);
     else rows.push({ label: 'Playing', state: 'off', detail: 'nothing: press "Watch"' });
@@ -181,7 +190,8 @@ mgu.run({
             return e;
         }
         // the channels' logos, asked for when a row with them is drawn
-        const logos = createLogos({ ask, png, log, onChange: () => { if (mirror && mirror.state().shown) mirror.tick(); } });
+        // a logo's first fetch goes over LTE through the service: 20 s for it (5 s gave it up in the car, for 10 minutes)
+        const logos = createLogos({ ask: (cmd, x) => ask(cmd, x, 20000), png, log, onChange: () => { if (mirror && mirror.state().shown) mirror.tick(); } });
 
         /* ---------- the last channel, kept for "Watch" ---------- */
         const lastFile = ctx.dataDir ? path.join(ctx.dataDir, 'last-channel.json') : null;
@@ -443,7 +453,7 @@ mgu.run({
             const live = pb && pb.state === 'error' ? { text: 'ERROR', color: 'accent' } : pb && pb.state === 'buffering' ? { text: 'BUFFERING' }
                 : pb && channelOn(pb) ? { text: pb.state === 'playing' ? 'LIVE ' + (QUALITY[pb.profile] || pb.profile || '') : 'TUNING', color: 'cold' } : null;
             G.frame(cv, t, ['TV', 'Status'], tab, [busy && { text: busy, color: 'accent' }, page && { text: 'SIGN-IN ' + Math.ceil((page.left || 0) / 60) + ' MIN' }, live]);
-            if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); }
+            if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); st.logoStats = logos.stats(); }
             if (tab === 1) drawStatus(cv, t, page); else drawTv(cv, t, page);
             return ui.image('MAIN_GFX', cv);
         }
