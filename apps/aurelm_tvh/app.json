@@ -2,7 +2,7 @@
   "id": "aurelm_tvh",
   "title": "TVH",
   "description": "Tvheadend's TV channels on the centre screen: sign in once from the phone (QR code), then Watch, Channel + / -, or the channel list over the picture. The picture shows while parked, the sound plays on the car's speakers. The server transcodes (profiles mgu-hd, mgu-sd, mgu-low: H.264 deinterlaced, AAC) and the profile goes down by itself when the internet is slow. Needs the TVH service.",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "vendor": "custom",
   "loggingId": "OA9V",
   "iconGlyph": "TV",
@@ -26,7 +26,7 @@
     }
   },
   "requires": {
-    "aurelm-tvh": "0.1.6"
+    "aurelm-tvh": "0.1.7"
   },
   "screens": [
     {
@@ -127,6 +127,44 @@
       "label": "Subtitles (a channel's DVB subtitles; in Tvheadend each mgu-* profile's Subtitle codec profile: Copy)",
       "type": "bool",
       "default": true
+    },
+    {
+      "key": "gain",
+      "label": "Sound level (TV is 10-15 dB quieter than the radio; the peaks are limited, never clipped)",
+      "type": "choice",
+      "default": "9",
+      "options": [
+        [
+          "0",
+          "As broadcast"
+        ],
+        [
+          "3",
+          "+3 dB"
+        ],
+        [
+          "6",
+          "+6 dB"
+        ],
+        [
+          "9",
+          "+9 dB (about as loud as the radio)"
+        ],
+        [
+          "12",
+          "+12 dB"
+        ],
+        [
+          "15",
+          "+15 dB"
+        ]
+      ]
+    },
+    {
+      "key": "even",
+      "label": "Even volume (speech up, loud scenes down: for road noise)",
+      "type": "bool",
+      "default": false
     },
     {
       "key": "tz",

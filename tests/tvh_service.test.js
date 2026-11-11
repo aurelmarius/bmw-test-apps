@@ -371,6 +371,23 @@ test('service: a connection that goes silent is opened again, a profile lower; t
     } finally { s.close(); srv.close(); }
 });
 
+test('service: the sound level: +9 dB by default to each new player, the setting and even volume to the one playing', async () => {
+    const srv = await fakeTvh();
+    const log = path.join(os.tmpdir(), 'tvh-fake-player-' + process.pid + '-' + Date.now() + '.log');
+    const s = await signedIn(srv, { playerEnv: { FAKE_PLAYER_LOG: log } });
+    const ctl = () => { try { return fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.ctl).map((x) => x.ctl); } catch (e) { return []; } };
+    try {
+        await ask(s.sock, { cmd: 'play', uuid: CH[0].uuid });
+        await until(() => ctl().indexOf('gain 9') >= 0, 8000, 'gain 9 to the player');
+        await until(() => { const p = s.svc.status().playback; return p && p.state === 'playing' && p.gain === 9 && p.even === false; }, 8000, 'status');
+        await ask(s.sock, { cmd: 'prefs', profile: 'mgu-hd', adaptive: true, gain: 12, even: true });
+        await until(() => ctl().indexOf('gain 12') >= 0 && ctl().indexOf('even on') >= 0, 5000, 'the new level to the player playing');
+        assert.strictEqual(JSON.parse(fs.readFileSync(path.join(s.tmp, 'state', 'prefs.json'), 'utf8')).gain, 12, 'kept');
+        await ask(s.sock, { cmd: 'prefs', profile: 'mgu-hd', adaptive: true, gain: 40 });
+        await until(() => ctl().indexOf('gain 15') >= 0 && ctl().indexOf('even off') >= 0, 5000, 'at most 15 dB');
+    } finally { s.close(); srv.close(); try { fs.unlinkSync(log); } catch (e) { /* none */ } }
+});
+
 test('service: no free tuner (503): tried 3 times, then said', async () => {
     const srv = await fakeTvh({ busy: true });
     const s = await signedIn(srv);
