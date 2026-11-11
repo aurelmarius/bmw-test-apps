@@ -15,7 +15,10 @@
  *     and a stream that ran dry plays again once that much is queued again (a film's 1 s was too little on LTE);
  *   - the picture structure of what is decoded is counted: an interlaced stream (a profile that does not
  *     deinterlace, or "pass") is told in "open" and in each tick ("fields"), for the app to say so;
- *   - a channel without a picture (radio) plays its sound alone, with the same prebuffer.
+ *   - a channel without a picture (radio) plays its sound alone, with the same prebuffer;
+ *   - DVB subtitles (the first subtitle stream: Tvheadend's transcoder copies the channel's first one, its profile's
+ *     "Subtitle codec profile: Copy") are decoded and laid over each picture before it goes to the frame file, scaled
+ *     from the subtitles' own display (1920x1080 from DVB-C HBO) to the picture's size. "subs on" / "subs off".
  *
  *   demux (main thread)  libavformat's mpegts demuxer on stdin -> a video and an audio queue (bounded)
  *   video thread         the MSDK decoder (decoder_msdk.cpp: display order, fit whole), each picture into the
@@ -24,7 +27,7 @@
  *   the clock            the monotonic clock from the first picture's timestamp; stopped while paused or while
  *                        the stream runs dry (buffering)
  *
- * Control (fd 3, one per line): pause | resume | volume <0..1> | quit
+ * Control (fd 3, one per line): pause | resume | volume <0..1> | subs on | subs off | quit
  * Events (stdout, one per line): MGU {json}: open, decoder, audio, tick (each 500 ms), end, error
  *
  * MGU_VIDEO_PATH   the frame file (default /dev/shm/mgu-video-aurelm-tvh)
@@ -35,6 +38,9 @@
  * MGU_PROBE_KB     how much of the stream is read to find its streams (default 1024; tests)
  * MGU_PREBUFFER_MS what is queued before the clock starts, and again after the stream ran dry (default 1500)
  * MGU_ANALYZE_MS   how far the stream is analysed for its streams (default 2500: past the next key frame)
+ * MGU_SUBS         0: the subtitles off from the start (default on)
+ * MGU_SUB_DUMP     <path>: with MGU_VIDEO_OFF, the first pictures a subtitle is on are written as I420 (a grey picture
+ *                  with the subtitle laid over), <path>-<n>.yuv, the picture's size: tests
  */
 #include <dlfcn.h>
 #include <errno.h>
@@ -55,6 +61,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -251,6 +258,173 @@ void picture_size(const AVCodecParameters *cp, AVRational sar) {
 }
 const double kPtsOffset = 20.0;   /* timestamps given to MSDK: never negative (B frames before the first I) */
 
+/* ---------- DVB subtitles ---------- */
+/* a page of subtitles as the decoder gives it (indexed bitmaps on the subtitles' own display, dw x dh, a palette each),
+ * shown from start until end or the next page; the picture's copy is made at its first use (scaled, Y U V A) */
+struct SubRect { int x = 0, y = 0, w = 0, h = 0; std::vector<uint8_t> idx; uint8_t pal[256][4]; };   /* pal: Y U V A */
+struct SubScaled { int x = 0, y = 0, w = 0, h = 0; std::vector<uint8_t> y_, a, u, v, ca; };       /* ca, u, v: half size */
+struct SubPage {
+    double start = 0, end = 0;
+    int dw = 720, dh = 576;
+    std::vector<SubRect> rects;
+    uint32_t fw = 0, fh = 0;
+    std::vector<SubScaled> sc;
+};
+std::mutex g_sub_mu;
+std::deque<std::shared_ptr<SubPage>> g_subs;
+std::atomic<bool> g_subs_on(true);
+std::atomic<unsigned long long> s_subpages(0), s_subshown(0);
+AVCodecContext *g_subctx = nullptr;
+AVStream *g_ss = nullptr;
+
+inline uint8_t clamp8(double v) { return v < 0 ? 0 : v > 255 ? 255 : (uint8_t) lrint(v); }
+/* RGB -> BT.709 limited range (the server's H.264 is HD, BT.709) */
+void yuv709(int r, int g, int b, uint8_t *Y, uint8_t *U, uint8_t *V) {
+    const double y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    *Y = clamp8(16 + y * 219.0 / 255.0);
+    *U = clamp8(128 + (b - y) / 1.8556 * 224.0 / 255.0);
+    *V = clamp8(128 + (r - y) / 1.5748 * 224.0 / 255.0);
+}
+
+/* a decoded page (pts: its packet's, in the stream's seconds) */
+void sub_add(const AVSubtitle &sub, double pts, int dw, int dh) {
+    auto pg = std::make_shared<SubPage>();
+    pg->start = pts + sub.start_display_time / 1000.0;
+    pg->end = sub.end_display_time ? pts + sub.end_display_time / 1000.0 : pts + 30.0;
+    if (dw > 0 && dh > 0) { pg->dw = dw; pg->dh = dh; }
+    for (unsigned i = 0; i < sub.num_rects; i++) {
+        const AVSubtitleRect *r = sub.rects[i];
+        if (!r || r->type != SUBTITLE_BITMAP || r->w <= 0 || r->h <= 0 || !r->data[0] || !r->data[1]) continue;
+        SubRect q;
+        q.x = r->x; q.y = r->y; q.w = r->w; q.h = r->h;
+        q.idx.resize((size_t) r->w * r->h);
+        for (int y = 0; y < r->h; y++) memcpy(&q.idx[(size_t) y * r->w], r->data[0] + (size_t) y * r->linesize[0], (size_t) r->w);
+        const uint32_t *pal = (const uint32_t *) r->data[1];
+        memset(q.pal, 0, sizeof q.pal);
+        for (int c = 0; c < r->nb_colors && c < 256; c++) {
+            const uint32_t v = pal[c];   /* 0xAARRGGBB */
+            yuv709((v >> 16) & 255, (v >> 8) & 255, v & 255, &q.pal[c][0], &q.pal[c][1], &q.pal[c][2]);
+            q.pal[c][3] = (uint8_t) (v >> 24);
+        }
+        pg->rects.push_back(std::move(q));
+    }
+    if (!pg->rects.empty()) s_subpages++;
+    std::lock_guard<std::mutex> l(g_sub_mu);
+    g_subs.push_back(pg);
+    while (g_subs.size() > 32) g_subs.pop_front();
+}
+
+/* the page on at pts, or none */
+std::shared_ptr<SubPage> sub_at(double pts) {
+    std::lock_guard<std::mutex> l(g_sub_mu);
+    std::shared_ptr<SubPage> cur;
+    size_t at = 0;
+    for (size_t i = 0; i < g_subs.size(); i++) if (g_subs[i]->start <= pts + 0.02) { cur = g_subs[i]; at = i; }
+    while (at > 0) { g_subs.pop_front(); at--; }   /* the ones before it are done with */
+    if (!cur || cur->rects.empty() || pts >= cur->end) return nullptr;
+    return cur;
+}
+
+/* the page scaled to the picture (W x H), each picture pixel the alpha-weighted mean of the subtitle pixels it covers */
+void sub_scale(SubPage &pg, uint32_t W, uint32_t H) {
+    pg.sc.clear(); pg.fw = W; pg.fh = H;
+    const double sx = (double) W / pg.dw, sy = (double) H / pg.dh;
+    for (const SubRect &r : pg.rects) {
+        SubScaled s;
+        int x0 = (int) floor(r.x * sx) & ~1, y0 = (int) floor(r.y * sy) & ~1;
+        int x1 = (int) ceil((r.x + r.w) * sx), y1 = (int) ceil((r.y + r.h) * sy);
+        x1 += x1 & 1; y1 += y1 & 1;
+        if (x1 > (int) W) x1 = (int) W & ~1;
+        if (y1 > (int) H) y1 = (int) H & ~1;
+        if (x1 <= x0 || y1 <= y0) continue;
+        s.x = x0; s.y = y0; s.w = x1 - x0; s.h = y1 - y0;
+        const size_t n = (size_t) s.w * s.h;
+        s.y_.assign(n, 0); s.a.assign(n, 0);
+        std::vector<double> pu(n, 0), pv(n, 0);
+        for (int dy = 0; dy < s.h; dy++) {
+            int a0 = (int) floor((y0 + dy) / sy) - r.y, a1 = (int) floor((y0 + dy + 1) / sy) - r.y;
+            if (a1 <= a0) a1 = a0 + 1;
+            for (int dx = 0; dx < s.w; dx++) {
+                int b0 = (int) floor((x0 + dx) / sx) - r.x, b1 = (int) floor((x0 + dx + 1) / sx) - r.x;
+                if (b1 <= b0) b1 = b0 + 1;
+                double sa = 0, syv = 0, su = 0, sv = 0; int cnt = 0;
+                for (int yy = a0; yy < a1; yy++) {
+                    if (yy < 0 || yy >= r.h) continue;
+                    for (int xx = b0; xx < b1; xx++) {
+                        if (xx < 0 || xx >= r.w) continue;
+                        const uint8_t *c = r.pal[r.idx[(size_t) yy * r.w + xx]];
+                        sa += c[3]; syv += c[0] * c[3]; su += c[1] * c[3]; sv += c[2] * c[3]; cnt++;
+                    }
+                }
+                const size_t i = (size_t) dy * s.w + dx;
+                if (!cnt || sa <= 0) continue;
+                s.a[i] = clamp8(sa / cnt);
+                s.y_[i] = clamp8(syv / sa);
+                pu[i] = su / sa; pv[i] = sv / sa;
+            }
+        }
+        /* chroma: a 2x2 block's alpha-weighted mean */
+        const int cw = s.w / 2, chh = s.h / 2;
+        s.u.assign((size_t) cw * chh, 128); s.v.assign((size_t) cw * chh, 128); s.ca.assign((size_t) cw * chh, 0);
+        for (int cy = 0; cy < chh; cy++) for (int cx = 0; cx < cw; cx++) {
+            double sa = 0, su = 0, sv = 0;
+            for (int k = 0; k < 4; k++) {
+                const size_t i = (size_t) (cy * 2 + (k >> 1)) * s.w + cx * 2 + (k & 1);
+                sa += s.a[i]; su += pu[i] * s.a[i]; sv += pv[i] * s.a[i];
+            }
+            const size_t j = (size_t) cy * cw + cx;
+            if (sa <= 0) continue;
+            s.ca[j] = clamp8(sa / 4); s.u[j] = clamp8(su / sa); s.v[j] = clamp8(sv / sa);
+        }
+        pg.sc.push_back(std::move(s));
+    }
+}
+
+/* the page laid over a dense I420 picture of W x H */
+void sub_blend(SubPage &pg, uint8_t *buf, uint32_t W, uint32_t H) {
+    if (pg.fw != W || pg.fh != H) sub_scale(pg, W, H);
+    uint8_t *Yp = buf, *Up = buf + (size_t) W * H, *Vp = Up + (size_t) (W / 2) * (H / 2);
+    for (const SubScaled &s : pg.sc) {
+        for (int dy = 0; dy < s.h; dy++) {
+            uint8_t *row = Yp + (size_t) (s.y + dy) * W + s.x;
+            const uint8_t *ys = &s.y_[(size_t) dy * s.w], *as = &s.a[(size_t) dy * s.w];
+            for (int dx = 0; dx < s.w; dx++) {
+                const unsigned a = as[dx];
+                if (a) row[dx] = (uint8_t) ((row[dx] * (255 - a) + ys[dx] * a + 127) / 255);
+            }
+        }
+        const int cw = s.w / 2, chh = s.h / 2;
+        for (int cy = 0; cy < chh; cy++) {
+            uint8_t *ur = Up + (size_t) (s.y / 2 + cy) * (W / 2) + s.x / 2, *vr = Vp + (size_t) (s.y / 2 + cy) * (W / 2) + s.x / 2;
+            for (int cx = 0; cx < cw; cx++) {
+                const size_t j = (size_t) cy * cw + cx;
+                const unsigned a = s.ca[j];
+                if (!a) continue;
+                ur[cx] = (uint8_t) ((ur[cx] * (255 - a) + s.u[j] * a + 127) / 255);
+                vr[cx] = (uint8_t) ((vr[cx] * (255 - a) + s.v[j] * a + 127) / 255);
+            }
+        }
+    }
+}
+
+/* MGU_SUB_DUMP (tests, MGU_VIDEO_OFF): a grey picture with the subtitle on at pts, written once per page, 4 at most */
+void sub_dump(double pts) {
+    static const char *path = getenv("MGU_SUB_DUMP");
+    static int n = 0;
+    static const SubPage *last = nullptr;
+    if (!path || !*path || n >= 4 || !g_subs_on) return;
+    auto pg = sub_at(pts);
+    if (!pg || pg.get() == last) return;
+    last = pg.get();
+    std::vector<uint8_t> buf((size_t) g_vw * g_vh * 3 / 2, 128);
+    memset(buf.data(), 60, (size_t) g_vw * g_vh);
+    sub_blend(*pg, buf.data(), g_vw, g_vh);
+    char f[1024];
+    snprintf(f, sizeof f, "%s-%d.yuv", path, n++);
+    FILE *o = fopen(f, "wb");
+    if (o) { fwrite(buf.data(), 1, buf.size(), o); fclose(o); }
+}
+
 /* waits until the clock reaches pts; false: quit */
 bool wait_until(double pts) {
     for (;;) {
@@ -290,7 +464,7 @@ void video_thread() {
         if (!g_clock.started()) g_clock.start(pts);
         if (!f || !f->y) {   /* decoded without a picture (it was late) */
             if (f) { s_late++; lastLate = true; }
-            else if (wait_until(pts)) s_shown++;   /* no decoder: timed and counted */
+            else if (wait_until(pts)) { s_shown++; sub_dump(pts); }   /* no decoder: timed and counted */
             return;
         }
         if (!wait_until(pts - 0.004)) return;
@@ -298,6 +472,10 @@ void video_thread() {
         if (late > kLate) { s_late++; lastLate = true; return; }
         lastLate = false;
         ytdec::nv12_to_i420(f->y, f->uv, f->pitch, f->w, f->h, g_mgvf.begin());
+        if (g_subs_on) {   /* the subtitle on now, over the picture */
+            auto pg = sub_at(pts);
+            if (pg) { sub_blend(*pg, g_mgvf.begin(), g_vw, g_vh); s_subshown++; }
+        }
         g_mgvf.commit();
         s_shown++;
     };
@@ -604,6 +782,8 @@ void control_thread() {
             const std::string line = buf.substr(0, i);
             buf.erase(0, i + 1);
             if (line == "pause") g_clock.set_paused(true);
+            else if (line == "subs on") g_subs_on = true;
+            else if (line == "subs off") g_subs_on = false;
             else if (line == "resume") g_clock.set_paused(false);
             else if (!line.compare(0, 7, "volume ")) {
                 const double v = atof(line.c_str() + 7);
@@ -660,9 +840,9 @@ void tick_thread() {
         if (g_quit) break;
         const double t = g_clock.started() ? g_clock.now() - first_pts() : 0;
         event("{\"ev\":\"tick\",\"t\":%.3f,\"state\":\"%s\",\"shown\":%llu,\"late\":%llu,\"decerr\":%llu,\"aplayed\":%llu,"
-              "\"alate\":%llu,\"aunread\":%llu,\"axrun\":%llu,\"adev\":%d,\"buffered\":%.2f,\"kbytes\":%llu,\"fields\":%llu}",
+              "\"alate\":%llu,\"aunread\":%llu,\"axrun\":%llu,\"adev\":%d,\"buffered\":%.2f,\"kbytes\":%llu,\"fields\":%llu,\"subs\":%llu,\"subshown\":%llu}",
               t < 0 ? 0 : t, state(), s_shown.load(), s_late.load(), s_decerr.load(), s_aplayed.load(), s_alate.load(),
-              s_aunread.load(), s_axrun.load(), s_adev_ms.load(), std::max(g_vq.span(), g_aq.span()), s_bytes.load() / 1024, s_fields.load());
+              s_aunread.load(), s_axrun.load(), s_adev_ms.load(), std::max(g_vq.span(), g_aq.span()), s_bytes.load() / 1024, s_fields.load(), s_subpages.load(), s_subshown.load());
     }
 }
 
@@ -739,6 +919,7 @@ int main() {
         if (sscanf(sz, "%ux%u", &w, &h) == 2 && w >= 16 && h >= 16 && w <= 2048 && h <= 2048) g_maxw = w & ~1u, g_maxh = h & ~1u;
     }
     if (const char *pb = getenv("MGU_PREBUFFER_MS")) if (atoi(pb) >= 0 && atoi(pb) <= 10000) g_pre = atoi(pb) / 1000.0;
+    if (const char *sb = getenv("MGU_SUBS")) if (!strcmp(sb, "0")) g_subs_on = false;
     drop_root();
     std::thread(watchdog).detach();
     std::thread ctl;
@@ -809,6 +990,22 @@ int main() {
     }
     g_has_audio = as != nullptr;
     if (as) { g_apar = as->codecpar; g_atb = as->time_base; }
+    /* the first DVB subtitle stream (the transcoder copies only the channel's first one) */
+    auto open_subs = [&](AVStream *st) {
+        const AVCodec *c = avcodec_find_decoder(AV_CODEC_ID_DVB_SUBTITLE);
+        AVCodecContext *ctx = c ? avcodec_alloc_context3(c) : nullptr;
+        if (!ctx || avcodec_parameters_to_context(ctx, st->codecpar) < 0 || avcodec_open2(ctx, c, nullptr) < 0) {
+            if (ctx) avcodec_free_context(&ctx);
+            event("{\"ev\":\"subs\",\"ok\":false,\"error\":\"no DVB subtitle decoder\"}");
+            return;
+        }
+        ctx->pkt_timebase = st->time_base;
+        g_subctx = ctx; g_ss = st;
+        const AVDictionaryEntry *lang = av_dict_get(st->metadata, "language", nullptr, 0);
+        event("{\"ev\":\"subs\",\"ok\":true,\"codec\":\"dvb\",\"lang\":\"%s\",\"on\":%s}", js(lang ? lang->value : "").c_str(), g_subs_on ? "true" : "false");
+    };
+    for (unsigned i = 0; i < fmt->nb_streams && !g_ss; i++)
+        if (fmt->streams[i]->codecpar->codec_id == AV_CODEC_ID_DVB_SUBTITLE) open_subs(fmt->streams[i]);
     event("{\"ev\":\"open\",\"video\":%s%s%s,\"audio\":%s%s%s}",
           vs ? "{\"codec\":\"h264\",\"w\":" : "null", vs ? std::to_string(vs->codecpar->width).c_str() : "",
           vs ? (",\"h\":" + std::to_string(vs->codecpar->height) + vtail(vs)).c_str() : "",
@@ -838,6 +1035,16 @@ int main() {
                   vs ? (",\"h\":" + std::to_string(vs->codecpar->height) + "}").c_str() : "",
                   avcodec_get_name(as->codecpar->codec_id), as->codecpar->sample_rate, as->codecpar->ch_layout.nb_channels);
             at = std::thread(audio_thread);
+        }
+        if (!g_ss && s->codecpar->codec_id == AV_CODEC_ID_DVB_SUBTITLE) open_subs(s);   /* a subtitle stream that came later */
+        if (s == g_ss && g_subctx && pkt->size > 0) {
+            AVSubtitle sub;
+            int got = 0;
+            if (avcodec_decode_subtitle2(g_subctx, &sub, &got, pkt) >= 0 && got) {
+                const double t = pkt->pts != AV_NOPTS_VALUE ? pkt->pts * av_q2d(s->time_base) : NAN;
+                if (!isnan(t)) sub_add(sub, t, g_subctx->width, g_subctx->height);
+                avsubtitle_free(&sub);
+            }
         }
         if ((s == vs || s == as) && pkt->size > 0) {
             Packet p;

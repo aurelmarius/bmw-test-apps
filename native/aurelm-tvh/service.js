@@ -41,7 +41,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.1.4';
+const VERSION = '0.1.5';
 const PAGE_PORT = 8491;   // Emby's page is 8490: both may be open at once
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -360,8 +360,8 @@ function createService(opts) {
         } else if (cmd === 'refresh') {
             toChild({ op: 'refresh' });
         } else if (cmd === 'prefs') {
-            const p = { profile: String(m.profile || 'mgu-hd'), adaptive: m.adaptive !== false };
-            if (!prefs || p.profile !== prefs.profile || p.adaptive !== prefs.adaptive) {
+            const p = { profile: String(m.profile || 'mgu-hd'), adaptive: m.adaptive !== false, subs: m.subs !== false };
+            if (!prefs || p.profile !== prefs.profile || p.adaptive !== prefs.adaptive || p.subs !== prefs.subs) {
                 prefs = p;
                 try { writeJson('prefs.json', prefs); } catch (e) { log('prefs: ' + e.message); }
                 toChild({ op: 'prefs', prefs });

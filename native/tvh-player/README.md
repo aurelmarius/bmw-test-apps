@@ -15,6 +15,7 @@ the AirPlay receiver's NAL framing, frame file, MSDK headers, ABI lists and chec
 | prebuffer | a live stream comes at its own pace, never ahead of the clock: the clock starts once **1.5 s** is queued (`MGU_PREBUFFER_MS`), and a stream that ran dry (buffering) plays again once 1.5 s is queued again. A channel without a picture (radio) waits for its sound's 1.5 s. |
 | picture | `src/decoder_msdk.cpp` (VA-API on `/dev/dri/renderD128`): display order, the picture fitted whole into its own shape (at most 1920x1080), each picture into the frame file (`/dev/shm/mgu-video-aurelm-tvh`, MGVF, 3 slots, I420) when the clock reaches it; the app places it (fit, zoom, fill). Each decoded picture's structure (`PicStruct`) is counted: field pictures (an interlaced stream) show in each tick as `fields`. |
 | sound | libavcodec's aac, ac3 and eac3 decoders, mixed down to stereo S16 at the volume, written to ALSA `plug:smartx:CarLifeMedia_CF_48_STEREO` (libasound opened at run time, the device non-blocking). Kept on the clock. Any other sound (MP2 from a DVB "pass" stream) is told: `audio` `ok:false` "choose a profile that transcodes". |
+| subtitles | the first DVB subtitle stream (`dvb_subtitle`: what a profile passes on with "Subtitle codec profile: Copy"), decoded by libavcodec's `dvbsub` into bitmaps with their palette, kept by their time (until the next one or its own timeout; 30 s without one), scaled to the picture (from the stream's display definition, 1920x1080, or 720x576 without one) and blended into each picture before it goes to the frame file. `open` is followed by `subs` (`ok`, `codec`, `lang`, `on`); the ticks count them (`subs` decoded, `subshown` pictures with one). `subs off` / `subs on` on the control line; `MGU_SUBS=0` starts without them. |
 | clock | monotonic, from the first picture's timestamp; stops while paused and while the stream runs dry. |
 
 **Interlaced.** The server's profiles deinterlace (VAAPI), so nothing is deinterlaced here. A stream that is
@@ -28,7 +29,7 @@ mgu-render takes). It has the service's limits (cgroup, nice 10, `LimitCORE=1`; 
 
 **Ending.** Told to end (`quit`, SIGTERM, the service gone), it closes the sound device first and is gone within 2.5 s.
 
-**Control** (fd 3, one per line): `pause`, `resume`, `volume <0..1>`, `quit`. **Events** (stdout): `MGU {json}`
+**Control** (fd 3, one per line): `pause`, `resume`, `volume <0..1>`, `subs on|off`, `quit`. **Events** (stdout): `MGU {json}`
 with `open` (the streams; the video's `fps` and `interlaced`), `decoder`, `audio`, `tick` (every 500 ms: position,
 state, pictures shown and late, field pictures, sound played, dropped and unread, buffered seconds), `end`, `error`.
 
