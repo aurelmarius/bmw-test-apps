@@ -403,8 +403,9 @@ test('service: the channels\' logos: public addresses fetched without a user, ke
         assert.deepStrictEqual(plates[0], [100, 10, 60, 36]);
         assert.ok(/^Stirile/.test(texts[0]) && texts[0].length < 14, texts[0]);
         assert.strictEqual(L.draw(rec, CH[0].uuid, 100, 10, 'PRO TV HD'), true);
-        assert.ok(rects.length > 20 && rects.length < 200, rects.length + ' runs');
-        assert.ok(rects.every((r) => r[0] >= 100 && r[0] + r[2] <= 160 && r[1] >= 10 && r[1] < 46 && r[3] === 1), 'inside the 60x36 box');
+        assert.ok(rects.length >= 3 && rects.length < 60, rects.length + ' rectangles (a red plate with a white bar: few, rows merged)');
+        assert.ok(rects.every((r) => r[0] >= 100 && r[0] + r[2] <= 161 && r[1] >= 10 && r[1] + r[3] <= 47 && r[3] >= 2), 'inside the 60x36 box (a pixel of overlap), rows merged');
+        assert.ok(rects.some((r) => r[3] > 2), 'runs the same on the rows below merged into taller rectangles');
         assert.ok(rects.some((r) => r[4] === 0xe00018ff) && rects.some((r) => r[4] === 0xffffffff), 'red and white, rounded to 32 levels');
         // a logo whose address changes is another logo: asked for again
         icons[CH[0].uuid] = 'x?v=3';
