@@ -417,7 +417,74 @@ mgu.run({
         let tab = 0;                 // 0 TV, 1 Status
         let sel = null, selAt = 0;   // the channel whose programme shows (chosen on the page; else the one playing)
         let first = 0, firstFor = null;   // the list's first row, kept so the selected channel shows
-        const evSel = { uuid: null, i: 0 };   // the programme's chosen entry (its details below)
+        const evSel = { uuid: null, i: 0 };   // the programme's chosen entry (its details below), its index from now
+        let evFirst = 0, evLen = 0;           // the programme's first row shown, how many entries it has
+        const ROWS = 8, ROW_H = 50, EV_ROWS = 6, EV_ROW_H = 42, EV_X = 808;
+
+        /* ---------- scrolling: a finger dragged on a list, the controller's knob along its rows ---------- */
+        // A finger dragged on the page (the kit: cv.scroll and ctx.onScroll) moves the list it is on: the channels on the
+        // left, the programme on the right, a row each ROW_H / EV_ROW_H; a drag is no press on a row.
+        let scrollAcc = 0, scrollCol = null;
+        ctx.onScroll((dy) => {
+            if (tab !== 0) return false;
+            const d = ctx.display, pl = d && d.place, at = d && d.downAt;
+            const k = pl && pl.scale ? pl.scale : 1;
+            const col = pl && at && (at.x - pl.ox) / k > EV_X - 30 ? 'ev' : 'ch';
+            if (col !== scrollCol) { scrollCol = col; scrollAcc = 0; }
+            scrollAcc += dy / k;
+            const rowH = col === 'ev' ? EV_ROW_H : ROW_H;
+            const steps = scrollAcc > 0 ? Math.floor(scrollAcc / rowH) : Math.ceil(scrollAcc / rowH);
+            if (!steps) return true;
+            scrollAcc -= steps * rowH;
+            if (col === 'ev') {
+                const to = Math.max(0, Math.min(evLen - EV_ROWS, evFirst + steps));
+                if (to === evFirst) return false;
+                evFirst = to;
+            } else {
+                const to = Math.max(0, Math.min(chans.channels.length - ROWS, first + steps));
+                if (to === first) return false;
+                first = to;
+                firstFor = selected();   // the selected channel may scroll out of sight: the list stays where the finger left it
+            }
+            render();
+            return true;
+        });
+        const disp0 = ctx.display;
+        if (disp0 && typeof disp0._ring === 'function') {
+            // the knob goes along the rows, not over the whole page as one place (the kit's ring has one for a page that scrolls)
+            const ring0 = disp0._ring.bind(disp0);
+            disp0._ring = () => ring0().filter((p) => !p.scroll);
+        }
+        if (disp0 && typeof disp0._focus === 'function') {
+            // 0.1.4 in the car: the knob went along the rows shown and then on to the programme, the rest of the list out of
+            // reach but for the arrows. Now the controller on the last row shown (or the first) moves the list a row on, so
+            // the next one is always there to turn to; at the list's end it goes on as before.
+            const focus0 = disp0._focus.bind(disp0);
+            disp0._focus = (p) => { focus0(p); follow(p && p.k); };
+        }
+        function follow(key) {
+            if (tab !== 0 || !key) return;
+            let m = /^tgt:ch:(.+)$/.exec(key);
+            if (m) {
+                const n = chans.channels.length, i = chans.channels.findIndex((c) => c.uuid === m[1]);
+                if (i < 0) return;
+                const slot = i - first;
+                if (slot >= ROWS - 1 && i < n - 1) first = Math.min(n - ROWS, i - ROWS + 2);
+                else if (slot <= 0 && i > 0) first = Math.max(0, i - 1);
+                else return;
+                firstFor = selected();
+                render();
+                return;
+            }
+            m = /^tgt:ev:(\d+)$/.exec(key);
+            if (m) {
+                const i = Number(m[1]), slot = i - evFirst;
+                if (slot >= EV_ROWS - 1 && i < evLen - 1) evFirst = Math.min(evLen - EV_ROWS, i - EV_ROWS + 2);
+                else if (slot <= 0 && i > 0) evFirst = Math.max(0, i - 1);
+                else return;
+                render();
+            }
+        }
         ctx.onTab((i) => { tab = i; return render(); });
         ui.onClick('BTN_PAGE', () => { tab = 1 - tab; return render(); });
         /** the selected channel: chosen on the page in the last 30 s, else the one playing, else the last one */
@@ -479,6 +546,7 @@ mgu.run({
         /** TV: the channels on the left, the selected one's programme on the right */
         function drawTv(cv, t, page) {
             const touch = !!(cv.own && cv.target);
+            if (touch) cv.scroll = true;   // a finger dragged on the page scrolls the list it is on (ctx.onScroll)
             const list = chans.channels;
             if (!list.length) {
                 // nothing to list yet: what is missing, from the steps (the first one not green)
@@ -498,7 +566,7 @@ mgu.run({
         }
         /** the channels: logo, number and name, what is on now and how far it is; the selected one tinted, the one playing marked */
         function drawChannels(cv, t, touch) {
-            const x0 = 24, w = 740, top = 52, rowH = 50, rows = 8, lw = LOGO.w + 14;
+            const x0 = 24, w = 740, top = 52, rowH = ROW_H, rows = ROWS, lw = LOGO.w + 14;
             const list = chans.channels, cur = selected(), on = playing();
             const at = Math.max(0, list.findIndex((c) => c.uuid === cur));
             if (firstFor !== cur) { firstFor = cur; if (at < first || at >= first + rows) first = at - 2; }
@@ -533,7 +601,7 @@ mgu.run({
 
         /** the selected channel's programme: from now, the chosen entry's details below */
         function drawProgramme(cv, t, touch) {
-            const x0 = 808, w = 768, top = 52;
+            const x0 = EV_X, w = 768, top = 52;
             const uuid = selected(), ch = chans.channels.filter((c) => c.uuid === uuid)[0];
             cv.fillRect(x0 - 22, top, 1, 456, withAlpha('#ffffff', 0.12));
             const lw = logos.draw(cv, uuid, x0, top + 2, ch && ch.name) ? LOGO.w + 14 : 0;
@@ -548,12 +616,16 @@ mgu.run({
                     x0, top + 100, 20, t.dim, { literal: true });
                 return;
             }
-            if (evSel.uuid !== uuid) { evSel.uuid = uuid; evSel.i = 0; }
-            const rows = 6, rowH = 42, y0 = top + 52;
-            evSel.i = Math.min(evSel.i, Math.min(rows, ev.length) - 1);
-            const tw = Math.max.apply(null, ev.slice(0, rows).map((e) => cv.textWidth(when(e.start, Date.now()), 20, { font: 'bold', literal: true }))) + 20;
-            ev.slice(0, rows).forEach((e, k) => {
-                const y = y0 + k * rowH, now = e.start <= tnow, chosen = k === evSel.i;
+            if (evSel.uuid !== uuid) { evSel.uuid = uuid; evSel.i = 0; evFirst = 0; }
+            const rows = EV_ROWS, rowH = EV_ROW_H, y0 = top + 52;
+            evLen = ev.length;
+            evFirst = Math.max(0, Math.min(evFirst, ev.length - rows));
+            evSel.i = Math.max(0, Math.min(evSel.i, ev.length - 1));
+            const shown = ev.slice(evFirst, evFirst + rows);
+            const tw = Math.max.apply(null, shown.map((e) => cv.textWidth(when(e.start, Date.now()), 20, { font: 'bold', literal: true }))) + 20;
+            if (ev.length > rows) cv.text((evFirst + 1) + '-' + (evFirst + shown.length) + ' / ' + ev.length, x0 + w, y0 + rows * rowH - 4, 14, t.dim, { align: 'right', literal: true });
+            shown.forEach((e, k0) => {
+                const k = evFirst + k0, y = y0 + k0 * rowH, now = e.start <= tnow, chosen = k === evSel.i;
                 if (chosen) cv.fillRect(x0 - 8, y, w + 16, rowH - 4, withAlpha('#ffffff', 0.07));
                 cv.text(when(e.start, Date.now()), x0, y + 26, 20, now ? BLUE : t.dim, { font: 'bold', literal: true });
                 cv.text(clip(cv, e.title + (e.subtitle ? ' - ' + e.subtitle : ''), 21, w - tw, 'label'), x0 + tw, y + 26, 21, t.text, { font: now ? 'bold' : undefined, literal: true });
