@@ -40,10 +40,35 @@ const ASPECT_NAME = { fit: 'FIT', zoom: 'ZOOM', fill: 'FILL' };
 const ACCENT = 0x2f8fd8ff;
 const LOGO = { w: 60, h: 36 };   // logos.js BOX (5:3, the server's logos)
 
-/** seconds since 1970 -> "21:05" (the head unit's local time) */
-const hm = (t) => { const d = new Date(t * 1000); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+/**
+ * The guide's times in the car's time zone. The head unit's Linux keeps UTC (0.1.6 in the car: the guide 2 h behind
+ * the car's clock, which the HMI keeps itself), so the zone is a setting: its hours from UTC in winter, and the EU's
+ * summer time (the last Sunday of March to the last Sunday of October, at 01:00 UTC) where it has one.
+ */
+const ZONES = {
+    eet: { base: 2, eu: true },     // Romania, Bulgaria, Greece, Finland, the Baltics
+    cet: { base: 1, eu: true },     // most of the EU
+    wet: { base: 0, eu: true },     // Portugal, UK, Ireland
+    utc: { base: 0, eu: false },
+};
+let zoneOf = () => 'eet';
+/** where the zone's key comes from (the app's setting); 'system': the head unit's own */
+const setZone = (f) => { zoneOf = f; };
+const lastSunday = (y, m) => { const d = new Date(Date.UTC(y, m + 1, 0, 1)); return d.getTime() - d.getUTCDay() * 86400000; };
+/** seconds the zone is ahead of UTC at `ms` */
+function zoneOffset(ms, key) {
+    const z = ZONES[key];
+    if (!z) return -new Date(ms).getTimezoneOffset() * 60;   // 'system'
+    const y = new Date(ms).getUTCFullYear();
+    const summer = z.eu && ms >= lastSunday(y, 2) && ms < lastSunday(y, 9);
+    return (z.base + (summer ? 1 : 0)) * 3600;
+}
+/** a Date whose UTC fields are the zone's local time */
+const local = (ms) => new Date(ms + zoneOffset(ms, zoneOf()) * 1000);
+/** seconds since 1970 -> "21:05" (the car's time) */
+const hm = (t) => { const d = local(t * 1000); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); };
 /** "21:05", or "Tue 06:00" on another day than `ref` */
-const when = (t, ref) => (new Date(t * 1000).toDateString() === new Date(ref).toDateString() ? '' : DAYS[new Date(t * 1000).getDay()] + ' ') + hm(t);
+const when = (t, ref) => { const d = local(t * 1000), r = local(ref); return (d.toISOString().slice(0, 10) === r.toISOString().slice(0, 10) ? '' : DAYS[d.getUTCDay()] + ' ') + hm(t); };
 
 function createControls(o) {
     const now = o.now || Date.now;
@@ -439,4 +464,4 @@ function videoRect(mode, fw, fh, pl) {
     return { x: Math.round((pl.w - w) / 2), y: Math.round((pl.h - h) / 2), w, h };
 }
 
-module.exports = { createControls, videoRect, BUTTONS, hm, when };
+module.exports = { createControls, videoRect, BUTTONS, hm, when, setZone, zoneOffset, ZONES };
