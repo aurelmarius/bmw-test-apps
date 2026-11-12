@@ -1,0 +1,100 @@
+{
+  "id": "aurelm_mediaprobe",
+  "title": "Media Probe",
+  "description": "What the car offers a music player (the first step of a Music Assistant client): the steering wheel's buttons, the source the HMI takes as playing, CarLife's bridge to BMW's media, button forwarding, and the BMW MediaPlayer's source for apps with files, a growing file, a pipe and http:// streams. Each test shows what the car answered; Report copies the log to a USB stick. Needs the Media Probe service.",
+  "version": "0.1.0",
+  "vendor": "custom",
+  "loggingId": "OA9Q",
+  "iconGlyph": "MP",
+  "signals": {},
+  "requires": {
+    "aurelm-mediaprobe": "0.1.0"
+  },
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "Media Probe",
+      "buttons": [
+        [
+          "BTN_UP",
+          "Previous test"
+        ],
+        [
+          "BTN_DOWN",
+          "Next test"
+        ],
+        [
+          "BTN_RUN",
+          "Run / undo"
+        ],
+        [
+          "BTN_STOPALL",
+          "Stop all"
+        ],
+        [
+          "BTN_REPORT",
+          "Report"
+        ]
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "key": "theme",
+      "label": "Colour theme",
+      "type": "choice",
+      "default": "m_tricolour",
+      "options": [
+        [
+          "m_red",
+          "M Red"
+        ],
+        [
+          "m_tricolour",
+          "M Tricolour"
+        ],
+        [
+          "ice",
+          "Ice White"
+        ],
+        [
+          "amber",
+          "Night Amber"
+        ]
+      ]
+    },
+    {
+      "key": "layout",
+      "label": "Screen layout",
+      "type": "choice",
+      "default": "full",
+      "options": [
+        [
+          "full",
+          "Full screen"
+        ],
+        [
+          "standard",
+          "Standard"
+        ]
+      ]
+    },
+    {
+      "key": "renderer",
+      "label": "Renderer",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        [
+          "auto",
+          "GPU 60 fps (default)"
+        ],
+        [
+          "software",
+          "Software"
+        ]
+      ]
+    }
+  ]
+}

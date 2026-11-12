@@ -1,0 +1,26 @@
+{
+ "probe.mp3": {
+  "bytes": 482780,
+  "seconds": 30.04
+ },
+ "probe.m4a": {
+  "bytes": 271773,
+  "seconds": 30
+ },
+ "probe.aac": {
+  "bytes": 273775,
+  "seconds": 28.1
+ },
+ "live.mp3": {
+  "bytes": 960515,
+  "seconds": 60.03
+ },
+ "tone48.wav": {
+  "bytes": 384078,
+  "seconds": 2
+ },
+ "cover.png": {
+  "bytes": 1575,
+  "seconds": 0
+ }
+}

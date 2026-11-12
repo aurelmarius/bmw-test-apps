@@ -41,6 +41,37 @@ myAirPlay and TVH Player (bmw-apps) and Emby share the car's speakers' input: th
 
 Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md), the player: [`native/emby-player/README.md`](native/emby-player/README.md).
 
+### 🔬 Media Probe (`aurelm_mediaprobe`) + Media Probe service (`aurelm-mediaprobe`)
+*What the car offers a music player: the first step of a Music Assistant client.*
+
+**Status:** step 0 (0.1.0), not yet run in a car. Before a player is written, it answers three questions in the car:
+do the **steering wheel's skip buttons** reach an app, can an app's **title, artist and cover** show where BMW's media
+show them (the media widget, the instrument cluster), and which source plays a **stream that never ends** (an
+internet radio)?
+
+- **Watched all the time** (each change on the screen and in the log): the steering wheel's buttons
+  (`SteeringWheelPushButton`: skip left / right, the knurled wheel, the star, voice), the source the HMI takes as
+  playing (`MediaSource`, `HmiMediaState`), CarLife's bridge to BMW's media (`CarLifeMp`, `BaiduCarLifeManager`), and
+  the BMW MediaPlayer's `CarLifeMedia` and `OapGenericMedia` (state, metadata, forwarded buttons).
+- **Tests** (choose with **Previous test** / **Next test**, press **Run / undo**; a second press undoes one that stays
+  on): source 287 (CarLife's input, as TVH Player and Emby play) with a test tone; CarLife's metadata written
+  (`CarLifeMp`); button forwarding on both players; source 1046 (the BMW MediaPlayer for apps, as RideTube plays) with an
+  MP3, an M4A and an AAC file with tags and a cover, a file that grows while it plays, a named pipe, and
+  `http://127.0.0.1` streams with and without an end; the environment (does the SOME/IP binding offer services too?).
+- **Stop all** undoes everything (routes, forwarding, CarLife's fields as they were). The service also undoes it as
+  it ends, and never takes source 287 from another app.
+- **Report** writes the log and a report and copies them to a **USB stick** if one is in
+  (`mediaprobe-<time>.log`); on the unit: `/var/opt/aurelm-mediaprobe/state/probe.log`.
+
+**How to test** (parked, about 15 minutes): open Media Probe with a USB stick in. 1) Press the steering wheel's
+skip buttons, the knurled wheel and the star with the radio playing: the right side counts them. 2) Run **Source
+287**: does the media widget say "CarLife"? Skip again. 3) Run **CarLife: write metadata**, look at the widget, the
+cluster and the media screen; run it again for the next status (1, 2, 0, 3). 4) Run **Button forwarding**, skip
+again. 5) Run each **1046** test and listen (each file has its own beeps); look at the widget and the cluster.
+6) **Stop all**, then **Report**. Photos of the widget and the cluster help.
+
+No internet needed. Details: [`native/aurelm-mediaprobe/README.md`](native/aurelm-mediaprobe/README.md).
+
 ## 🚀 Installation
 
 ### Via mgu-store
