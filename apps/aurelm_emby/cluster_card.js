@@ -4,7 +4,7 @@
  * it is (h:mm of h:mm, the minutes left, a progress bar), paused; over the media widget in the right dial, while a film
  * plays here.
  *
- * As TVH's card (apps/aurelm_tvh/cluster_card.js, 0.1.9 in the car): the cluster's media widget shows only what BMW's
+ * As TVH's card (now TVH Player in aurelmarius/bmw-apps, apps/aurelm_tvhplayer/cluster_card.js; 0.1.9 in the car): the cluster's media widget shows only what BMW's
  * mediaapp fills in, and the film's sound comes in by the CarLife input, so the widget says CarLife's "Not connected.".
  * So the card is drawn over it, through cluster-render (robertnisipeanu/idrive-apps, the Store; Waze on cluster installs
  * it): an image layer on its `panel` target (1920x720, the whole cluster, over the gauges and under the telltales),
