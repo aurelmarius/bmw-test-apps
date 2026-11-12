@@ -33,7 +33,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.3.11';
+const VERSION = '0.3.12';
 const PAGE_PORT = 8490;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -95,6 +95,28 @@ function createService(opts) {
 
     /* ---------- the client (internet uid) ---------- */
     let child = null, childStarts = 0, signinWait = {};
+    // the film's poster for the app's cluster card: asked of the client (it has the internet), the last few kept
+    let imageWait = {}, imageSeq = 0;
+    const images = new Map();
+    function image(id) {
+        if (!id) return Promise.resolve({ error: 'no item' });
+        if (images.has(id)) return Promise.resolve(images.get(id));
+        if (!child) return Promise.resolve({ error: 'the client is not running' });
+        const it = st.playback && st.playback.item;
+        const seriesId = it && it.id === id ? it.seriesId || null : null;
+        return new Promise((res) => {
+            const n = ++imageSeq;
+            const t = setTimeout(() => { delete imageWait[n]; res({ error: 'no answer in 20 s' }); }, 20000);
+            imageWait[n] = (m) => {
+                clearTimeout(t);
+                const r = m.ok ? { id, png: m.png } : { id, error: m.error };
+                if (m.ok) { if (images.size >= 4) images.delete(images.keys().next().value); images.set(id, r); }
+                else log('poster ' + id + ': ' + m.error);
+                res(r);
+            };
+            toChild({ op: 'image', id: n, itemId: id, seriesId });
+        });
+    }
     function startChild() {
         if (child) return;
         childStarts++;
@@ -134,6 +156,7 @@ function createService(opts) {
         else if (m.ev === 'command') st.command = m.data;
         else if (m.ev === 'playback') st.playback = m.status;
         else if (m.ev === 'subs') subs = { key: m.key, cues: m.cues || [] };
+        else if (m.ev === 'image' && imageWait[m.id]) { imageWait[m.id](m); delete imageWait[m.id]; }
         else if (m.ev === 'player-start') player.start(m.id);
         else if (m.ev === 'player-ctl') player.ctl(m.id, m.line);
         else if (m.ev === 'player-stop') player.stop(m.id);
@@ -274,6 +297,8 @@ function createService(opts) {
                 try { writeJson('prefs.json', prefs); } catch (e) { log('prefs: ' + e.message); }
                 toChild({ op: 'prefs', prefs });
             }
+        } else if (cmd === 'image') {
+            return image(String(m.id || ''));
         } else if (cmd === 'subs') {
             return { key: subs.key, cues: subs.cues };
         } else if (cmd === 'playstate' && m.command) {

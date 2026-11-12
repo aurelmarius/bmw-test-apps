@@ -200,6 +200,59 @@ test('aspect: fit keeps the whole film, fill covers the screen, zoom is between'
     assert.deepStrictEqual(videoRect('fill', 0, 0, PL), { x: 0, y: 0, w: 1920, h: 720 });
 });
 
+test('the cluster card: drawn on cluster-render\'s panel while a film plays, its poster asked for, hidden when it stops', async () => {
+    const fs = require('fs'), os = require('os');
+    const { createClusterCard, CARD, PLACE, LOGO } = require(path.join(__dirname, '..', 'apps', 'aurelm_emby', 'cluster_card'));
+    const { Canvas } = require(path.join(__dirname, '..', 'kit', 'runtime', 'canvas'));
+    const png = require(path.join(__dirname, '..', 'kit', 'runtime', 'png'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'emby-cluster-'));
+    const calls = [];
+    const fake = path.join(dir, 'client.js');
+    fs.writeFileSync(fake, "const E = require('events'); let calls = null;\n" +
+        "class ClusterRender extends E { constructor(app) { super(); calls = global.__clusterCalls; calls.push(['new', app]); }\n" +
+        "  connect() { calls.push(['connect']); } image(o) { calls.push(['image', o]); return 7; } set(r, o) { calls.push(['set', r, o]); }\n" +
+        "  pixels(r, rects, px) { calls.push(['pixels', r, px.length]); return true; } close() { calls.push(['close']); } }\n" +
+        'module.exports = { ClusterRender };\n');
+    global.__clusterCalls = calls;
+    // a poster as the server gives it (PNG, 2:3)
+    const poster = new Canvas(200, 300).clear([200, 40, 40, 255]).png();
+    const asked = [];
+    let playing = null, on = true;
+    const card = createClusterCard({ Canvas, png, clientPath: fake, socketPath: path.join(dir, 'none.sock'),
+        ask: (cmd, x) => { asked.push([cmd, x.id]); return Promise.resolve({ id: x.id, png: poster.toString('base64') }); },
+        enabled: () => on, offset: () => ({ dx: 0, dy: -40 }), info: () => (playing ? Object.assign({}, playing) : null) });
+    card.update();
+    assert.strictEqual(calls.length, 0, 'nothing playing: cluster-render not asked');
+    playing = { id: 'film2', name: 'Armageddon', sub: '1998', pos: 600, dur: 9050, paused: false, loading: false };
+    card.update();
+    const img = calls.filter((c) => c[0] === 'image')[0];
+    assert.strictEqual(calls[0][1], 'aurelm_emby');
+    assert.strictEqual(img[1].target, 'panel');
+    assert.deepStrictEqual([img[1].x, img[1].y], [PLACE.x, PLACE.y - 40], 'moved by the setting');
+    assert.ok(calls.some((c) => c[0] === 'pixels' && c[2] === CARD.w * CARD.h * 4), 'the card\'s pixels');
+    assert.ok(calls.some((c) => c[0] === 'set' && c[2].visible === 1), 'shown');
+    assert.deepStrictEqual(asked, [['image', 'film2']], 'the poster asked for');
+    await new Promise((r) => setTimeout(r, 300));   // decoded
+    const n = calls.length;
+    card.update();
+    assert.strictEqual(calls.length, n, 'within 5 s: not drawn again');
+    assert.strictEqual(asked.length, 1, 'asked once');
+    playing = null;
+    card.update();
+    assert.deepStrictEqual(calls[calls.length - 1], ['set', 7, { visible: 0 }], 'hidden when the film stops');
+    on = false; card.update();
+    assert.strictEqual(card.state().state, 'off');
+    // the card itself: the poster in the cover's place, opaque inside, transparent at the corners
+    const p = png.decode(poster), k = Math.min(LOGO.w / p.w, LOGO.h / p.h), f = png.fit(p, Math.round(Math.max(p.w, p.h) * k));
+    const cv = card.render({ id: 'film2', name: 'Știrile — ăîâ', sub: 'S1E3 Pilot', pos: 3700, dur: 7200, paused: true, cover: { w: f.w, h: f.h, d: f.data } });
+    assert.strictEqual(cv.d[3], 0, 'a corner: transparent');
+    const mid = ((40 + 75) * CARD.w + (CARD.w >> 1)) * 4;
+    assert.deepStrictEqual([cv.d[mid], cv.d[mid + 3]], [200, 255], 'the poster in the middle, on top');
+    assert.ok(cv.d[((CARD.h >> 1) * CARD.w + 8) * 4 + 3] < 128, 'the edge: fading out');
+    card.render({ id: 'x', name: 'No poster', sub: null, pos: 0, dur: 0, loading: true, cover: null });
+    card.close();
+});
+
 (async () => {
     let failed = 0;
     for (const t of tests) {

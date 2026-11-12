@@ -56,6 +56,12 @@ function describe(item) {
         : item.Name + (item.ProductionYear ? ' (' + item.ProductionYear + ')' : '');
     return {
         id: item.Id, title, type: item.Type,
+        // the cluster card's two lines: the film (or the series), then the episode (or the year)
+        name: item.Type === 'Episode' && item.SeriesName ? item.SeriesName : item.Name,
+        sub: item.Type === 'Episode' && item.SeriesName
+            ? ((item.ParentIndexNumber != null ? 'S' + item.ParentIndexNumber : '') + (item.IndexNumber != null ? 'E' + item.IndexNumber : '') + ' ' + (item.Name || '')).trim()
+            : item.ProductionYear ? String(item.ProductionYear) : null,
+        seriesId: item.SeriesId || null,
         seconds: item.RunTimeTicks ? Math.round(item.RunTimeTicks / TICKS) : null,
         container: src.Container || item.Container || null,
         bitrate: src.Bitrate || null,
@@ -282,7 +288,23 @@ function createClient(o) {
         return { status: r.status, text: r.body.toString('utf8') };
     }
 
-    return Object.assign(ev, { signIn, run, stop, signOut, status, describe, call, callText, account: () => account, device: o.device });
+    /**
+     * an item's poster as PNG (the server converts it: Format=png), at most 300 px, 1 MiB; an episode without one of
+     * its own: the series'. Resolves the bytes, or rejects with why.
+     */
+    async function poster(id, seriesId) {
+        if (!account) throw new Error('not signed in');
+        let why = 'none';
+        for (const x of [id, seriesId].filter(Boolean)) {
+            const r = await nx.request({ method: 'GET', headers: headers(account), maxBytes: 1024 * 1024, timeoutMs: 20000,
+                url: account.server + '/Items/' + encodeURIComponent(x) + '/Images/Primary?MaxWidth=300&MaxHeight=300&Format=png&Quality=90' });
+            if (r.status === 200 && r.body.length > 8 && r.body.readUInt32BE(0) === 0x89504e47) return r.body;
+            why = r.status === 200 ? 'not a PNG' : 'HTTP ' + r.status;
+        }
+        throw new Error(why);
+    }
+
+    return Object.assign(ev, { signIn, run, stop, signOut, status, describe, call, callText, poster, account: () => account, device: o.device });
 }
 
 module.exports = { createClient, candidates, authHeader, describe, COMMANDS, CLIENT };

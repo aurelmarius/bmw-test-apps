@@ -82,6 +82,13 @@ function fakeEmby(opts) {
                         { Type: 'Subtitle', Index: 3, Codec: 'PGSSUB', Language: 'eng', DeliveryMethod: 'Encode' }],
                     TranscodingUrl: '/videos/film2/stream.ts?MediaSourceId=ms2&PlaySessionId=' + ps + '&api_key=' + TOKEN + '&StartTimeTicks=0&VideoCodec=h264' }] });
             }
+            if (p === '/Items/film2/Images/Primary') {
+                seen.images = (seen.images || []).concat([query]);
+                if (o.noPoster) return json(404);
+                res.writeHead(200, { 'Content-Type': 'image/png' });
+                return res.end(Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'));
+            }
+            if (p === '/Items/series9/Images/Primary') { seen.images = (seen.images || []).concat([query]); return json(404); }
             if (p === '/videos/film2/stream.ts') {
                 seen.streams.push({ query, token: req.headers['x-emby-token'] });
                 if (o.streamFails) { res.writeHead(500, { 'Content-Type': 'text/plain' }); return res.end('Error'); }
@@ -280,7 +287,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.3.11');
+        assert.strictEqual(s.version, '0.3.12');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -567,6 +574,24 @@ test('tracks from the iDrive: the lists in the status; another audio is a new st
         await until(() => srv.seen.pbinfo.length === 3, 5000, 'burned in');
         assert.strictEqual(srv.seen.pbinfo[2].query.SubtitleStreamIndex, '3');
         assert.strictEqual(srv.seen.pbinfo[2].query.AudioStreamIndex, '4', 'the chosen audio kept');
+    } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
+});
+
+test('the poster for the cluster card: asked of the server as PNG, kept; none: why', async () => {
+    const srv = await fakeEmby({ seconds: 600 });
+    const svc = await signedIn(srv, { playerEnv: { FAKE_PLAYER_SECONDS: '100' } });
+    try {
+        srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow' } });
+        const s = await statusUntil(svc.sock, (x) => x.playback && x.playback.item, 5000, 'an item');
+        assert.strictEqual(s.playback.item.name, 'Sample');
+        let r = await ask(svc.sock, 'image', { id: 'film2' });
+        assert.strictEqual(Buffer.from(r.png, 'base64').readUInt32BE(0), 0x89504e47);
+        assert.strictEqual(srv.seen.images[0].Format, 'png');
+        r = await ask(svc.sock, 'image', { id: 'film2' });
+        assert.ok(r.png);
+        assert.strictEqual(srv.seen.images.length, 1, 'kept: asked once');
+        r = await ask(svc.sock, 'image', { id: 'series9' });
+        assert.strictEqual(r.error, 'HTTP 404');
     } finally { srv.close(); svc.svc.stop(); svc.server.close(); }
 });
 

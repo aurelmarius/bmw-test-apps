@@ -22,7 +22,8 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const mgu = require('./kit/mgu');
-const { withAlpha } = require('./kit/canvas');
+const { withAlpha, Canvas } = require('./kit/canvas');
+const png = require('./kit/png');
 const G = require('./kit/gauges');
 const record = require('./kit/record');
 const Parked = require('./kit/parked');
@@ -31,12 +32,13 @@ const { RenderClient } = require('./mgu_render_client');
 const { createMirrorView } = require('./mirror_view');
 const { createControls, videoRect } = require('./controls');
 const { createCarAudio } = require('./car_audio');
+const { createClusterCard } = require('./cluster_card');
 
 const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.3.11';
+const SERVICE_VERSION = '0.3.12';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 // a film is on: playing, paused, starting; not one parked by Stop on the iDrive (its player closed)
@@ -44,12 +46,12 @@ const filmOn = (pb) => !!(pb && ACTIVE.indexOf(pb.state) >= 0 && !pb.parked);
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const GREEN = '#52b54b', AMBER = '#ffb020', RED = '#ef2b2d';
 
-function ask(cmd, extra) {
+function ask(cmd, extra, ms) {
     return new Promise((res) => {
         let buf = '', done = false;
         const end = (v) => { if (!done) { done = true; clearTimeout(t); try { c.destroy(); } catch (e) { /* gone */ } res(v); } };
         const c = net.connect(SOCK);
-        const t = setTimeout(() => end(null), 5000);
+        const t = setTimeout(() => end(null), ms || 5000);
         c.setEncoding('utf8');
         c.on('connect', () => c.write(JSON.stringify(Object.assign({ cmd }, extra || {})) + '\n'));
         c.on('data', (d) => {
@@ -158,6 +160,9 @@ function playRows(s, rows) {
         else snd = { state: ca.connected ? 'ok' : 'wait', detail: n + (ca.connected ? ', on the speakers' : ', connecting the speakers') + (pb.muted ? ', muted' : pb.volume < 100 ? ', volume ' + pb.volume + '%' : '') };
     }
     rows.push(Object.assign({ label: 'Sound' }, snd));
+    // the film on the instrument cluster (cluster_card.js, through cluster-render)
+    const cl = s.cluster;
+    if (cl) rows.push({ label: 'Cluster', state: cl.state === 'shown' ? 'ok' : cl.state === 'error' ? 'bad' : cl.state === 'off' || cl.state === 'missing' ? 'off' : 'wait', detail: cl.detail });
 }
 
 /** the QR code's dark modules for `text`: { n, dark(r, c) } */
@@ -400,6 +405,20 @@ mgu.run({
         // a subtitle line comes or goes, the bar's time moves on or it hides: a new frame (only then; the picture itself needs none)
         setInterval(() => { if (mirror.state().shown) mirror.tick(); }, 100);
 
+        /* ---------- the film on the instrument cluster: a card over the media widget (cluster_card.js) ---------- */
+        const offsetOf = (k) => { const v = Number(ctx.settings.get(k)); return isFinite(v) ? Math.max(-160, Math.min(160, v)) : 0; };
+        const card = createClusterCard({ log, ask, png, Canvas,
+            enabled: () => ctx.settings.get('cluster') !== false,
+            offset: () => ({ dx: offsetOf('clusterX'), dy: offsetOf('clusterY') }),
+            info: () => {
+                const pb = st && st.playback;
+                if (!filmOn(pb) || !pb.item || !pb.item.id) return null;
+                return { id: pb.item.id, name: pb.item.name || pb.item.title || '', sub: pb.item.sub || null, pos: posNow(), dur: pb.dur,
+                    paused: pb.state === 'paused', loading: pb.state === 'loading' };
+            } });
+        setInterval(() => { try { card.update(); } catch (e) { log.warn('cluster: ' + (e && e.stack || e)); } }, 1000);
+        if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => card.close());
+
         let soundUntil = 0;
         function sync() {
             const pb = st && st.playback;
@@ -425,7 +444,7 @@ mgu.run({
         }
 
         function draw(cv, t, page) {
-            if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); }
+            if (st) { st.mirror = mirror.state(); st.carAudio = carAudio.state(); st.cluster = card.state(); }
             const rows = steps(st);
             const COL = { ok: GREEN, wait: AMBER, bad: RED, off: withAlpha('#ffffff', 0.3) };
             const textW = page ? 860 : 1180;
