@@ -1,0 +1,129 @@
+{
+  "id": "aurelm-music",
+  "kind": "tool",
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "title": "Music Assistant service",
+  "description": "For the app Music Assistant: the car as a Music Assistant player. Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code) and keeps only a long-lived token. Browses the library and the recommendations over the server's API, and receives the music over Sendspin (Music Assistant's own protocol, through its authenticated /sendspin): Opus decoded by ma-player (libopus) into SmartXbar's CarLife input. 30 s of music are buffered (a gap in the mobile network goes unheard). Its internet goes through mgu-uplink, as uid 13106 only; the player runs as nobody.",
+  "requires": {
+    "mgu-deploy": "0.7.0",
+    "mgu-uplink": "0.7.0"
+  },
+  "uninstallable": true,
+  "mguHmi": [
+    "ID7"
+  ],
+  "internet": true,
+  "uids": [
+    13106
+  ],
+  "files": [
+    {
+      "path": "service.js",
+      "from": "service.js",
+      "mode": "0644"
+    },
+    {
+      "path": "client.js",
+      "from": "client.js",
+      "mode": "0644"
+    },
+    {
+      "path": "ma.js",
+      "from": "ma.js",
+      "mode": "0644"
+    },
+    {
+      "path": "ws.js",
+      "from": "ws.js",
+      "mode": "0644"
+    },
+    {
+      "path": "netx.js",
+      "from": "netx.js",
+      "mode": "0644"
+    },
+    {
+      "path": "player.js",
+      "from": "player.js",
+      "mode": "0644"
+    },
+    {
+      "path": "page.js",
+      "from": "page.js",
+      "mode": "0644"
+    },
+    {
+      "path": "nft.js",
+      "from": "nft.js",
+      "mode": "0644"
+    },
+    {
+      "path": "sockgroup.js",
+      "from": "sockgroup.js",
+      "mode": "0644"
+    },
+    {
+      "path": "check.js",
+      "from": "check.js",
+      "mode": "0644"
+    },
+    {
+      "path": "cleanup.js",
+      "from": "cleanup.js",
+      "mode": "0644"
+    },
+    {
+      "path": "cacert.pem",
+      "from": "cacert.pem",
+      "mode": "0644"
+    },
+    {
+      "path": "README.md",
+      "from": "README.md",
+      "mode": "0644"
+    },
+    {
+      "path": "ma-player",
+      "from": "../ma-player/build/ma-player",
+      "mode": "0755"
+    },
+    {
+      "path": "OPUS-LICENSE",
+      "from": "../ma-player/build/opus/COPYING",
+      "mode": "0644"
+    }
+  ],
+  "check": [
+    "check.js"
+  ],
+  "deactivate": [
+    "node",
+    "cleanup.js"
+  ],
+  "crashNames": [
+    "ma-player"
+  ],
+  "units": [
+    {
+      "name": "aurelm-music.socket",
+      "from": "systemd/aurelm-music.socket"
+    },
+    {
+      "name": "aurelm-music.service",
+      "from": "systemd/aurelm-music.service"
+    }
+  ],
+  "enable": [
+    {
+      "unit": "aurelm-music.socket",
+      "target": "sockets.target"
+    }
+  ],
+  "recmgr": [
+    "aurelm-music"
+  ],
+  "restart": [
+    "aurelm-music.service"
+  ]
+}

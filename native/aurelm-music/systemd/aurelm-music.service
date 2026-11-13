@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=aurelm-music: Music Assistant in the car, for the app Music Assistant
+RequiresMountsFor=/var/opt
+# Started by the app's connection to the socket, never at boot. Signed in, it stays until the unit sleeps (the car
+# is a Music Assistant player meanwhile); signed out, it ends 10 minutes after the last request. Ordered before no
+# head-unit unit, waited for by none.
+Requires=aurelm-music.socket
+After=aurelm-music.socket
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+# root: the sign-in page opens (and closes again) an accept rule for its port in the unit's firewall (nft), and the
+# player takes the sound devices' group before it drops to nobody (ma-player). The Music Assistant client runs as
+# the tool's uid (13106, the only one mgu-uplink routes for it), the player as nobody, children of this service with
+# its limits and LimitCORE.
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+Environment=MUSIC_STATE=/var/opt/aurelm-music/state
+ExecStartPre=-/bin/sh -c 'mkdir -p /var/opt/aurelm-music/state && chmod 0700 /var/opt/aurelm-music/state'
+ExecStart=/usr/bin/node --max-old-space-size=96 /var/opt/aurelm-music/current/service.js
+ExecStopPost=-/usr/bin/node /var/opt/aurelm-music/current/cleanup.js
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=8
+Nice=5
+# music: the decoding is light (Opus, 48 kHz stereo); nice 5 keeps CarPlay and the HMI first
+CPUQuota=100%
+MemoryLimit=160M
+TasksMax=32
+# No core dump goes to the crash handler (which restarts the head unit for a program it does not list),
+# so a crash restarts this service and never the head unit.
+LimitCORE=1
+StandardOutput=journal
+StandardError=journal

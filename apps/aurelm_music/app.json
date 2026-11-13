@@ -1,0 +1,122 @@
+{
+  "id": "aurelm_music",
+  "title": "Music Assistant",
+  "description": "Your Music Assistant server in the car: the home page's recommendations with their covers, the library (playlists, albums, artists, radio, tracks), search, and what plays with its cover, its progress and what comes next. The music comes over Sendspin and plays on the car's speakers; skip on the steering wheel goes to the next or the previous track; the track shows on the instrument cluster. Sign in once from the phone (QR code). Needs the Music Assistant service.",
+  "version": "0.1.0",
+  "vendor": "custom",
+  "loggingId": "OA9U",
+  "iconGlyph": "MA",
+  "signals": {
+    "de.bmw.infotainment.controlelements.SteeringWheelPushButton": {
+      "_instances": "1",
+      "statusSearchSwitch1": "rs"
+    },
+    "org.genivi.am.commandinterface.CommandControl": {
+      "_instances": "1",
+      "_methods": [
+        "connect",
+        "disconnect",
+        "getListMainConnections"
+      ]
+    },
+    "org.genivi.am.routinginterface.RoutingControlObserver": {
+      "_instances": "1",
+      "_methods": [
+        "hookSourceAvailablityStatusChange"
+      ]
+    }
+  },
+  "requires": {
+    "aurelm-music": "0.1.0"
+  },
+  "screens": [
+    {
+      "name": "MAIN",
+      "kind": "canvas",
+      "title": "Music Assistant",
+      "buttons": [
+        [
+          "BTN_PLAY",
+          "Play / Pause"
+        ],
+        [
+          "BTN_PREVTRACK",
+          "Previous"
+        ],
+        [
+          "BTN_NEXTTRACK",
+          "Next"
+        ],
+        [
+          "BTN_SIGNIN",
+          "Sign in"
+        ],
+        [
+          "BTN_SETTINGS",
+          "Settings"
+        ]
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "key": "wheel",
+      "label": "Skip on the steering wheel: next / previous track (held: back / forward 15 s)",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "cluster",
+      "label": "What plays on the instrument cluster (a card over the media widget; needs cluster-render from the Store, as Waze on cluster)",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "clusterX",
+      "label": "Cluster card: left / right",
+      "type": "choice",
+      "default": "0",
+      "options": [
+        ["-160", "left 160 px"], ["-120", "left 120 px"], ["-80", "left 80 px"], ["-40", "left 40 px"], ["0", "as placed"],
+        ["40", "right 40 px"], ["80", "right 80 px"], ["120", "right 120 px"], ["160", "right 160 px"]
+      ]
+    },
+    {
+      "key": "clusterY",
+      "label": "Cluster card: up / down",
+      "type": "choice",
+      "default": "0",
+      "options": [
+        ["-160", "up 160 px"], ["-120", "up 120 px"], ["-80", "up 80 px"], ["-40", "up 40 px"], ["0", "as placed"],
+        ["40", "down 40 px"], ["80", "down 80 px"], ["120", "down 120 px"], ["160", "down 160 px"]
+      ]
+    },
+    {
+      "key": "theme",
+      "label": "Colour theme",
+      "type": "choice",
+      "default": "m_tricolour",
+      "options": [
+        ["m_red", "M Red"], ["m_tricolour", "M Tricolour"], ["ice", "Ice White"], ["amber", "Night Amber"]
+      ]
+    },
+    {
+      "key": "layout",
+      "label": "Screen layout",
+      "type": "choice",
+      "default": "full",
+      "options": [
+        ["full", "Full screen"], ["standard", "Standard"]
+      ]
+    },
+    {
+      "key": "renderer",
+      "label": "Renderer",
+      "type": "choice",
+      "default": "auto",
+      "options": [
+        ["auto", "GPU 60 fps (default)"], ["software", "Software"]
+      ]
+    }
+  ]
+}

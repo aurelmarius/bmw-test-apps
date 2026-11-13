@@ -41,6 +41,33 @@ myAirPlay and TVH Player (bmw-apps) and Emby share the car's speakers' input: th
 
 Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md), the player: [`native/emby-player/README.md`](native/emby-player/README.md).
 
+### 🎵 Music Assistant (`aurelm_music`) + Music Assistant service (`aurelm-music`)
+*Your [Music Assistant](https://github.com/music-assistant) server in the car, in the style of Spotify.*
+
+**Status:** step 1 (0.1.0), not yet run in a car. Built on what Media Probe found in the car (2026-11-13) and a probe
+against Music Assistant 2.10.9.
+
+- **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
+  Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;
+  **Search** with an on-screen keyboard; **Playing**: the cover, the title, the artist, the progress (tap the bar to
+  seek), play / pause, previous, next, shuffle, repeat, and what comes next.
+- **The music comes over Sendspin**, Music Assistant's own protocol, through the server's own address (as the phone
+  opens it from outside): Opus, decoded on the head unit, on the car's speakers. **30 s are buffered**: a gap in the
+  mobile network goes unheard. The car is also a player in the phone's Music Assistant app ("BMW iDrive").
+- **Skip on the steering wheel**: next / previous track while our music plays; held, back / forward 15 s (30 s held
+  longer). The radio is not touched.
+- **On the instrument cluster**: the cover, the title, the artist and the progress, over the media widget (needs
+  cluster-render from the Store, as Waze on cluster; optional).
+- **Sign in once** from the phone: Sign in, scan the QR code (the phone on the car Wi-Fi, as for wireless CarPlay),
+  enter the server's address, your user and password (only the long-lived token the server gives is kept) or a token
+  made in Music Assistant (an account that signs in through Home Assistant).
+
+**Installing**: the Store installs the Music Assistant service with the app (it needs mgu-uplink). **Restart the head
+unit once** after installing. Music Assistant must be reachable from the internet (as for its phone app).
+
+Details: [`native/aurelm-music/README.md`](native/aurelm-music/README.md), the player:
+[`native/ma-player/README.md`](native/ma-player/README.md).
+
 ### 🔬 Media Probe (`aurelm_mediaprobe`) + Media Probe service (`aurelm-mediaprobe`)
 *What the car offers a music player: the first step of a Music Assistant client.*
 

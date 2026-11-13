@@ -14,7 +14,7 @@
  * opts.native: ask for mgu-render's own dialect (mgu-render/1, the Store's renderer). There touch
  * claims and the controller grab work on one connection, and X_STATE says when the renderer has
  * the app on screen. A renderer that does not speak it answers READY alone and the connection
- * stays in the upstream dialect. Pixel images (op 18) are upstream only: an app that draws them
+ * stays in the upstream dialect. Pixel images (op 18): upstream's IMAGE 9, or mgu-render/1's IMAGE 10 (premultiplied); an app that draws them
  * (Doom) connects without opts.native.
  */
 const net = require('net');
@@ -80,7 +80,7 @@ class RenderClient extends EventEmitter {
             this.fd = fs.openSync(this.opts.file, 'w');
             this.connected = this.ready = true;
             this._write(msg(M.HELLO, this._hello()));
-            if (this.opts.native) { this.native = true; this._write(this._u32msg(X.MODE, [X_MODE_LAYER])); }
+            if (this.opts.native) { this.native = true; rec.useNativeImages(true); this._write(this._u32msg(X.MODE, [X_MODE_LAYER])); }
             setImmediate(() => this.emit('ready', this.screen));
             return this;
         }
@@ -96,6 +96,7 @@ class RenderClient extends EventEmitter {
             this._reset();
             s.setNoDelay && s.setNoDelay(true);
             this.native = false; this.info = null; this.onScreen = null;
+            rec.useNativeImages(false);
             this.claimed = null;
             this._write(msg(M.HELLO, this._hello()));
             // upstream renderers take these before READY; they are sent again once READY came
@@ -180,6 +181,7 @@ class RenderClient extends EventEmitter {
             if (type === X.READY && p.length >= 12) {
                 const caps = p.readUInt32LE(8);
                 this.native = true;
+                rec.useNativeImages(true);
                 this.info = { touch: !!(caps & 1), controller: !!(caps & 2), frontGate: !!(caps & 4) };
             } else if (type === E.READY) {
                 this.ready = true; this.errLogged = false;
@@ -280,10 +282,26 @@ class RenderClient extends EventEmitter {
     }
     /** upload a pixel image when this connection hasn't got its current version */
     _ensureImage(id) {
-        if (this.native) { if (!this.imgWarned) { this.imgWarned = true; this.log.warn('renderd: pixel images need the upstream dialect'); } return; }
         const im = rec.imageById.get(id);
         if (!im || !im.data) return;
         if (this.sent.image.get(id) === im.ver) return;
+        if (this.native) {
+            // mgu-render/1 (as IterioDev's protocol 4): IMAGE is message 10, premultiplied RGBA, up to 1024 px a side,
+            // 64 pictures an app (the same id replaces); drawn by op 18 `x y w h r id`, filtered
+            if (im.w < 1 || im.h < 1 || im.w > 1024 || im.h > 1024) { this.log.warn('renderd: image ' + id + ' ' + im.w + 'x' + im.h + ' is too large'); return; }
+            const n = im.w * im.h * 4, b = Buffer.alloc(8 + 12 + n);
+            b.writeUInt32LE(10, 0); b.writeUInt32LE(12 + n, 4);
+            b.writeUInt32LE(id, 8); b.writeUInt32LE(im.w, 12); b.writeUInt32LE(im.h, 16);
+            const d = im.data;
+            for (let i = 0, o = 20; i < n; i += 4, o += 4) {
+                const a = d[i + 3];
+                if (a === 255) { b[o] = d[i]; b[o + 1] = d[i + 1]; b[o + 2] = d[i + 2]; b[o + 3] = 255; }
+                else { b[o] = (d[i] * a + 127) / 255 | 0; b[o + 1] = (d[i + 1] * a + 127) / 255 | 0; b[o + 2] = (d[i + 2] * a + 127) / 255 | 0; b[o + 3] = a; }
+            }
+            this._write(b);
+            this.sent.image.set(id, im.ver);
+            return;
+        }
         const head = Buffer.alloc(12);
         head.writeUInt32LE(id, 0); head.writeUInt32LE(im.w, 4); head.writeUInt32LE(im.h, 8);
         const px = Buffer.from(im.data.buffer, im.data.byteOffset, im.w * im.h * 4);
