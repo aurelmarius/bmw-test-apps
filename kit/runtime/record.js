@@ -60,6 +60,12 @@ function atlasId(f, family) {
 }
 function atlasById(id) { const a = atlasList.find((x) => x.id === id); return a ? a.f : null; }
 
+// op 18's words: the upstream dialect's `id ver x y w h` (nearest pixel), or mgu-render/1's (the Store's renderer, also
+// IterioDev's protocol 4) `x y w h r id` (filtered, corner radius r): the transport says which once it knows
+// (renderd.js, X_READY), and frames recorded from then on use it
+let nativeImages = false;
+function useNativeImages(on) { nativeImages = !!on; }
+
 // pixel images (e.g. a game's frame): id -> { w, h, data (RGBA bytes), ver }. setImage() bumps ver;
 // a frame records id + ver, so a changed picture is a changed frame, and the transport uploads it
 const imageById = new Map();
@@ -124,12 +130,14 @@ class Recorder {
         this.u[i] = OP.VIDEO; f[i + 1] = x; f[i + 2] = y; f[i + 3] = w; f[i + 4] = h; f[i + 5] = r || 0; this.u[i + 6] = id;
         this.n += 7; return this;
     }
-    /** Draw pixel image `id` (see setImage) scaled into x, y, w, h (nearest pixel). */
-    image(id, x, y, w, h) {
+    /** Draw pixel image `id` (see setImage) scaled into x, y, w, h (nearest pixel; on mgu-render/1 filtered, with
+     *  corner radius r). */
+    image(id, x, y, w, h, r) {
         const im = imageById.get(id);
         if (!im || !(w > 0 && h > 0)) return this;
         this._grow(7); const f = this.f, i = this.n;
-        this.u[i] = OP.IMAGE; this.u[i + 1] = id; this.u[i + 2] = im.ver; f[i + 3] = x; f[i + 4] = y; f[i + 5] = w; f[i + 6] = h;
+        if (nativeImages) { this.u[i] = OP.IMAGE; f[i + 1] = x; f[i + 2] = y; f[i + 3] = w; f[i + 4] = h; f[i + 5] = r || 0; this.u[i + 6] = id; }
+        else { this.u[i] = OP.IMAGE; this.u[i + 1] = id; this.u[i + 2] = im.ver; f[i + 3] = x; f[i + 4] = y; f[i + 5] = w; f[i + 6] = h; }
         this.images.add(id);
         this.n += 7; return this;
     }
@@ -362,7 +370,11 @@ function play(words, real) {
         }
         case OP.LAYER: { const L = layerById.get(u[i]); if (L) cv.blit(softLayer(L), f[i + 1], f[i + 2]); i += 3; break; }
         case OP.VIDEO: i += 6; break;                       // (software path: no video)
-        case OP.IMAGE: { const im = imageById.get(u[i]); if (im && cv.drawImage) cv.drawImage(im.data, im.w, im.h, f[i + 2], f[i + 3], f[i + 4], f[i + 5]); i += 6; break; }
+        case OP.IMAGE: {
+            if (nativeImages) { const im = imageById.get(u[i + 5]); if (im && cv.drawImage) cv.drawImage(im.data, im.w, im.h, f[i], f[i + 1], f[i + 2], f[i + 3]); }
+            else { const im = imageById.get(u[i]); if (im && cv.drawImage) cv.drawImage(im.data, im.w, im.h, f[i + 2], f[i + 3], f[i + 4], f[i + 5]); }
+            i += 6; break;
+        }
         case OP.CLIP: clip = [f[i], f[i + 1], f[i + 2], f[i + 3]]; i += 4; break;     // (software path: ignored)
         case OP.NOCLIP: clip = null; break;
         case OP.ALPHA: alpha = f[i]; i += 1; break;
@@ -374,4 +386,4 @@ function play(words, real) {
     return real;
 }
 
-module.exports = { Recorder, OP, pack, unpack, rampId, rampList, atlasId, atlasList, atlasById, makeLayer, dropLayer, layerById, play, softLayer, setImage, imageById };
+module.exports = { Recorder, OP, pack, unpack, rampId, rampList, atlasId, atlasList, atlasById, makeLayer, dropLayer, layerById, play, softLayer, setImage, imageById, useNativeImages };
