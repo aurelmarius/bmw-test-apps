@@ -2,13 +2,13 @@
   "id": "aurelm_mediaprobe",
   "title": "Media Probe",
   "description": "What the car offers a music player (the first step of a Music Assistant client): the steering wheel's buttons, the source the HMI takes as playing, CarLife's bridge to BMW's media, button forwarding, and the BMW MediaPlayer's source for apps with files, a growing file, a pipe and http:// streams. Each test shows what the car answered; Report copies the log to a USB stick. Needs the Media Probe service.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "vendor": "custom",
   "loggingId": "OA9Q",
   "iconGlyph": "MP",
   "signals": {},
   "requires": {
-    "aurelm-mediaprobe": "0.1.2"
+    "aurelm-mediaprobe": "0.1.3"
   },
   "screens": [
     {

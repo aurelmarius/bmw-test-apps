@@ -28,6 +28,7 @@ const path = require('path');
 const cp = require('child_process');
 const feeds = require('./feeds');
 const { createRoutes, CARLIFE, OAP, AM, AMR } = require('./routes');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const IF = {
     WHEEL: 'de.bmw.infotainment.controlelements.SteeringWheelPushButton',
@@ -54,7 +55,10 @@ const MONITORS = [
     { key: 'carlifeMgr', iface: IF.CLM, inst: 'CarLifeManagerInst1' },
     { key: 'routes', iface: IF.AM, inst: '1', fields: ['listOfMainConnections'], events: [] },
 ];
-const BUTTONS = ['ITEM_NEXT', 'ITEM_PREV', 'PLAY', 'PAUSE', 'STOP', 'FAST_FWD', 'FAST_BWD', 'SCAN_NEXT', 'SCAN_PREV'];
+// forwarded to us: next / previous and their long presses only. 0.1.2 also forwarded PLAY / PAUSE / STOP, and the
+// player then sent us our own STOP instead of stopping (sendButtonEvent timed out)
+const BUTTONS = ['ITEM_NEXT', 'ITEM_PREV', 'SCAN_NEXT', 'SCAN_PREV', 'FAST_FWD', 'FAST_BWD'];
+const { id3 } = require('./id3');
 const LANG = 7695972;   // RideTube's languageCode for playFile
 const HTTP_PORT = 8494;
 
@@ -114,6 +118,7 @@ function createProbe(o) {
     const mon = {};         // key -> { available, error }
     const events = [];      // the last button-ish events, for the app's panel
     const counts = { wheel: 0, forward: 0 };
+    let skips = 0, lastForward = null;
     function note(key, field, v, isEvent) {
         const k = key + '.' + field;
         const prev = vals[k];
@@ -128,7 +133,8 @@ function createProbe(o) {
         // a first value (read at the start) is not a press
         if (!prev && !isEvent) return;
         if (key === 'wheel') { counts.wheel++; events.push({ at: now(), text: 'wheel ' + (WHEEL_NAMES[field] || field) + ': ' + show(unwrap(v), 120) }); }
-        if (field === 'buttonEventForward') { counts.forward++; events.push({ at: now(), text: key + ' forwarded ' + show(v, 120) }); }
+        if (key === 'wheel' && field === 'statusSearchSwitch1' && /SKIP/.test(show(v))) skips++;
+        if (field === 'buttonEventForward') { lastForward = show(v, 80); counts.forward++; events.push({ at: now(), text: key + ' forwarded ' + show(v, 120) }); }
         while (events.length > 12) events.shift();
     }
     async function startMonitor(m) {
@@ -261,12 +267,12 @@ function createProbe(o) {
         done(t, 'idle', out.join('; ') || 'nothing read before, nothing restored');
     });
 
-    /* button forwarding on both players */
+    /* button forwarding (next / previous) on the 1046 player; CarLifeMedia is not offered on a European car (0.1.2) */
     let fwOrig = null;
-    def('forward', 'Button forwarding on CarLifeMedia + OapGenericMedia', async (t) => {
+    def('forward', 'Button forwarding (next/prev) on OapGenericMedia', async (t) => {
         fwOrig = {};
         const out = [];
-        for (const inst of ['CarLifeMedia', 'OapGenericMedia']) {
+        for (const inst of ['OapGenericMedia']) {
             const p = await s.proxy(IF.MP, inst);
             fwOrig[inst] = await s.get(p, 'configureButtonEventForwarding').catch((e) => { log('forward: read ' + inst + ': ' + (e.message || e)); return undefined; });
             const r = await s.set(p, 'configureButtonEventForwarding', BUTTONS).then((x) => 'ok ' + show(x, 80), (e) => 'error ' + (e.message || e));
@@ -297,6 +303,9 @@ function createProbe(o) {
         if (!c) return;
         if (c.feed) c.feed.stop();
         const p = await oap().catch(() => null);
+        if (p && c.fwWas !== undefined) {
+            log('1046: forwarding back to ' + show(c.fwWas) + ' ' + show(await s.set(p, 'configureButtonEventForwarding', c.fwWas || []).catch((e) => String(e))));
+        }
         if (p) log('1046: STOP ' + show(await s.call(p, 'sendButtonEvent', { button: 'STOP', action: 'PRESS' }, 3000).catch((e) => String(e))));
         c.t.live = null;
         if (c.t.state === 'on' || c.t.state === 'running') done(c.t, 'idle', 'stopped (' + why + '); ' + verdict(c));
@@ -306,7 +315,8 @@ function createProbe(o) {
         return 'played to ' + (el / 1000).toFixed(1) + ' s' + (c.startSec ? ' (first written: ' + c.startSec + ' s)' : '') +
             ', state ' + show(v('oapMedia.playerState'), 40) + (c.error ? ', error ' + c.error : '');
     }
-    function play1046(id, label, prepare) {
+    function play1046(id, label, prepare, opts) {
+        const po = opts || {};
         def(id, label, async (t) => {
             await end1046('another 1046 test');
             const r = await routes.connect(OAP);
@@ -318,14 +328,63 @@ function createProbe(o) {
             if (c.feed && c.feed.error) return done(t, 'bad', c.feed.error);
             cur = c;
             const p = await oap();
+            let fwSay = '';
+            if (po.forward) {
+                c.fwWas = await s.get(p, 'configureButtonEventForwarding').catch(() => []);
+                fwSay = 'forwarding ' + await s.set(p, 'configureButtonEventForwarding', BUTTONS).then(() => 'on', (e) => 'error ' + (e.message || e));
+                log('1046: ' + fwSay + ' (' + BUTTONS.join(',') + ')');
+                c.fw0 = counts.forward;
+            }
             const pr = await s.call(p, 'playFile', { path: target, languageCode: LANG }).then((x) => x, (e) => ({ error: String(e.message || e) }));
             log('1046: playFile ' + target + ' -> ' + show(pr));
-            t.live = () => 'playFile ' + show(pr, 80) + ' | ' + verdict(c) + ' | metadata ' + show(v('oapMedia.currentItemMetadata'), 160) +
+            t.live = () => (po.forward ? fwSay + ', forwarded: ' + (counts.forward - c.fw0) + (lastForward ? ' (last: ' + lastForward + ')' : '') + ', wheel skips: ' + skips + ' | ' : '') +
+                'playFile ' + show(pr, 80) + ' | ' + verdict(c) + ' | metadata ' + show(v('oapMedia.currentItemMetadata'), 160) +
                 ' | HMI ' + show(v('hmi.playerMetadata'), 100) + (c.feed && c.feed.state ? ' | feed ' + show(c.feed.state(), 160) : '');
             done(t, pr && pr.EntError === 'OK' ? 'on' : 'bad', 'playFile ' + show(pr, 120));
         }, async () => end1046('pressed again'));
     }
     const fileIn = (name) => { const f = copyToPlay(name); if (!f) throw new Error('no ' + name + ' in the package'); return f; };
+    play1046('p_skip', '1046: play 2 min + forwarding: press skip!', () => fileIn('long.mp3'), { forward: true });
+    play1046('p_sparse', '1046: preallocated 60 min MP3 (radio?)', (c) => {
+        const dst = path.join(playDir, 'radio.mp3');
+        c.startSec = 10;
+        let cover = null;
+        try { cover = { mime: 'image/png', data: fs.readFileSync(path.join(media, 'cover.png')) }; } catch (e) { /* none */ }
+        c.feed = feeds.preallocated(srcOf('live.mp3'), dst, { log, startSec: c.startSec, totalSec: 3600,
+            head: id3({ title: 'Probe Radio', artist: 'Media Probe', album: 'Preallocated 60 min', cover }) });
+        return dst;
+    });
+    /* pause: is PAUSE on the 1046 player a real pause? (RideTube: it answers OK and plays on) */
+    def('p_pause', '1046: native PAUSE then PLAY (12 s)', async (t) => {
+        await end1046('the pause test');
+        const r = await routes.connect(OAP);
+        if (!r.ok) return done(t, 'bad', r.detail);
+        playFolder();
+        const target = fileIn('long.mp3');
+        const c = { t, feed: null, started: now(), maxElapsed: 0, startSec: 0, error: null };
+        cur = c;
+        const p = await oap();
+        const elapsed = () => { const ti = v('oapMedia.currentItemTime'); return ti && typeof ti.elapsed === 'number' ? ti.elapsed : null; };
+        const pr = await s.call(p, 'playFile', { path: target, languageCode: LANG }).then((x) => x, (e) => ({ error: String(e.message || e) }));
+        log('pause: playFile -> ' + show(pr));
+        const t0 = now();
+        while (now() - t0 < 8000 && !(elapsed() > 3000)) await sleep(250);
+        const e1 = elapsed();
+        const rp = await s.call(p, 'sendButtonEvent', { button: 'PAUSE', action: 'PRESS' }, 3000).then(show, (e) => 'error ' + (e.message || e));
+        log('pause: PAUSE at ' + e1 + ' ms -> ' + rp);
+        await sleep(5000);
+        const e2 = elapsed(), st2 = v('oapMedia.playerState');
+        const rq = await s.call(p, 'sendButtonEvent', { button: 'PLAY', action: 'PRESS' }, 3000).then(show, (e) => 'error ' + (e.message || e));
+        log('pause: after 5 s ' + e2 + ' ms, ' + show(st2) + '; PLAY -> ' + rq);
+        await sleep(4000);
+        const e3 = elapsed(), st3 = v('oapMedia.playerState');
+        const moved = (a, b) => (a != null && b != null ? ((b - a) / 1000).toFixed(1) + ' s' : '?');
+        const paused = e1 != null && e2 != null && e2 - e1 < 1500;
+        const res = 'PAUSE ' + rp + ': in 5 s the time moved ' + moved(e1, e2) + ', state ' + show(st2) + (paused ? ' -> A REAL PAUSE' : ' -> NOT paused') +
+            ' | PLAY ' + rq + ': in 4 s it moved ' + moved(e2, e3) + ', state ' + show(st3);
+        t.live = () => res + ' | now ' + verdict(c);
+        done(t, 'on', res);
+    }, async () => end1046('pressed again'));
     play1046('p_mp3', '1046: MP3 file with ID3 tags + cover', () => fileIn('probe.mp3'));
     play1046('p_m4a', '1046: M4A (AAC) file with tags + cover', () => fileIn('probe.m4a'));
     play1046('p_aac', '1046: AAC ADTS file (.aac)', () => fileIn('probe.aac'));
@@ -349,6 +408,9 @@ function createProbe(o) {
         c.feed = feeds.http(srcOf('live.mp3'), { port: HTTP_PORT, log });
         return 'http://127.0.0.1:' + HTTP_PORT + '/file.mp3';
     });
+
+    // 0.1.3: the three tests of this round first, after env
+    ['p_skip', 'p_pause', 'p_sparse'].reverse().forEach((id) => { const i = tests.indexOf(T[id]); tests.splice(i, 1); tests.splice(1, 0, T[id]); });
 
     def('stopall', 'Stop all: routes, forwarding, CarLife as it was', async (t) => {
         await stopAll('Stop all');
