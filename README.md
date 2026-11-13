@@ -44,7 +44,7 @@ Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md), the pla
 ### 🔬 Media Probe (`aurelm_mediaprobe`) + Media Probe service (`aurelm-mediaprobe`)
 *What the car offers a music player: the first step of a Music Assistant client.*
 
-**Status:** step 0 (0.1.2). 0.1.0 in the car: no configs (BMW's generator refused one field), and the service killed for its memory at every start (the screen came and went); 0.1.2 fixes both, makes its configs in a child process, skips a step that crashed it before, and shows its starts and memory. Before a player is written, it answers three questions in the car:
+**Status:** step 0 (0.1.3). **0.1.2 in the car** (2026-11-13): an MP3 or M4A with tags played on source 1046 (the BMW MediaPlayer for apps, `playFile`) shows its **title, artist, cover and progress on the instrument cluster and the media screen**, as a BMW source; the steering wheel's buttons all reach the service (skip left / right, volume, the knurled wheel, the special button); button forwarding on the 1046 player works (it forwarded our own STOP). Did not work: CarLife (287: the HMI says "No device connected", its metadata unused), and on 1046 a file that grows (played only as far as it was), a pipe and http:// URLs (`ITEM_UNPLAYABLE`). **0.1.3** tests what is left, first in the list: skip with forwarding while 1046 plays, a native pause, and a 60-minute MP3 made at its whole size at once (a radio?).
 do the **steering wheel's skip buttons** reach an app, can an app's **title, artist and cover** show where BMW's media
 show them (the media widget, the instrument cluster), and which source plays a **stream that never ends** (an
 internet radio)?
@@ -63,12 +63,7 @@ internet radio)?
 - **Report** writes the log and a report and copies them to a **USB stick** if one is in
   (`mediaprobe-<time>.log`); on the unit: `/var/opt/aurelm-mediaprobe/state/probe.log`.
 
-**How to test** (parked, about 15 minutes): open Media Probe with a USB stick in. 1) Press the steering wheel's
-skip buttons, the knurled wheel and the star with the radio playing: the right side counts them. 2) Run **Source
-287**: does the media widget say "CarLife"? Skip again. 3) Run **CarLife: write metadata**, look at the widget, the
-cluster and the media screen; run it again for the next status (1, 2, 0, 3). 4) Run **Button forwarding**, skip
-again. 5) Run each **1046** test and listen (each file has its own beeps); look at the widget and the cluster.
-6) **Stop all**, then **Report**. Photos of the widget and the cluster help.
+**How to test 0.1.3** (parked, about 5 minutes): 1) **1046: play 2 min + forwarding**: Run, then press skip left / right on the steering wheel, and next / previous on the media screen (and hold them); the line counts what was forwarded. 2) **1046: native PAUSE then PLAY**: Run, wait 12 s (it pauses for 5 s by itself, then plays on); the line says whether it was a real pause. 3) **1046: preallocated 60 min MP3**: Run, let it play 1-2 minutes (double beeps): does it go past 10 s, and what do the cluster and the media screen show? Then **Stop all**, **Report**, and the log over SSH.
 
 No internet needed. Details: [`native/aurelm-mediaprobe/README.md`](native/aurelm-mediaprobe/README.md).
 

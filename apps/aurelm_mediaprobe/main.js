@@ -22,7 +22,7 @@ const G = require('./kit/gauges');
 
 const W = 1600, H = 520;
 const SOCK = process.env.PROBE_SOCK || '/run/aurelm-mediaprobe.sock';
-const SERVICE_VERSION = '0.1.2';
+const SERVICE_VERSION = '0.1.3';
 const GREEN = '#52b54b', AMBER = '#ffb020', RED = '#ef2b2d', BLUE = '#40a0eb';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 

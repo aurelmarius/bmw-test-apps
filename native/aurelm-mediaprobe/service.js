@@ -22,7 +22,7 @@ const path = require('path');
 const { createSomeip } = require('./someip');
 const { createProbe, show, usbMounts } = require('./probe');
 
-const VERSION = '0.1.2';
+const VERSION = '0.1.3';
 const IDLE_MS = 20 * 60 * 1000;
 const LOG_LINES = 400;
 const LOG_MAX = 4 * 1024 * 1024;

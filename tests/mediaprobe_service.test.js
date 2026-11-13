@@ -62,10 +62,19 @@ function fakeNative() {
             mp.emit('playerState', 'PLAYER_STATE_PLAY');
             let el = 0;
             clearInterval(mp.timer);
-            mp.timer = setInterval(() => { el += 250; mp.emit('currentItemTime', { elapsed: el, total: 30000 }); }, 50);
+            mp.timer = setInterval(() => { el += 250; mp.values.currentItemTime = { elapsed: el, total: 30000 }; mp.emit('currentItemTime', { elapsed: el, total: 30000 }); }, 50);
             return { EntError: 'OK' };
         };
-        mp.methods.sendButtonEvent = (a) => { if (a.button === 'STOP') { clearInterval(mp.timer); mp.emit('playerState', 'PLAYER_STATE_STOP'); } return { EntError: 'OK' }; };
+        mp.methods.sendButtonEvent = (a) => {
+            if (a.button === 'STOP' || a.button === 'PAUSE') { clearInterval(mp.timer); mp.emit('playerState', a.button === 'STOP' ? 'PLAYER_STATE_STOP' : 'PLAYER_STATE_PAUSE'); }
+            if (a.button === 'PLAY') {
+                let el = (mp.values.currentItemTime && mp.values.currentItemTime.elapsed) || 0;
+                clearInterval(mp.timer);
+                mp.timer = setInterval(() => { el += 250; mp.emit('currentItemTime', { elapsed: el, total: 120000 }); }, 50);
+                mp.emit('playerState', 'PLAYER_STATE_PLAY');
+            }
+            return { EntError: 'OK' };
+        };
     });
     // CarLife: CarLifeMp offered (with setters), its manager not
     const cl = provider('de.bmw.infotainment.a4a.baiducarlife.carlifemp.CarLifeMp', 'CarLifeMpInst1');
@@ -363,6 +372,56 @@ module.exports.main = (a) => {
     assert.strictEqual(wc.attributes.statusRotarySteps, 's', 'its read left out, its notifier kept');
     assert.strictEqual(wc.attributes.statusSearchSwitch1, 'rs');
     assert.ok(/statusRotarySteps: no read/.test(String(r.stdout)), String(r.stdout));
+});
+
+test('0.1.3: the new tests come first; skip: forwarding of next/prev only, counted, put back with the stop', async () => {
+    const { svc, f } = setup();
+    await svc.start();
+    let st = svc.status();
+    assert.deepStrictEqual(st.tests.slice(0, 4).map((t) => t.id), ['env', 'p_skip', 'p_pause', 'p_sparse']);
+    const oap = f.provider('de.bmw.infotainment.entertainment.mediaplayer.MediaPlayer', 'OapGenericMedia');
+    st = await svc.command({ cmd: 'run', id: 'p_skip' });
+    assert.strictEqual(testOf(st, 'p_skip').state, 'on', testOf(st, 'p_skip').result);
+    assert.deepStrictEqual(oap.values.configureButtonEventForwarding, ['ITEM_NEXT', 'ITEM_PREV', 'SCAN_NEXT', 'SCAN_PREV', 'FAST_FWD', 'FAST_BWD']);
+    assert.ok(/long\.mp3$/.test(oap.played));
+    f.provider('de.bmw.infotainment.controlelements.SteeringWheelPushButton', '1').emit('statusSearchSwitch1',
+        { operationPushButtonAudioAutomaticTuningSteeringWheel: 'SUCHLAUF_AUFWAERTS_MENUE_SKIP_RECHTS' });
+    oap.emit('buttonEventForward', { button: 'ITEM_NEXT', action: 'PRESS' });
+    st = svc.status();
+    assert.ok(/forwarded: 1 \(last: .*ITEM_NEXT.*\), wheel skips: 1/.test(testOf(st, 'p_skip').result), testOf(st, 'p_skip').result);
+    st = await svc.command({ cmd: 'run', id: 'p_skip' });
+    assert.strictEqual(testOf(st, 'p_skip').state, 'idle');
+    assert.deepStrictEqual(oap.values.configureButtonEventForwarding, [], 'forwarding put back');
+    assert.strictEqual(oap.values.playerState, 'PLAYER_STATE_STOP');
+    await svc.stop();
+});
+
+test('0.1.3: pause: PAUSE stops the time (a real pause), PLAY goes on', async () => {
+    const { svc } = setup();
+    await svc.start();
+    const st = await svc.command({ cmd: 'run', id: 'p_pause' });
+    const r = testOf(st, 'p_pause');
+    assert.strictEqual(r.state, 'on', r.result);
+    assert.ok(/moved 0\.\d s, state "PLAYER_STATE_PAUSE" -> A REAL PAUSE/.test(r.result), r.result);
+    assert.ok(/PLAY .*: in 4 s it moved [1-9]/.test(r.result), r.result);
+    await svc.command({ cmd: 'stopall' });
+    await svc.stop();
+});
+
+test('0.1.3: the preallocated file has its whole size at once, its ID3 tag first', async () => {
+    const { svc, f, tmp } = setup();
+    await svc.start();
+    const st = await svc.command({ cmd: 'run', id: 'p_sparse' });
+    assert.strictEqual(testOf(st, 'p_sparse').state, 'on', testOf(st, 'p_sparse').result);
+    const file = path.join(tmp, 'play', 'radio.mp3');
+    const size = fs.statSync(file).size;
+    assert.ok(size > 3600 * 16000, 'an hour: ' + size);
+    const b = Buffer.alloc(3);
+    const fd = fs.openSync(file, 'r'); fs.readSync(fd, b, 0, 3, 0); fs.closeSync(fd);
+    assert.strictEqual(b.toString('latin1'), 'ID3');
+    assert.strictEqual(f.provider('de.bmw.infotainment.entertainment.mediaplayer.MediaPlayer', 'OapGenericMedia').played, file);
+    await svc.command({ cmd: 'stopall' });
+    await svc.stop();
 });
 
 if (require.main === module) (async () => {

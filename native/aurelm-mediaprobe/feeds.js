@@ -6,6 +6,10 @@
  *   growing(src, dst, o)   dst gets src's first o.startSec seconds, then the rest at a little over real time; the
  *                          player is asked to play dst at once (does it read on past the end it first saw?)
  *   fifo(src, dst, o)      dst is a named pipe; src is written into it again and again, at a little over real time
+ *   preallocated(src, dst, o)  dst made o.totalSec long at once (a sparse file: the size the player sees from the
+ *                          start), o.head (an ID3 tag) first, src's sound again and again after it: the first o.startSec
+ *                          seconds at once, the rest a little faster than it plays (0.1.2 in the car: a file that grows
+ *                          was played only as far as it was when opened; does a file of its whole size play on?)
  *   http(o)                a server on 127.0.0.1: /live.mp3 never ends (src again and again, chunked, no length, as
  *                          a radio stream), /file.mp3 is src with its length; each request is logged (does the
  *                          player open a URL at all, and with which headers?)
@@ -89,6 +93,40 @@ function fifo(src, dst, o) {
     };
 }
 
+function preallocated(src, dst, o) {
+    const log = o.log;
+    const data = fs.readFileSync(src.path);
+    const bps = rate(src);
+    const head = o.head || Buffer.alloc(0);
+    const total = head.length + bps * (o.totalSec || 3600);
+    try { fs.unlinkSync(dst); } catch (e) { /* none */ }
+    const fd = fs.openSync(dst, 'w+', 0o644);
+    fs.ftruncateSync(fd, total);
+    fs.chmodSync(dst, 0o644);
+    let pos = 0, at = 0;
+    const put = (n) => {
+        while (n > 0 && pos < total) {
+            const inHead = pos < head.length;
+            const buf = inHead ? head.slice(pos, Math.min(head.length, pos + n)) : data.slice(at, Math.min(data.length, at + n, at + (total - pos)));
+            fs.writeSync(fd, buf, 0, buf.length, pos);
+            pos += buf.length; n -= buf.length;
+            if (!inHead) { at += buf.length; if (at >= data.length) at = 0; }
+        }
+    };
+    put(head.length + bps * (o.startSec || 10));
+    log('feed: preallocated ' + dst + ': ' + total + ' bytes (' + (o.totalSec || 3600) + ' s), ' + pos + ' written at once, the rest at ' + bps + ' B/s');
+    // written ahead for 15 minutes at most (the test is a few minutes)
+    const end = Date.now() + 15 * 60 * 1000;
+    const t = setInterval(() => {
+        if (pos >= total || Date.now() > end) { clearInterval(t); log('feed: preallocated file: stopped writing at ' + pos + ' bytes'); return; }
+        try { put(Math.round(bps * AHEAD * STEP_MS / 1000)); } catch (e) { log('feed: preallocated write ' + e.message); clearInterval(t); }
+    }, STEP_MS);
+    return {
+        stop() { clearInterval(t); try { fs.closeSync(fd); } catch (e) { /* closed */ } },
+        state: () => ({ written: pos, total, seconds: Math.round((pos - head.length) / bps) }),
+    };
+}
+
 function httpFeed(src, o) {
     const log = o.log;
     const data = fs.readFileSync(src.path);
@@ -141,4 +179,4 @@ function httpFeed(src, o) {
     };
 }
 
-module.exports = { growing, fifo, http: httpFeed, rate };
+module.exports = { growing, fifo, preallocated, http: httpFeed, rate };

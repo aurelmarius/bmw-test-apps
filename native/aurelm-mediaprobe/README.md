@@ -78,6 +78,17 @@ capped at 128 MiB. Found in that log: the binding exports `registerService` (an 
 has no `aplay` (the 287 test makes the route but plays no tone), `OapGenericMedia` is there (`INT_MASS_STORAGE`,
 next / previous AVAILABLE).
 
+0.1.2 in the car (2026-11-13), the answers so far: an MP3 / M4A with tags played on 1046 shows its title, artist,
+cover (the engine writes it to /tmp/mediaramdisk_hu/covers) and progress on the cluster and the media screen; the HMI
+takes 1046 as an entertainment source ("Active Player") and goes back to the radio when it is disconnected; the
+wheel's skip, volume, knurl and special buttons all reach `SteeringWheelPushButton`; forwarding on `OapGenericMedia`
+is taken (it forwarded our own STOP, so 0.1.3 forwards only next / previous / scan / fast); `CarLifeMp` takes its
+fields, but the HMI shows "No device connected" on 287 and `CarLifeMedia` is not offered; a growing file plays only
+as far as it was when opened, a pipe and http:// URLs give `ITEM_UNPLAYABLE` (the engine never asked our server).
+0.1.3 adds, first in the list: `p_skip` (2 minutes with forwarding, press skip), `p_pause` (PAUSE then PLAY, does the
+time stop?) and `p_sparse` (a 60-minute MP3 made at its whole size at once with its ID3 tag, written ahead of the
+player: does a radio play this way?). `id3.js` writes the tags (the player will tag Music Assistant's tracks the same way).
+
 Over SSH: `journalctl -u aurelm-mediaprobe --no-pager -n 150` and `/var/opt/aurelm-mediaprobe/state/probe.log`.
 
 ## Safety

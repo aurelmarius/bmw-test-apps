@@ -4,7 +4,8 @@
 #   probe.mp3   30 s, 440 Hz beeps, ID3v2.3 tags (title, artist, album) and a front cover (cover.png)
 #   probe.m4a   30 s, 554 Hz beeps, AAC-LC, iTunes tags and the cover
 #   probe.aac   30 s, 659 Hz beeps, AAC-LC in ADTS (no tags: ADTS has none)
-#   live.mp3    60 s, 880 Hz double beeps, no tags: the growing file, the pipe and the http streams
+#   live.mp3    60 s, 880 Hz double beeps, no tags: the growing file, the pipe, the http streams, the preallocated file
+#   long.mp3    120 s, 494 Hz triple beeps, ID3 tags and the cover: the skip and pause tests (time to press)
 #   tone48.wav  2 s, 523 Hz, 48 kHz stereo: the tone on source 287 (aplay)
 #   cover.png   300x300: the MP3's and M4A's cover, and the albumArt written to CarLifeMp
 set -e
@@ -18,11 +19,13 @@ $F -f lavfi -i "$(beeps 554 30)" -i cover.png -map 0:a -map 1:v -ac 2 -c:a aac -
    -metadata title="Probe M4A" -metadata artist="Media Probe" -metadata album="Probe Album" -movflags +faststart probe.m4a
 $F -f lavfi -i "$(beeps 659 30)" -ac 2 -c:a aac -b:a 128k -f adts probe.aac
 $F -f lavfi -i "aevalsrc=0.3*sin(2*PI*880*t)*lt(mod(t\,1)\,0.15)+0.3*sin(2*PI*880*t)*gte(mod(t\,1)\,0.3)*lt(mod(t\,1)\,0.45):s=44100:d=60" -ac 2 -c:a libmp3lame -b:a 128k -write_xing 0 live.mp3
+$F -f lavfi -i "aevalsrc=0.3*sin(2*PI*494*t)*(lt(mod(t\,2)\,0.12)+gte(mod(t\,2)\,0.25)*lt(mod(t\,2)\,0.37)+gte(mod(t\,2)\,0.5)*lt(mod(t\,2)\,0.62)):s=44100:d=120" -i cover.png -map 0:a -map 1:v -ac 2 -c:a libmp3lame -b:a 96k -c:v png -disposition:v attached_pic \
+   -id3v2_version 3 -metadata title="Probe Long" -metadata artist="Media Probe" -metadata album="Probe Album" long.mp3
 $F -f lavfi -i "sine=f=523:r=48000:d=2" -ac 2 -c:a pcm_s16le -af volume=0.3 tone48.wav
 node -e '
 const fs = require("fs"), cp = require("child_process");
 const out = {};
-for (const f of ["probe.mp3", "probe.m4a", "probe.aac", "live.mp3", "tone48.wav", "cover.png"]) {
+for (const f of ["probe.mp3", "probe.m4a", "probe.aac", "live.mp3", "long.mp3", "tone48.wav", "cover.png"]) {
     const d = f.endsWith(".png") ? 0 : Number(cp.execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", f]).toString().trim());
     out[f] = { bytes: fs.statSync(f).size, seconds: Math.round(d * 100) / 100 };
 }
