@@ -25,6 +25,27 @@
       "uninstallable": true
     },
     {
+      "id": "aurelm-mediaprobe",
+      "kind": "tool",
+      "version": "0.1.0",
+      "title": "Media Probe service",
+      "description": "For the app Media Probe: what the car offers a music player (the first step of a Music Assistant client). Watches the steering wheel's buttons, the source the HMI takes as playing, CarLife's bridge to BMW's media and the BMW MediaPlayer, and runs tests the app starts: source 287 with a tone, CarLife's metadata written, button forwarding, source 1046 with MP3 / M4A / AAC files, a growing file, a pipe and http:// streams on 127.0.0.1. Everything a test changes is undone when it ends. No internet. Logs to /var/opt/aurelm-mediaprobe/state/probe.log; Report copies it to a USB stick.",
+      "author": "aurelmarius",
+      "mguHmi": [
+        "ID7"
+      ],
+      "artifact": {
+        "name": "aurelm-mediaprobe@0.1.0.tgz",
+        "size": 738937,
+        "sha256": "4c41236d5ca802d95f47122ae2a275bae007f63d06a6234f9cec69f3a4dc7084",
+        "url": "packages/aurelm-mediaprobe@0.1.0.tgz"
+      },
+      "requires": {
+        "mgu-deploy": "0.7.0"
+      },
+      "uninstallable": true
+    },
+    {
       "id": "aurelm_emby",
       "kind": "app",
       "version": "0.3.12",
@@ -44,6 +65,28 @@
       "iconSha256": "9682cbd70243b5b0193c54d589a11a38ee4b81eaec07326a666eed140ce39918",
       "requires": {
         "aurelm-emby": "0.3.12"
+      }
+    },
+    {
+      "id": "aurelm_mediaprobe",
+      "kind": "app",
+      "version": "0.1.0",
+      "title": "Media Probe",
+      "description": "What the car offers a music player (the first step of a Music Assistant client): the steering wheel's buttons, the source the HMI takes as playing, CarLife's bridge to BMW's media, button forwarding, and the BMW MediaPlayer's source for apps with files, a growing file, a pipe and http:// streams. Each test shows what the car answered; Report copies the log to a USB stick. Needs the Media Probe service.",
+      "mguHmi": [
+        "ID7"
+      ],
+      "artifact": {
+        "name": "aurelm_mediaprobe@0.1.0.tgz",
+        "size": 557297,
+        "sha256": "fb2c3744a8508966256dde1e80dfa69f5c7ea2f78d4f1fdc32f9d7025f6221be",
+        "url": "packages/aurelm_mediaprobe@0.1.0.tgz"
+      },
+      "uninstallable": true,
+      "icon": "aurelm_mediaprobe.png",
+      "iconSha256": "25e7bde367376b5b51a704026c90ade7ca40800aad0c041d1074a74f45b39412",
+      "requires": {
+        "aurelm-mediaprobe": "0.1.0"
       }
     }
   ]
