@@ -1,7 +1,7 @@
 {
   "id": "aurelm-mediaprobe",
   "kind": "tool",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "GPL-3.0-or-later",
   "title": "Media Probe service",
   "description": "For the app Media Probe: what the car offers a music player (the first step of a Music Assistant client). Watches the steering wheel's buttons, the source the HMI takes as playing, CarLife's bridge to BMW's media and the BMW MediaPlayer, and runs tests the app starts: source 287 with a tone, CarLife's metadata written, button forwarding, source 1046 with MP3 / M4A / AAC files, a growing file, a pipe and http:// streams on 127.0.0.1. Everything a test changes is undone when it ends. No internet. Logs to /var/opt/aurelm-mediaprobe/state/probe.log; Report copies it to a USB stick.",
@@ -26,6 +26,11 @@
     {
       "path": "prepare.js",
       "from": "prepare.js",
+      "mode": "0644"
+    },
+    {
+      "path": "scan.js",
+      "from": "scan.js",
       "mode": "0644"
     },
     {

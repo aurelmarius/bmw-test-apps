@@ -329,6 +329,42 @@ test('prepare.js: the summary written in a child process, also when the generato
     assert.strictEqual(mf.proxies['de.bmw.infotainment.controlelements.SteeringWheelPushButton'].attributes.statusSearchSwitch1, 'rs');
 });
 
+test('prepare.js: an id 0 is no getter; a field the generator refuses loses that flag, the others are made', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mediaprobe-'));
+    // prepare.js beside a fake oapgen.js that acts as BMW's generator on the car (0.1.0's log): it refuses a read
+    // where the catalog has no getter, and here also refuses statusRotarySteps' read
+    fs.copyFileSync(path.join(DIR, 'prepare.js'), path.join(tmp, 'prepare.js'));
+    fs.writeFileSync(path.join(tmp, 'oapgen.js'), `
+const fs = require('fs'), path = require('path');
+module.exports.main = (a) => {
+    const cat = JSON.parse(fs.readFileSync(a[0], 'utf8')), mf = JSON.parse(fs.readFileSync(a[1], 'utf8'));
+    Object.keys(mf.proxies).forEach((n) => {
+        const at = mf.proxies[n].attributes || {};
+        Object.keys(at).forEach((f) => {
+            const g = cat.interfaces[n].fields[f].getter;
+            if (at[f].indexOf('r') >= 0 && (!g || !g.id || f === 'statusRotarySteps')) throw new Error('IFConfigGenerator::generate() Failed due to Error: Requested read for ' + f + ' but no getter available');
+        });
+        fs.writeFileSync(path.join(a[3], n.replace(/\\./g, '_') + '.json'), JSON.stringify({ iface: n, attributes: at }));
+    });
+};`);
+    const cat = path.join(tmp, 'catalog.json');
+    fs.writeFileSync(cat, JSON.stringify(CATALOG));
+    const out = path.join(tmp, 'someip');
+    const W = 'de.bmw.infotainment.controlelements.SteeringWheelPushButton', M = 'de.bmw.infotainment.entertainment.mediasource.MediaSource';
+    const r = require('child_process').spawnSync(process.execPath, [path.join(tmp, 'prepare.js'), cat, out, W + ',' + M]);
+    assert.strictEqual(r.status, 0, String(r.stderr));
+    const sum = JSON.parse(fs.readFileSync(path.join(out, 'summary.json'), 'utf8'));
+    assert.strictEqual(sum.interfaces[W].fields.requestSteerWheelFunctions.getter, false, 'getter id 0: none');
+    assert.strictEqual(sum.interfaces[W].fields.requestSteerWheelFunctions.setter, true);
+    assert.strictEqual(sum.gen.error, null, JSON.stringify(sum.gen));
+    assert.strictEqual(sum.gen.count, 2);
+    const wc = JSON.parse(fs.readFileSync(path.join(out, W.replace(/\./g, '_') + '.json'), 'utf8'));
+    assert.strictEqual(wc.attributes.requestSteerWheelFunctions, 'w');
+    assert.strictEqual(wc.attributes.statusRotarySteps, 's', 'its read left out, its notifier kept');
+    assert.strictEqual(wc.attributes.statusSearchSwitch1, 'rs');
+    assert.ok(/statusRotarySteps: no read/.test(String(r.stdout)), String(r.stdout));
+});
+
 if (require.main === module) (async () => {
     let failed = 0;
     for (const t of tests) {

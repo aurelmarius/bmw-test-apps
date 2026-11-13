@@ -4,52 +4,156 @@
   "de.bmw.infotainment.controlelements.SteeringWheelPushButton": {
    "fields": {
     "operationSteerWheelFAV": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 9,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32777,
+      "reliable": false
+     }
     },
     "operationSteerWheelFC": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 10,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32778,
+      "reliable": false
+     }
     },
     "requestSteerWheelFunctions": {
-     "getter": true,
-     "setter": true
+     "getter": {
+      "id": 0
+     },
+     "setter": {
+      "id": 12,
+      "reliable": false
+     }
     },
     "statusAudioVolumeButton": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 2,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32770,
+      "reliable": false
+     }
     },
     "statusPTTButton1": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 4,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32772,
+      "reliable": false
+     }
     },
     "statusRotaryPress": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 8,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32776,
+      "reliable": false
+     }
     },
     "statusRotarySteps": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 7,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32775,
+      "reliable": false
+     }
     },
     "statusSearchSwitch1": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 3,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32771,
+      "reliable": false
+     }
     },
     "statusSpecialFunctionButton": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 5,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32773,
+      "reliable": false
+     }
     },
     "statusSpecialFunctionButton2": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 6,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32774,
+      "reliable": false
+     }
     },
     "statusSteerWheelFCLED": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 11,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32779,
+      "reliable": false
+     }
     },
     "statusTelephoneButton": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 1,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32769,
+      "reliable": false
+     }
     }
    },
    "events": {},
@@ -58,12 +162,30 @@
   "de.bmw.infotainment.entertainment.mediasource.MediaSource": {
    "fields": {
     "activeSourceId": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 2,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32770,
+      "reliable": true
+     }
     },
     "sources": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 1,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32769,
+      "reliable": true
+     }
     }
    },
    "events": {},
@@ -74,36 +196,108 @@
   "de.bmw.infotainment.hmi.hmimediastate.HmiMediaState": {
    "fields": {
     "coverArt": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 4,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32772,
+      "reliable": true
+     }
     },
     "ivaFlags": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 8,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32776,
+      "reliable": true
+     }
     },
     "mainMenuMetadata": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 1,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32769,
+      "reliable": true
+     }
     },
     "menu": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 6,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32774,
+      "reliable": true
+     }
     },
     "playerMetadata": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 2,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32770,
+      "reliable": true
+     }
     },
     "trackProgress": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 3,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32771,
+      "reliable": true
+     }
     },
     "trackSelection": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 7,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32775,
+      "reliable": true
+     }
     },
     "tracks": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 5,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32773,
+      "reliable": true
+     }
     }
    },
    "events": {},
@@ -116,134 +310,431 @@
   "de.bmw.infotainment.entertainment.mediaplayer.MediaPlayer": {
    "fields": {
     "angle": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 519,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33287,
+      "reliable": true
+     },
+     "setter": {
+      "id": 535,
+      "reliable": true
+     }
     },
     "audioStream": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 517,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33285,
+      "reliable": true
+     },
+     "setter": {
+      "id": 533,
+      "reliable": true
+     }
     },
     "autoplay": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 788,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33546,
+      "reliable": true
+     },
+     "setter": {
+      "id": 789,
+      "reliable": true
+     }
     },
     "availableAngles": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 516,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33284,
+      "reliable": true
+     }
     },
     "availableAudioStreams": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 514,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33282,
+      "reliable": true
+     }
     },
     "availableSubtitles": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 515,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33283,
+      "reliable": true
+     }
     },
     "chapter": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 12,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32780,
+      "reliable": true
+     }
     },
     "configureButtonEventForwarding": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 520,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33288,
+      "reliable": true
+     },
+     "setter": {
+      "id": 536,
+      "reliable": true
+     }
     },
     "currentItemId": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 3,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32771,
+      "reliable": true
+     }
     },
     "currentItemMetadata": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 10,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32778,
+      "reliable": true
+     }
     },
     "currentItemMetadataConfig": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 4,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32772,
+      "reliable": true
+     }
     },
     "currentItemPath": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 14,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32782,
+      "reliable": true
+     }
     },
     "currentItemPosition": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 8,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32776,
+      "reliable": true
+     }
     },
     "currentItemTime": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 15,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32783,
+      "reliable": true
+     }
     },
     "deviceInfo": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 19,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32787,
+      "reliable": true
+     }
     },
     "isPipEnabled": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 771,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33539,
+      "reliable": true
+     },
+     "setter": {
+      "id": 787,
+      "reliable": true
+     }
     },
     "nextItemMetadata": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 11,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32779,
+      "reliable": true
+     }
     },
     "playbackSpeed": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 13,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32781,
+      "reliable": true
+     }
     },
     "playerCacheSize": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 777,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33545,
+      "reliable": true
+     }
     },
     "playerCacheStatus": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 770,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33538,
+      "reliable": true
+     }
     },
     "playerCapabilities": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 2,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32770,
+      "reliable": true
+     }
     },
     "playerState": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 1,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32769,
+      "reliable": true
+     }
     },
     "playlist": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 5,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32773,
+      "reliable": true
+     }
     },
     "playlistNumAlbums": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 6,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32774,
+      "reliable": true
+     }
     },
     "playlistNumArtists": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 7,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32775,
+      "reliable": true
+     }
     },
     "prevItemMetadata": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 9,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32777,
+      "reliable": true
+     }
     },
     "random": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 17,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32785,
+      "reliable": true
+     }
     },
     "repeat": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 16,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32784,
+      "reliable": true
+     }
     },
     "shuffle": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 18,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32786,
+      "reliable": true
+     }
     },
     "subtitle": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 518,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 33286,
+      "reliable": true
+     },
+     "setter": {
+      "id": 534,
+      "reliable": true
+     }
     },
     "thirdPartyMode": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 20,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32788,
+      "reliable": true
+     }
     }
    },
    "events": {
@@ -278,24 +769,60 @@
   "de.bmw.infotainment.a4a.baiducarlife.carlifemp.CarLifeMp": {
    "fields": {
     "currentItemMetadata": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 1
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32769
+     },
+     "setter": {
+      "id": 2
+     }
     },
     "currentItemTimeInSeconds": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 5
+     },
+     "notifier": {
+      "eventgroups": [
+       3
+      ],
+      "id": 32771
+     },
+     "setter": {
+      "id": 6
+     }
     },
     "deviceInfo": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 3
+     },
+     "notifier": {
+      "eventgroups": [
+       2
+      ],
+      "id": 32770
+     },
+     "setter": {
+      "id": 4
+     }
     },
     "playState": {
-     "getter": true,
-     "notifier": true,
-     "setter": true
+     "getter": {
+      "id": 7
+     },
+     "notifier": {
+      "eventgroups": [
+       4
+      ],
+      "id": 32772
+     },
+     "setter": {
+      "id": 8
+     }
     }
    },
    "events": {},
@@ -306,24 +833,59 @@
   "de.bmw.infotainment.a4a.baiducarlife.carlifehmi.BaiduCarLifeManager": {
    "fields": {
     "projectedGuidanceActive": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 2
+     },
+     "notifier": {
+      "eventgroups": [
+       2
+      ],
+      "id": 32770
+     }
     },
     "projectedGuidanceMetadataAvailable": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 8
+     },
+     "notifier": {
+      "eventgroups": [
+       5
+      ],
+      "id": 32773
+     }
     },
     "projectedSpeechActive": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 3
+     },
+     "notifier": {
+      "eventgroups": [
+       3
+      ],
+      "id": 32771
+     }
     },
     "projectedUiActive": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 1
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32769
+     }
     },
     "sessionActive": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 4
+     },
+     "notifier": {
+      "eventgroups": [
+       4
+      ],
+      "id": 32772
+     }
     }
    },
    "events": {},
@@ -336,8 +898,17 @@
   "org.genivi.am.commandinterface.CommandControl": {
    "fields": {
     "listOfMainConnections": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 22,
+      "reliable": false
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32769,
+      "reliable": false
+     }
     }
    },
    "events": {
@@ -395,8 +966,17 @@
   "org.genivi.am.routinginterface.RoutingControlObserver": {
    "fields": {
     "routingReady": {
-     "getter": true,
-     "notifier": true
+     "getter": {
+      "id": 29,
+      "reliable": true
+     },
+     "notifier": {
+      "eventgroups": [
+       1
+      ],
+      "id": 32769,
+      "reliable": true
+     }
     }
    },
    "events": {},
