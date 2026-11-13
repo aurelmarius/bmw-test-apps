@@ -22,7 +22,7 @@ const path = require('path');
 const { createSomeip } = require('./someip');
 const { createProbe, show, usbMounts } = require('./probe');
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const IDLE_MS = 20 * 60 * 1000;
 const LOG_LINES = 400;
 const LOG_MAX = 4 * 1024 * 1024;
@@ -53,11 +53,22 @@ function createService(opts) {
     }
 
     const s = createSomeip({ log, dir: path.join(o.stateDir, 'someip'), native: o.native, catalog: o.catalog, generate: o.generate, configFor: o.configFor });
-    const probe = createProbe({ s, log, mediaDir: o.mediaDir, playDir: o.playDir, stateDir: o.stateDir, now });
+    // how often the service started in this boot (a crash loop shows as a count that keeps growing)
+    const starts = (() => {
+        const f = path.join(o.stateDir, 'starts.json');
+        let boot = null;
+        try { boot = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(); } catch (e) { /* not Linux */ }
+        let j = null;
+        try { j = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { /* first */ }
+        const n = j && j.boot === boot ? j.count + 1 : 1;
+        try { fs.writeFileSync(f, JSON.stringify({ boot, count: n })); } catch (e) { /* not writable */ }
+        return n;
+    })();
+    const probe = createProbe({ s, log, mediaDir: o.mediaDir, playDir: o.playDir, stateDir: o.stateDir, now, version: VERSION });
     let lastReq = now(), stopping = false, idleTimer = null, report = null;
 
     function status() {
-        return { version: VERSION, now: now(), tests: probe.testList(), panel: probe.panel(), report, log: lines.slice(-10) };
+        return { version: VERSION, now: now(), starts, memory: Math.round(process.memoryUsage().rss / 1048576), tests: probe.testList(), panel: probe.panel(), report, log: lines.slice(-10) };
     }
 
     function writeReport() {
@@ -112,7 +123,7 @@ function createService(opts) {
     }
 
     function start() {
-        log('aurelm-mediaprobe ' + VERSION + ' starting (log ' + logFile + ')');
+        log('aurelm-mediaprobe ' + VERSION + ' starting (start ' + starts + ' in this boot, node ' + process.version + ', log ' + logFile + ')');
         idleTimer = setInterval(() => { if (!probe.active() && now() - lastReq > IDLE_MS) { log('idle: ending'); stop(0); } }, 30000);
         return probe.start().catch((e) => log('start: ' + (e && e.stack || e)));
     }
@@ -124,6 +135,7 @@ function createService(opts) {
         const t = new Promise((res) => setTimeout(res, 6000));
         return Promise.race([probe.stopAll('the service ends').catch((e) => log('stop: ' + e)), t])
             .then(() => s.shutdown().catch(() => {}))
+            .then(() => probe.clearStep())
             .then(() => { log('ended'); if (o.exit !== false) setTimeout(() => process.exit(code || 0), 100); });
     }
     return { start, stop, serve, command, status, writeReport, probe, log };

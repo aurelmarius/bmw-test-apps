@@ -44,7 +44,7 @@ Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md), the pla
 ### 🔬 Media Probe (`aurelm_mediaprobe`) + Media Probe service (`aurelm-mediaprobe`)
 *What the car offers a music player: the first step of a Music Assistant client.*
 
-**Status:** step 0 (0.1.0), not yet run in a car. Before a player is written, it answers three questions in the car:
+**Status:** step 0 (0.1.1). 0.1.0 in the car: the service died while it started, again and again (the screen came and went); 0.1.1 makes its configs in a child process, skips a step that crashed it before, and shows its starts and memory. Before a player is written, it answers three questions in the car:
 do the **steering wheel's skip buttons** reach an app, can an app's **title, artist and cover** show where BMW's media
 show them (the media widget, the instrument cluster), and which source plays a **stream that never ends** (an
 internet radio)?

@@ -22,7 +22,7 @@ const G = require('./kit/gauges');
 
 const W = 1600, H = 520;
 const SOCK = process.env.PROBE_SOCK || '/run/aurelm-mediaprobe.sock';
-const SERVICE_VERSION = '0.1.0';
+const SERVICE_VERSION = '0.1.1';
 const GREEN = '#52b54b', AMBER = '#ffb020', RED = '#ef2b2d', BLUE = '#40a0eb';
 const older = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 
@@ -67,13 +67,15 @@ const ago = (t, now) => { const s = Math.max(0, Math.round((now - t) / 1000)); r
 mgu.run({
     async start(ctx) {
         const { ui, log } = ctx;
-        let st = null, sel = 0, busy = null, polling = false, askedExit = false;
+        // st: the service's last answer, kept while it does not answer (busy starting, or restarting after a crash)
+        let st = null, sel = 0, busy = null, polling = false, askedExit = false, okAt = 0, misses = 0;
 
         async function poll() {
             if (polling) return;
             polling = true;
             try {
-                st = await ask('status');
+                const r = await ask('status');
+                if (r) { st = r; okAt = Date.now(); misses = 0; } else misses++;
                 if (st && st.version && older(st.version, SERVICE_VERSION) && !askedExit) {
                     askedExit = true;
                     log.info('mediaprobe: service ' + st.version + ' running, ' + SERVICE_VERSION + ' installed: asking it to end');
@@ -106,7 +108,8 @@ mgu.run({
         function render() {
             const t = ctx.theme();
             const cv = ctx.canvas(W, H).clear(t.bg);
-            G.frame(cv, t, ['Media Probe'], 0, [busy && { text: busy, color: 'accent' }]);
+            const silent = st && misses >= 2 ? Math.round((Date.now() - okAt) / 1000) : 0;
+            G.frame(cv, t, ['Media Probe'], 0, [busy && { text: busy, color: 'accent' }, silent && { text: 'SERVICE SILENT ' + silent + ' S' }]);
             draw(cv, t);
             return ui.image('MAIN_GFX', cv);
         }
@@ -148,6 +151,8 @@ mgu.run({
                 ['CarLifeMp', p.carlifeMp],
                 ['CarLife mgr', p.carlifeMgr],
                 ['1046', p.oap],
+                ['Service', st.version + ', start ' + (st.starts || '?') + (st.starts > 1 ? ' (RESTARTED)' : '') + ', ' + (st.memory || '?') + ' MB, ' + (p.phase || '?') +
+                    (p.crashed && p.crashed.length ? ' | crashed in: ' + p.crashed.join(', ') : '')],
                 ['Routes', p.routes ? '287: ' + (p.routes['287'] != null ? '#' + p.routes['287'] : '-') + ', 1046: ' + (p.routes['1046'] != null ? '#' + p.routes['1046'] : '-') : '-'],
             ];
             rows.forEach((r, i) => {

@@ -85,6 +85,30 @@ function createProbe(o) {
     const index = (() => { try { return JSON.parse(fs.readFileSync(path.join(media, 'index.json'), 'utf8')); } catch (e) { return {}; } })();
     const routes = createRoutes({ s, log, file: path.join(o.stateDir, 'routes.json') });
 
+    /* ---------- crash guard ----------
+     * Each risky step (a proxy, a subscription, a test) is written to step.json before it runs and cleared after. A
+     * step.json found at the start is a step the last run died in (a crash of the native binding, the memory limit):
+     * it is counted in crashed.json, and a monitor's step is skipped from then on (a test is only flagged), so one bad
+     * interface does not take the service down at every start. A new version of the service starts afresh. */
+    const stepFile = path.join(o.stateDir, 'step.json'), crashFile = path.join(o.stateDir, 'crashed.json');
+    const readJ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+    let crashed = readJ(crashFile);
+    if (!crashed || crashed.version !== o.version) crashed = { version: o.version, steps: {} };
+    const lastStep = readJ(stepFile);
+    if (lastStep && lastStep.step) {
+        crashed.steps[lastStep.step] = (crashed.steps[lastStep.step] || 0) + 1;
+        log('CRASH GUARD: the last run ended during "' + lastStep.step + '" (' + crashed.steps[lastStep.step] + ' time(s)): ' +
+            (/^monitor:/.test(lastStep.step) ? 'skipped from now on' : 'flagged'));
+    }
+    try { fs.writeFileSync(crashFile, JSON.stringify(crashed)); fs.unlinkSync(stepFile); } catch (e) { /* none */ }
+    const bad = (step) => !!crashed.steps[step];
+    function stepOn(step) { try { fs.writeFileSync(stepFile, JSON.stringify({ step, at: now() })); } catch (e) { /* not writable */ } }
+    function stepOff() { try { fs.unlinkSync(stepFile); } catch (e) { /* none */ } }
+    async function guarded(step, fn) {
+        stepOn(step);
+        try { return await fn(); } finally { stepOff(); }
+    }
+
     /* ---------- monitors ---------- */
     const vals = {};        // 'key.field' -> { v, at, n }
     const mon = {};         // key -> { available, error }
@@ -111,26 +135,36 @@ function createProbe(o) {
         const st = mon[m.key] = { iface: m.iface, inst: m.inst, available: false, error: null };
         const x = s.info(m.iface);
         if (!x) { st.error = 'not in the catalog'; log('monitor ' + m.key + ': ' + st.error); return; }
+        const sp = 'monitor:' + m.key + ':proxy';
+        if (bad(sp)) { st.error = 'skipped: its proxy crashed the service before'; log('monitor ' + m.key + ': ' + st.error); return; }
+        log('monitor ' + m.key + ': ' + m.iface + ' ' + m.inst + '...');
         let p;
-        try { p = await s.proxy(m.iface, m.inst); }
+        try { p = await guarded(sp, () => s.proxy(m.iface, m.inst)); }
         catch (e) { st.error = String(e.message || e); log('monitor ' + m.key + ': ' + st.error); return; }
         const fields = (m.fields || Object.keys(x.fields || {})).filter((f) => x.fields && x.fields[f]);
         const evs = m.events || Object.keys(x.events || {});
         const fetch = () => fields.forEach((f) => {
-            if (!x.fields[f].getter) return;
+            if (!x.fields[f].getter || bad('monitor:' + m.key + ':get:' + f)) return;
             s.get(p, f).then((v) => note(m.key, f, v), (e) => log('monitor ' + m.key + '.' + f + ' get: ' + (e.message || e)));
         });
-        await s.avail(p, (a) => {
-            if (a === st.available) return;
-            st.available = a;
-            log('monitor ' + m.key + ' (' + m.iface.split('.').pop() + ' ' + m.inst + '): ' + (a ? 'AVAILABLE' : 'not available'));
-            if (a) fetch();
-        }).catch((e) => log('monitor ' + m.key + ' availability: ' + e));
-        for (const f of fields) {
-            if (!x.fields[f].notifier) continue;
-            await s.on(p, f, (v) => note(m.key, f, v)).catch((e) => log('monitor ' + m.key + '.' + f + ' subscribe: ' + (e.message || e)));
+        const sa = 'monitor:' + m.key + ':availability';
+        if (!bad(sa)) {
+            await guarded(sa, () => s.avail(p, (a) => {
+                if (a === st.available) return;
+                st.available = a;
+                log('monitor ' + m.key + ' (' + m.iface.split('.').pop() + ' ' + m.inst + '): ' + (a ? 'AVAILABLE' : 'not available'));
+                if (a) fetch();
+            })).catch((e) => log('monitor ' + m.key + ' availability: ' + e));
         }
-        for (const ev of evs) await s.on(p, ev, (v) => note(m.key, ev, v, true)).catch((e) => log('monitor ' + m.key + '.' + ev + ' subscribe: ' + (e.message || e)));
+        const subs = fields.filter((f) => x.fields[f].notifier).map((f) => [f, false]).concat(evs.map((e) => [e, true]));
+        let skipped = 0;
+        for (const it of subs) {
+            const step = 'monitor:' + m.key + ':sub:' + it[0];
+            if (bad(step)) { skipped++; continue; }
+            await guarded(step, () => s.on(p, it[0], (v) => note(m.key, it[0], v, it[1])))
+                .catch((e) => log('monitor ' + m.key + '.' + it[0] + ' subscribe: ' + (e.message || e)));
+        }
+        log('monitor ' + m.key + ': ' + (subs.length - skipped) + ' subscriptions' + (skipped ? ', ' + skipped + ' skipped (they crashed the service before)' : ''));
         if (!st.available) setTimeout(() => { if (!st.available) log('monitor ' + m.key + ': still not available after 5 s'); }, 5000);
     }
     async function startMonitors() {
@@ -156,7 +190,7 @@ function createProbe(o) {
         log('env: tools ' + tools.join(' '));
         const usb = usbMounts();
         log('env: removable storage ' + (usb.length ? usb.join(', ') : 'none mounted'));
-        const sdk = scanSdk(log);
+        const sdk = await scanSdk(log);
         const provider = Object.keys(b.exports).filter((k) => /stub|skeleton|service|provider|offer|register/i.test(k));
         done(t, 'ok', 'binding: ' + Object.keys(b.exports).join(', ') + (provider.length ? ' | provider-like: ' + provider.join(', ') : ' | no provider-like export') +
             ' | SDK: ' + sdk + ' | ' + tools.filter((x) => !/=-$/.test(x)).map((x) => x.split('=')[0]).join(' '));
@@ -375,7 +409,7 @@ function createProbe(o) {
         const undo = t.state === 'on' && t.undo;
         t.state = 'running';
         t.result = undo ? 'undoing...' : 'running...';
-        try { await (undo ? t.undo(t) : t.run(t)); }
+        try { await guarded('test:' + id + (undo ? ':undo' : ''), () => (undo ? t.undo(t) : t.run(t))); }
         catch (e) { done(t, 'bad', String(e && e.message || e)); }
         if (t.state === 'running') done(t, undo ? 'idle' : 'ok', undo ? 'undone' : t.result);
         return t.result;
@@ -406,20 +440,34 @@ function createProbe(o) {
             oap: show(v('oapMedia.playerState'), 40) + ' ' + show(v('oapMedia.currentItemTime'), 60),
             routes: routes.state(),
             monitors: Object.keys(mon).map((k) => k + ':' + (mon[k].available ? 'up' : mon[k].error ? 'error' : 'down')).join(' '),
+            crashed: Object.keys(crashed.steps),
+            phase,
         };
     }
     function testList() {
-        return tests.map((t) => ({ id: t.id, label: t.label, state: t.state, result: t.live && t.state === 'on' ? safe(t.live) : t.result, undo: !!t.undo }));
+        return tests.map((t) => {
+            const r = t.live && t.state === 'on' ? safe(t.live) : t.result;
+            const c = crashed.steps['test:' + t.id];
+            return { id: t.id, label: t.label, state: t.state, result: (c && t.state === 'idle' && !r ? 'CRASHED THE SERVICE last time (' + c + 'x) - see the log' : r), undo: !!t.undo };
+        });
     }
     const safe = (fn) => { try { return fn(); } catch (e) { return String(e.message || e); } };
 
+    let phase = 'starting';
     async function start() {
-        s.prepare(MONITORS.map((m) => m.iface).concat([IF.AMR], EXTRA), {});
-        await routes.leftovers().catch((e) => log('route leftovers: ' + (e.message || e)));
+        phase = 'making the SOME/IP configs';
+        const g = await s.prepare(MONITORS.map((m) => m.iface).concat([IF.AMR], EXTRA));
+        log('configs: ' + (g.error ? 'generator failed: ' + g.error : g.count + ' (' + (g.cached ? 'kept' : 'made in ' + g.ms + ' ms') + ')') + (s.hasCatalog() ? '' : '; NO CATALOG SUMMARY'));
+        phase = 'disconnecting a crash\'s routes';
+        if (!bad('routes:leftovers')) await guarded('routes:leftovers', () => routes.leftovers()).catch((e) => log('route leftovers: ' + (e.message || e)));
+        phase = 'starting the monitors';
         await startMonitors();
-        await run('env');
+        phase = 'ready';
+        log('ready: monitors ' + Object.keys(mon).map((k) => k + (mon[k].available ? ' up' : mon[k].error ? ' error' : ' down')).join(', '));
+        if (!crashed.steps['test:env']) await run('env');
+        else log('env: not run by itself (it crashed the service before); press Run to try it');
     }
-    return { start, run, stopAll, active, panel, testList, vals: () => vals, monitors: () => mon, tests };
+    return { start, run, stopAll, active, panel, testList, vals: () => vals, monitors: () => mon, tests, clearStep: stepOff };
 }
 
 function which(name) {
@@ -440,19 +488,19 @@ function usbMounts() {
  * The SDK's (and MainApp's) JavaScript, searched for how the binding offers a service: next to each buildProxy
  * the binding's other calls show. Logs what it finds; returns a one-line summary.
  */
-function scanSdk(log) {
+async function scanSdk(log) {
     const roots = ['/usr/lib/oap-mainapp', '/usr/lib/node_modules', '/var/opt/public/oap'];
     const files = [];
     const walk = (d, depth) => {
-        if (files.length >= 600 || depth > 9) return;
+        if (files.length >= 300 || depth > 9) return;
         let ents = [];
         try { ents = fs.readdirSync(d); } catch (e) { return; }
         for (const n of ents) {
             const f = path.join(d, n);
             let st;
             try { st = fs.lstatSync(f); } catch (e) { continue; }
-            if (st.isDirectory()) { if (!/^(data|rhmiData|resources|fonts|images|\.git)$/.test(n)) walk(f, depth + 1); }
-            else if (/\.js$/.test(n) && st.size < 12 * 1024 * 1024) files.push(f);
+            if (st.isDirectory()) { if (!/^(data|rhmiData|resources|fonts|images|media|\.git)$/.test(n)) walk(f, depth + 1); }
+            else if (/\.js$/.test(n) && st.size < 4 * 1024 * 1024 && files.length < 300) files.push(f);
         }
     };
     roots.forEach((r) => walk(r, 0));
@@ -460,10 +508,14 @@ function scanSdk(log) {
     const snippets = [];
     const RX = /\b(build(?:Stub|Skeleton|Service|Provider)|createStub|createSkeleton|offerService|stopOfferService|registerService|offerEvent|offerField|fireEvent|fireSelectiveEvent|notifyEvent|setFieldValue|registerMethod|registerRequestHandler)\b/g;
     for (const f of files) {
+        // one file per tick: the service keeps answering the app
+        await new Promise((r) => setImmediate(r));
         let txt;
         try { txt = fs.readFileSync(f, 'utf8'); } catch (e) { continue; }
-        if (txt.indexOf('buildProxy') < 0 && !RX.test(txt)) { RX.lastIndex = 0; continue; }
         RX.lastIndex = 0;
+        const has = RX.test(txt);
+        RX.lastIndex = 0;
+        if (txt.indexOf('buildProxy') < 0 && !has) continue;
         let mm;
         while ((mm = RX.exec(txt))) {
             names[mm[1]] = (names[mm[1]] || 0) + 1;

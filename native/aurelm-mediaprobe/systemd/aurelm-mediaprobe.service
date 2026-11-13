@@ -23,8 +23,8 @@ RestartSec=10
 TimeoutStopSec=8
 Nice=10
 IOSchedulingClass=idle
-CPUQuota=50%
-MemoryLimit=192M
+CPUQuota=100%
+MemoryLimit=256M
 TasksMax=24
 # No core dump goes to the crash handler (which restarts the head unit for a program it does not list),
 # so a crash restarts this service and never the head unit.

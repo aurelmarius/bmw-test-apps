@@ -285,6 +285,50 @@ test('report: written on the unit and copied to the USB stick', async () => {
     await svc.stop();
 });
 
+test('crash guard: a monitor step the last run died in is skipped, the start counted', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mediaprobe-'));
+    const stateDir = path.join(tmp, 'state');
+    fs.mkdirSync(stateDir);
+    fs.writeFileSync(path.join(stateDir, 'step.json'), JSON.stringify({ step: 'monitor:carlifeMp:proxy', at: 1 }));
+    const f = fakeNative();
+    const svc = createService({ stateDir, playDir: path.join(tmp, 'play'), native: f.native, catalog: CATALOG, generate: false,
+        configFor: (iface) => ({ iface }), quiet: true, exit: false, usb: () => [] });
+    await svc.start();
+    const st = svc.status();
+    assert.deepStrictEqual(st.panel.crashed, ['monitor:carlifeMp:proxy']);
+    assert.ok(/carlifeMp:error/.test(st.panel.monitors), st.panel.monitors);
+    assert.ok(/skipped/.test(st.panel.carlifeMp), st.panel.carlifeMp);
+    assert.ok(/wheel:up/.test(st.panel.monitors));
+    assert.strictEqual(st.panel.phase, 'ready');
+    assert.ok(!fs.existsSync(path.join(stateDir, 'step.json')), 'no step left after the start');
+    await svc.stop();
+    assert.ok(!fs.existsSync(path.join(stateDir, 'step.json')), 'none after a clean stop');
+    // the next start: still skipped (counted once), the service started twice in this boot
+    const svc2 = createService({ stateDir, playDir: path.join(tmp, 'play'), native: fakeNative().native, catalog: CATALOG, generate: false,
+        configFor: (iface) => ({ iface }), quiet: true, exit: false, usb: () => [] });
+    await svc2.start();
+    assert.deepStrictEqual(svc2.status().panel.crashed, ['monitor:carlifeMp:proxy']);
+    assert.strictEqual(svc2.status().starts, 2);
+    await svc2.stop();
+});
+
+test('prepare.js: the summary written in a child process, also when the generator is missing', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mediaprobe-'));
+    const cat = path.join(tmp, 'catalog.json');
+    fs.writeFileSync(cat, JSON.stringify(CATALOG));
+    const out = path.join(tmp, 'someip');
+    const r = require('child_process').spawnSync(process.execPath, [path.join(DIR, 'prepare.js'), cat, out,
+        'de.bmw.infotainment.controlelements.SteeringWheelPushButton,no.such.Iface'], { env: Object.assign({}, process.env, { OAP_APPMGMT: path.join(tmp, 'none.js') }) });
+    assert.strictEqual(r.status, 0, String(r.stderr));
+    const sum = JSON.parse(fs.readFileSync(path.join(out, 'summary.json'), 'utf8'));
+    assert.deepStrictEqual(Object.keys(sum.interfaces), ['de.bmw.infotainment.controlelements.SteeringWheelPushButton']);
+    assert.strictEqual(sum.interfaces['de.bmw.infotainment.controlelements.SteeringWheelPushButton'].fields.statusSearchSwitch1.notifier, true);
+    assert.deepStrictEqual(sum.instances['de.bmw.infotainment.controlelements.SteeringWheelPushButton'], ['1']);
+    assert.ok(sum.gen.error, 'no firmware generator off the car');
+    const mf = JSON.parse(fs.readFileSync(path.join(out, 'manifest.json'), 'utf8'));
+    assert.strictEqual(mf.proxies['de.bmw.infotainment.controlelements.SteeringWheelPushButton'].attributes.statusSearchSwitch1, 'rs');
+});
+
 if (require.main === module) (async () => {
     let failed = 0;
     for (const t of tests) {
