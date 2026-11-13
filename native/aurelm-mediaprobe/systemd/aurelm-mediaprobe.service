@@ -15,7 +15,8 @@ StartLimitBurst=10
 # No internet: everything the probe plays is in its package or on 127.0.0.1.
 Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
 ExecStartPre=-/bin/sh -c 'mkdir -p /var/opt/aurelm-mediaprobe/state /var/opt/aurelm-mediaprobe/play && chmod 0700 /var/opt/aurelm-mediaprobe/state && chmod 0711 /var/opt/aurelm-mediaprobe/play'
-ExecStart=/usr/bin/node /var/opt/aurelm-mediaprobe/current/service.js
+# Node does not see the unit's memory limit: its heap is capped below it, so it collects in time
+ExecStart=/usr/bin/node --max-old-space-size=128 /var/opt/aurelm-mediaprobe/current/service.js
 ExecStopPost=-/usr/bin/node /var/opt/aurelm-mediaprobe/current/cleanup.js
 Restart=on-failure
 RestartSec=10

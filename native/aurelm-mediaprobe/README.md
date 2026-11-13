@@ -68,6 +68,16 @@ any test ran: the service died while it started and systemd started it again eve
   its memory, its phase and the steps that crashed it;
 - 256 MiB and a whole core (`CPUQuota=100%`) instead of 192 MiB and half a core.
 
+0.1.1 in the car showed the real causes (its log): BMW's generator refused the whole manifest for one field
+(`SteeringWheelPushButton.requestSteerWheelFunctions` has `"getter": {"id": 0}`: an id 0 is none), so no config was
+made and only MediaPlayer and CommandControl (MainApp's own configs) were watched; and the SDK search read hundreds
+of files in the service, which systemd killed for its memory at every start. 0.1.2: an id 0 is no getter / setter /
+notifier; the generator runs one interface at a time and leaves out a field's flag it refuses, never the other
+interfaces; the SDK search runs in its own process (`scan.js`, `--max-old-space-size=96`); the service's heap is
+capped at 128 MiB. Found in that log: the binding exports `registerService` (an app can offer a service), the unit
+has no `aplay` (the 287 test makes the route but plays no tone), `OapGenericMedia` is there (`INT_MASS_STORAGE`,
+next / previous AVAILABLE).
+
 Over SSH: `journalctl -u aurelm-mediaprobe --no-pager -n 150` and `/var/opt/aurelm-mediaprobe/state/probe.log`.
 
 ## Safety

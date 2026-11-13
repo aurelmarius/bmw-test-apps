@@ -485,49 +485,19 @@ function usbMounts() {
 }
 
 /**
- * The SDK's (and MainApp's) JavaScript, searched for how the binding offers a service: next to each buildProxy
- * the binding's other calls show. Logs what it finds; returns a one-line summary.
+ * The SDK search (scan.js) in a child process with its own, capped memory: 0.1.0 read the files in the service and
+ * was killed for its memory at every start. Logs what the child says; returns its one-line summary.
  */
-async function scanSdk(log) {
-    const roots = ['/usr/lib/oap-mainapp', '/usr/lib/node_modules', '/var/opt/public/oap'];
-    const files = [];
-    const walk = (d, depth) => {
-        if (files.length >= 300 || depth > 9) return;
-        let ents = [];
-        try { ents = fs.readdirSync(d); } catch (e) { return; }
-        for (const n of ents) {
-            const f = path.join(d, n);
-            let st;
-            try { st = fs.lstatSync(f); } catch (e) { continue; }
-            if (st.isDirectory()) { if (!/^(data|rhmiData|resources|fonts|images|media|\.git)$/.test(n)) walk(f, depth + 1); }
-            else if (/\.js$/.test(n) && st.size < 4 * 1024 * 1024 && files.length < 300) files.push(f);
-        }
-    };
-    roots.forEach((r) => walk(r, 0));
-    const names = {};
-    const snippets = [];
-    const RX = /\b(build(?:Stub|Skeleton|Service|Provider)|createStub|createSkeleton|offerService|stopOfferService|registerService|offerEvent|offerField|fireEvent|fireSelectiveEvent|notifyEvent|setFieldValue|registerMethod|registerRequestHandler)\b/g;
-    for (const f of files) {
-        // one file per tick: the service keeps answering the app
-        await new Promise((r) => setImmediate(r));
-        let txt;
-        try { txt = fs.readFileSync(f, 'utf8'); } catch (e) { continue; }
-        RX.lastIndex = 0;
-        const has = RX.test(txt);
-        RX.lastIndex = 0;
-        if (txt.indexOf('buildProxy') < 0 && !has) continue;
-        let mm;
-        while ((mm = RX.exec(txt))) {
-            names[mm[1]] = (names[mm[1]] || 0) + 1;
-            if (snippets.length < 12) snippets.push(f + ': ...' + txt.slice(Math.max(0, mm.index - 140), mm.index + 160).replace(/\s+/g, ' ') + '...');
-        }
-        const bp = txt.indexOf('buildProxy');
-        if (bp >= 0 && snippets.length < 16) snippets.push(f + ' (buildProxy): ...' + txt.slice(Math.max(0, bp - 200), bp + 300).replace(/\s+/g, ' ') + '...');
-    }
-    log('env: SDK scan: ' + files.length + ' files; provider-like calls ' + show(names, 600));
-    snippets.forEach((x) => log('env: SDK ' + x.slice(0, 700)));
-    const k = Object.keys(names);
-    return files.length + ' JS files, ' + (k.length ? k.map((n) => n + ' x' + names[n]).join(', ') : 'no provider-like calls');
+function scanSdk(log) {
+    return new Promise((res) => {
+        cp.execFile(process.execPath, ['--max-old-space-size=96', path.join(__dirname, 'scan.js')], { timeout: 120000, maxBuffer: 4 << 20 }, (err, out, errOut) => {
+            const lines = String(out || '').split('\n').filter(Boolean);
+            lines.slice(0, -1).forEach((l) => log('env: SDK ' + l.slice(0, 900)));
+            if (errOut && String(errOut).trim()) log('env: SDK scan stderr: ' + String(errOut).trim().slice(0, 400));
+            if (err) return res('SDK scan failed: ' + (err.killed ? 'timed out' : err.code || err.message));
+            res(lines.length ? lines[lines.length - 1] : 'SDK scan: no answer');
+        });
+    });
 }
 
 module.exports = { createProbe, show, usbMounts, which, IF, MONITORS, BUTTONS, HTTP_PORT };

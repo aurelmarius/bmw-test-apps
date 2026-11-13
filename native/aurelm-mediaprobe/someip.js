@@ -71,7 +71,7 @@ function createSomeip(opts) {
         try { st = fs.statSync(CATALOG); } catch (e) { gen.error = 'no catalog: ' + e.message; return Promise.resolve(gen); }
         try {
             const old = JSON.parse(fs.readFileSync(sumFile, 'utf8'));
-            if (old.catalog.size === st.size && old.catalog.mtimeMs === st.mtime.getTime() && old.ifaces.join(',') === ifaces.join(',') && !old.gen.error) {
+            if (old.format === 2 && old.catalog.size === st.size && old.catalog.mtimeMs === st.mtime.getTime() && old.ifaces.join(',') === ifaces.join(',') && !old.gen.error) {
                 sum = old; gen.count = old.gen.count; gen.cached = true; gen.ms = old.gen.ms;
                 log('configs: kept from an earlier start (' + gen.count + ' configs, catalog ' + (old.catalog.version || '?') + ')');
                 return Promise.resolve(gen);
