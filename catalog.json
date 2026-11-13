@@ -46,6 +46,28 @@
       "uninstallable": true
     },
     {
+      "id": "aurelm-music",
+      "kind": "tool",
+      "version": "0.1.0",
+      "title": "Music Assistant service",
+      "description": "For the app Music Assistant: the car as a Music Assistant player. Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code) and keeps only a long-lived token. Browses the library and the recommendations over the server's API, and receives the music over Sendspin (Music Assistant's own protocol, through its authenticated /sendspin): Opus decoded by ma-player (libopus) into SmartXbar's CarLife input. 30 s of music are buffered (a gap in the mobile network goes unheard). Its internet goes through mgu-uplink, as uid 13106 only; the player runs as nobody.",
+      "author": "aurelmarius",
+      "mguHmi": [
+        "ID7"
+      ],
+      "artifact": {
+        "name": "aurelm-music@0.1.0.tgz",
+        "size": 411748,
+        "sha256": "f14baedc3b919eded0571ae919d774a567af1db17c748f6ce0005b90fb97e430",
+        "url": "packages/aurelm-music@0.1.0.tgz"
+      },
+      "requires": {
+        "mgu-deploy": "0.7.0",
+        "mgu-uplink": "0.7.0"
+      },
+      "uninstallable": true
+    },
+    {
       "id": "aurelm_emby",
       "kind": "app",
       "version": "0.3.12",
@@ -87,6 +109,28 @@
       "iconSha256": "25e7bde367376b5b51a704026c90ade7ca40800aad0c041d1074a74f45b39412",
       "requires": {
         "aurelm-mediaprobe": "0.1.3"
+      }
+    },
+    {
+      "id": "aurelm_music",
+      "kind": "app",
+      "version": "0.1.0",
+      "title": "Music Assistant",
+      "description": "Your Music Assistant server in the car: the home page's recommendations with their covers, the library (playlists, albums, artists, radio, tracks), search, and what plays with its cover, its progress and what comes next. The music comes over Sendspin and plays on the car's speakers; skip on the steering wheel goes to the next or the previous track; the track shows on the instrument cluster. Sign in once from the phone (QR code). Needs the Music Assistant service.",
+      "mguHmi": [
+        "ID7"
+      ],
+      "artifact": {
+        "name": "aurelm_music@0.1.0.tgz",
+        "size": 588063,
+        "sha256": "215b7a176656aa98734518d4fa6280779e7000f821c144a1f8a55ba8af7bf5a9",
+        "url": "packages/aurelm_music@0.1.0.tgz"
+      },
+      "uninstallable": true,
+      "icon": "aurelm_music.png",
+      "iconSha256": "89e420b4540245f1f70a78f46443e755c85af4070e52ee0e5cdd5fab697a1227",
+      "requires": {
+        "aurelm-music": "0.1.0"
       }
     }
   ]
