@@ -2,16 +2,18 @@
 /**
  * someip.js - SOME/IP for the probe service: any interface of the head unit's catalog, as root.
  *
- * The interface configs are made on the unit, at the service's start, the way MainApp's installer makes an app's
- * (oapgen.js: BMW's own generator, loaded from the firmware), from a manifest that asks for every field (with its
- * getter, setter and notifier as the catalog has them), method and event of the interfaces below. When that fails,
+ * The interface configs are made on the unit, at the service's first start, the way MainApp's installer makes an
+ * app's (oapgen.js: BMW's own generator, loaded from the firmware), asking for every field (with its getter, setter
+ * and notifier as the catalog has them), method and event of the probe's interfaces. That runs in a child process
+ * (prepare.js: its own memory, the 4.6 MB catalog and the firmware's bundle never in the service, which keeps
+ * answering meanwhile), and is kept: the next start uses it while the catalog file is the same. When it fails,
  * MainApp's own configs (/usr/lib/oap-mainapp/src-gen, as RideTube's daemon uses them) are tried.
  *
  * The native binding deadlocks when called inline next to other SOME/IP traffic (kit/runtime/signals.js): every
  * call goes through one queue, each in a fresh setImmediate tick, one at a time.
  *
  *   const s = createSomeip({ log, dir });
- *   await s.prepare(ifaces)                 configs for these interfaces (once)
+ *   await s.prepare(ifaces)                 configs and the catalog's summary for these interfaces (once)
  *   const p = await s.proxy(iface, inst)    a proxy, made once and kept
  *   s.get(p, field) / s.set(p, field, v) / s.call(p, method, args) / s.on(p, name, fn) / s.avail(p, fn)
  *   s.info(iface)                           the catalog's entry: { fields: {name: {getter,setter,notifier}}, events, methods }
@@ -30,9 +32,9 @@ function createSomeip(opts) {
     const dir = o.dir;                 // where the made configs go
     let native = null, nativeError = null;
     try { native = o.native || require(SOMEIP); } catch (e) { nativeError = e.message; }
-    let catalog = null, catalogError = null;
-    try { catalog = o.catalog || JSON.parse(fs.readFileSync(CATALOG, 'utf8')); } catch (e) { catalogError = e.message; }
-    const gen = { done: false, error: null, count: 0 };
+    // the catalog's summary for the probe's interfaces (prepare.js); tests hand a catalog in
+    let sum = o.catalog ? Object.assign({ catalog: { version: o.catalog.version || null } }, require('./prepare').summarize(o.catalog, Object.keys(o.catalog.interfaces || {}))) : null;
+    const gen = { done: false, error: null, count: 0, cached: false, ms: 0 };
     const proxies = new Map();
 
     let chain = Promise.resolve();
@@ -50,50 +52,44 @@ function createSomeip(opts) {
     }
 
     function info(iface) {
-        return catalog && catalog.interfaces ? catalog.interfaces[iface] || null : null;
+        if (!sum || !sum.interfaces[iface]) return null;
+        const x = sum.interfaces[iface];
+        const ev = {}, me = {};
+        (x.events || []).forEach((e) => { ev[e] = {}; });
+        (x.methods || []).forEach((m) => { me[m] = {}; });
+        return { fields: x.fields, events: ev, methods: me };
     }
-    function instances(iface) {
-        const m = catalog && catalog.instanceIDs ? catalog.instanceIDs[iface] : null;
-        return m ? Object.keys(m) : [];
-    }
-    /** the manifest entry asking for all of an interface, with each field's flags as the catalog has them */
-    function entry(iface) {
-        const x = info(iface);
-        if (!x) return null;
-        const attributes = {};
-        Object.keys(x.fields || {}).forEach((f) => {
-            const v = x.fields[f];
-            attributes[f] = (v.getter ? 'r' : '') + (v.setter ? 'w' : '') + (v.notifier ? 's' : '');
-        });
-        const e = { instances: '*' };
-        if (Object.keys(attributes).length) e.attributes = attributes;
-        if (Object.keys(x.methods || {}).length) e.methods = Object.keys(x.methods);
-        if (Object.keys(x.events || {}).length) e.broadcasts = Object.keys(x.events);
-        return e;
-    }
+    function instances(iface) { return (sum && sum.instances[iface]) || []; }
 
-    /** configs for `ifaces` (proxies) and `offers` ({ iface: [instances] }, services this process could offer) */
-    function prepare(ifaces, offers) {
-        if (gen.done) return gen;
+    /** the configs and the summary for `ifaces`: made by prepare.js in a child process, or kept from the last start */
+    function prepare(ifaces) {
+        if (gen.done) return Promise.resolve(gen);
         gen.done = true;
-        if (!catalog) { gen.error = 'no catalog: ' + catalogError; return gen; }
-        if (o.generate === false) return gen;
+        if (o.catalog) return Promise.resolve(gen);
+        const sumFile = path.join(dir, 'summary.json');
+        let st = null;
+        try { st = fs.statSync(CATALOG); } catch (e) { gen.error = 'no catalog: ' + e.message; return Promise.resolve(gen); }
         try {
-            const proxiesM = {};
-            ifaces.forEach((i) => { const e = entry(i); if (e) proxiesM[i] = e; else log('catalog: no ' + i); });
-            const services = {};
-            Object.keys(offers || {}).forEach((i) => { if (info(i)) services[i] = { instances: offers[i] }; });
-            const manifest = { proxies: proxiesM, services };
-            try { fs.mkdirSync(dir, 0o700); } catch (e) { /* there (Node 8: no recursive) */ }
-            const mf = path.join(dir, 'manifest.json');
-            fs.writeFileSync(mf, JSON.stringify(manifest, null, 1));
-            require('./oapgen').main([CATALOG, mf, '0', dir]);
-            gen.count = fs.readdirSync(dir).filter((f) => /\.json$/.test(f) && f !== 'manifest.json' && f !== 'acl.json').length;
-        } catch (e) {
-            gen.error = String(e && e.message || e);
-            log('config generator: ' + gen.error + ' (MainApp\'s configs are tried instead)');
-        }
-        return gen;
+            const old = JSON.parse(fs.readFileSync(sumFile, 'utf8'));
+            if (old.catalog.size === st.size && old.catalog.mtimeMs === st.mtime.getTime() && old.ifaces.join(',') === ifaces.join(',') && !old.gen.error) {
+                sum = old; gen.count = old.gen.count; gen.cached = true; gen.ms = old.gen.ms;
+                log('configs: kept from an earlier start (' + gen.count + ' configs, catalog ' + (old.catalog.version || '?') + ')');
+                return Promise.resolve(gen);
+            }
+        } catch (e) { /* none yet */ }
+        log('configs: making them (prepare.js, a child process)...');
+        return new Promise((res) => {
+            const cp = require('child_process');
+            cp.execFile(process.execPath, [path.join(__dirname, 'prepare.js'), CATALOG, dir, ifaces.join(',')], { timeout: 120000, maxBuffer: 1 << 20 }, (err, out, errOut) => {
+                if (out && out.trim()) log(out.trim());
+                if (errOut && errOut.trim()) log('prepare stderr: ' + errOut.trim().slice(0, 600));
+                try { sum = JSON.parse(fs.readFileSync(sumFile, 'utf8')); } catch (e) { sum = null; }
+                if (!sum) gen.error = 'prepare.js: ' + (err ? (err.killed ? 'timed out' : err.message) : 'no summary');
+                else { gen.error = sum.gen.error; gen.count = sum.gen.count; gen.ms = sum.gen.ms; }
+                if (gen.error) log('config generator: ' + gen.error + ' (MainApp\'s configs are tried instead)');
+                res(gen);
+            });
+        });
     }
 
     function config(iface) {
@@ -153,8 +149,8 @@ function createSomeip(opts) {
         }
     }
 
-    return { prepare, proxy, get, set, call, on, avail, isAvailable, info, instances, entry, binding, shutdown, gen,
-        catalogVersion: () => (catalog && catalog.version) || null, hasCatalog: () => !!catalog, hasNative: () => !!native };
+    return { prepare, proxy, get, set, call, on, avail, isAvailable, info, instances, binding, shutdown, gen,
+        catalogVersion: () => (sum && sum.catalog && sum.catalog.version) || null, hasCatalog: () => !!sum, hasNative: () => !!native };
 }
 
 module.exports = { createSomeip, SOMEIP, CATALOG, SRCGEN };

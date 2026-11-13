@@ -52,6 +52,24 @@ media engine runs as its own uid and opens them by name, as RideTube found).
 - **Report** (the app's button): `report.json` beside it (each test's result, each field's last value and how often
   it changed), and both copied to a USB stick if one is in (`mediaprobe-<time>.log`, `mediaprobe-<time>-report.json`).
 
+## When it crashes
+
+0.1.0 came and went on the screen in the car (the app's "does not answer", then the list, again and again) before
+any test ran: the service died while it started and systemd started it again every 10 s. 0.1.1:
+
+- the configs are made in a child process (`prepare.js`, its own memory: the catalog and the firmware's generator
+  never in the service, which answers the app meanwhile), and kept for the next starts while the catalog is the same;
+- each risky step (a monitor's proxy, each subscription, each test) is written to `state/step.json` before it runs.
+  A step the last run died in is counted in `state/crashed.json` and, for a monitor, skipped from then on, so one bad
+  interface no longer takes the service down at every start; the log says `CRASH GUARD: ...`. A new version starts
+  afresh;
+- the SDK search (env) reads one file per tick, 300 files of 4 MiB at most;
+- the app keeps the last answer (`SERVICE SILENT n S` at the top) and shows the service's start count in this boot,
+  its memory, its phase and the steps that crashed it;
+- 256 MiB and a whole core (`CPUQuota=100%`) instead of 192 MiB and half a core.
+
+Over SSH: `journalctl -u aurelm-mediaprobe --no-pager -n 150` and `/var/opt/aurelm-mediaprobe/state/probe.log`.
+
 ## Safety
 
 - Nothing runs at boot: the app's first connection to `/run/aurelm-mediaprobe.sock` starts the service; it ends 20
