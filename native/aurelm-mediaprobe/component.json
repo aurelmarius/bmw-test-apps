@@ -1,0 +1,136 @@
+{
+  "id": "aurelm-mediaprobe",
+  "kind": "tool",
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "title": "Media Probe service",
+  "description": "For the app Media Probe: what the car offers a music player (the first step of a Music Assistant client). Watches the steering wheel's buttons, the source the HMI takes as playing, CarLife's bridge to BMW's media and the BMW MediaPlayer, and runs tests the app starts: source 287 with a tone, CarLife's metadata written, button forwarding, source 1046 with MP3 / M4A / AAC files, a growing file, a pipe and http:// streams on 127.0.0.1. Everything a test changes is undone when it ends. No internet. Logs to /var/opt/aurelm-mediaprobe/state/probe.log; Report copies it to a USB stick.",
+  "requires": {
+    "mgu-deploy": "0.7.0"
+  },
+  "uninstallable": true,
+  "mguHmi": [
+    "ID7"
+  ],
+  "files": [
+    {
+      "path": "service.js",
+      "from": "service.js",
+      "mode": "0644"
+    },
+    {
+      "path": "someip.js",
+      "from": "someip.js",
+      "mode": "0644"
+    },
+    {
+      "path": "oapgen.js",
+      "from": "oapgen.js",
+      "mode": "0644"
+    },
+    {
+      "path": "probe.js",
+      "from": "probe.js",
+      "mode": "0644"
+    },
+    {
+      "path": "routes.js",
+      "from": "routes.js",
+      "mode": "0644"
+    },
+    {
+      "path": "feeds.js",
+      "from": "feeds.js",
+      "mode": "0644"
+    },
+    {
+      "path": "tone.js",
+      "from": "tone.js",
+      "mode": "0644"
+    },
+    {
+      "path": "sockgroup.js",
+      "from": "sockgroup.js",
+      "mode": "0644"
+    },
+    {
+      "path": "check.js",
+      "from": "check.js",
+      "mode": "0644"
+    },
+    {
+      "path": "cleanup.js",
+      "from": "cleanup.js",
+      "mode": "0644"
+    },
+    {
+      "path": "README.md",
+      "from": "README.md",
+      "mode": "0644"
+    },
+    {
+      "path": "media/probe.mp3",
+      "from": "media/probe.mp3",
+      "mode": "0644"
+    },
+    {
+      "path": "media/probe.m4a",
+      "from": "media/probe.m4a",
+      "mode": "0644"
+    },
+    {
+      "path": "media/probe.aac",
+      "from": "media/probe.aac",
+      "mode": "0644"
+    },
+    {
+      "path": "media/live.mp3",
+      "from": "media/live.mp3",
+      "mode": "0644"
+    },
+    {
+      "path": "media/tone48.wav",
+      "from": "media/tone48.wav",
+      "mode": "0644"
+    },
+    {
+      "path": "media/cover.png",
+      "from": "media/cover.png",
+      "mode": "0644"
+    },
+    {
+      "path": "media/index.json",
+      "from": "media/index.json",
+      "mode": "0644"
+    }
+  ],
+  "check": [
+    "check.js"
+  ],
+  "deactivate": [
+    "node",
+    "cleanup.js"
+  ],
+  "units": [
+    {
+      "name": "aurelm-mediaprobe.socket",
+      "from": "systemd/aurelm-mediaprobe.socket"
+    },
+    {
+      "name": "aurelm-mediaprobe.service",
+      "from": "systemd/aurelm-mediaprobe.service"
+    }
+  ],
+  "enable": [
+    {
+      "unit": "aurelm-mediaprobe.socket",
+      "target": "sockets.target"
+    }
+  ],
+  "recmgr": [
+    "aurelm-mediaprobe"
+  ],
+  "restart": [
+    "aurelm-mediaprobe.service"
+  ]
+}

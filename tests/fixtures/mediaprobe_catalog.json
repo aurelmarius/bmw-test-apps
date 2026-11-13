@@ -1,0 +1,520 @@
+{
+ "version": "0.1.0",
+ "interfaces": {
+  "de.bmw.infotainment.controlelements.SteeringWheelPushButton": {
+   "fields": {
+    "operationSteerWheelFAV": {
+     "getter": true,
+     "notifier": true
+    },
+    "operationSteerWheelFC": {
+     "getter": true,
+     "notifier": true
+    },
+    "requestSteerWheelFunctions": {
+     "getter": true,
+     "setter": true
+    },
+    "statusAudioVolumeButton": {
+     "getter": true,
+     "notifier": true
+    },
+    "statusPTTButton1": {
+     "getter": true,
+     "notifier": true
+    },
+    "statusRotaryPress": {
+     "getter": true,
+     "notifier": true
+    },
+    "statusRotarySteps": {
+     "getter": true,
+     "notifier": true
+    },
+    "statusSearchSwitch1": {
+     "getter": true,
+     "notifier": true
+    },
+    "statusSpecialFunctionButton": {
+     "getter": true,
+     "notifier": true
+    },
+    "statusSpecialFunctionButton2": {
+     "getter": true,
+     "notifier": true
+    },
+    "statusSteerWheelFCLED": {
+     "getter": true,
+     "notifier": true
+    },
+    "statusTelephoneButton": {
+     "getter": true,
+     "notifier": true
+    }
+   },
+   "events": {},
+   "methods": {}
+  },
+  "de.bmw.infotainment.entertainment.mediasource.MediaSource": {
+   "fields": {
+    "activeSourceId": {
+     "getter": true,
+     "notifier": true
+    },
+    "sources": {
+     "getter": true,
+     "notifier": true
+    }
+   },
+   "events": {},
+   "methods": {
+    "selectSource": {}
+   }
+  },
+  "de.bmw.infotainment.hmi.hmimediastate.HmiMediaState": {
+   "fields": {
+    "coverArt": {
+     "getter": true,
+     "notifier": true
+    },
+    "ivaFlags": {
+     "getter": true,
+     "notifier": true
+    },
+    "mainMenuMetadata": {
+     "getter": true,
+     "notifier": true
+    },
+    "menu": {
+     "getter": true,
+     "notifier": true
+    },
+    "playerMetadata": {
+     "getter": true,
+     "notifier": true
+    },
+    "trackProgress": {
+     "getter": true,
+     "notifier": true
+    },
+    "trackSelection": {
+     "getter": true,
+     "notifier": true
+    },
+    "tracks": {
+     "getter": true,
+     "notifier": true
+    }
+   },
+   "events": {},
+   "methods": {
+    "selectMenuEntry": {},
+    "selectTrack": {},
+    "switchTracklistWindow": {}
+   }
+  },
+  "de.bmw.infotainment.entertainment.mediaplayer.MediaPlayer": {
+   "fields": {
+    "angle": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    },
+    "audioStream": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    },
+    "autoplay": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    },
+    "availableAngles": {
+     "getter": true,
+     "notifier": true
+    },
+    "availableAudioStreams": {
+     "getter": true,
+     "notifier": true
+    },
+    "availableSubtitles": {
+     "getter": true,
+     "notifier": true
+    },
+    "chapter": {
+     "getter": true,
+     "notifier": true
+    },
+    "configureButtonEventForwarding": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    },
+    "currentItemId": {
+     "getter": true,
+     "notifier": true
+    },
+    "currentItemMetadata": {
+     "getter": true,
+     "notifier": true
+    },
+    "currentItemMetadataConfig": {
+     "getter": true,
+     "notifier": true
+    },
+    "currentItemPath": {
+     "getter": true,
+     "notifier": true
+    },
+    "currentItemPosition": {
+     "getter": true,
+     "notifier": true
+    },
+    "currentItemTime": {
+     "getter": true,
+     "notifier": true
+    },
+    "deviceInfo": {
+     "getter": true,
+     "notifier": true
+    },
+    "isPipEnabled": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    },
+    "nextItemMetadata": {
+     "getter": true,
+     "notifier": true
+    },
+    "playbackSpeed": {
+     "getter": true,
+     "notifier": true
+    },
+    "playerCacheSize": {
+     "getter": true,
+     "notifier": true
+    },
+    "playerCacheStatus": {
+     "getter": true,
+     "notifier": true
+    },
+    "playerCapabilities": {
+     "getter": true,
+     "notifier": true
+    },
+    "playerState": {
+     "getter": true,
+     "notifier": true
+    },
+    "playlist": {
+     "getter": true,
+     "notifier": true
+    },
+    "playlistNumAlbums": {
+     "getter": true,
+     "notifier": true
+    },
+    "playlistNumArtists": {
+     "getter": true,
+     "notifier": true
+    },
+    "prevItemMetadata": {
+     "getter": true,
+     "notifier": true
+    },
+    "random": {
+     "getter": true,
+     "notifier": true
+    },
+    "repeat": {
+     "getter": true,
+     "notifier": true
+    },
+    "shuffle": {
+     "getter": true,
+     "notifier": true
+    },
+    "subtitle": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    },
+    "thirdPartyMode": {
+     "getter": true,
+     "notifier": true
+    }
+   },
+   "events": {
+    "buttonEventForward": {},
+    "copyProtectionEvent": {},
+    "mmpRequestFocusEvent": {},
+    "pipSuppressedEvent": {},
+    "playbackErrorEvent": {},
+    "uopRestrictionEvent": {}
+   },
+   "methods": {
+    "addToPlaylist": {},
+    "clearPlayerCache": {},
+    "createPlaylist": {},
+    "getSongsPlayedInLUM": {},
+    "playFile": {},
+    "removeFromPlaylist": {},
+    "sendButtonEvent": {},
+    "sendTouchEvent": {},
+    "setChapter": {},
+    "setCombiListMode": {},
+    "setCurrentItem": {},
+    "setCurrentItemPosition": {},
+    "setCurrentItemPositionAndTime": {},
+    "setDeviceInfoName": {},
+    "setMetadataConfig": {},
+    "setPlaybackSpeed": {},
+    "setPlaylist": {},
+    "setTime": {}
+   }
+  },
+  "de.bmw.infotainment.a4a.baiducarlife.carlifemp.CarLifeMp": {
+   "fields": {
+    "currentItemMetadata": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    },
+    "currentItemTimeInSeconds": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    },
+    "deviceInfo": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    },
+    "playState": {
+     "getter": true,
+     "notifier": true,
+     "setter": true
+    }
+   },
+   "events": {},
+   "methods": {
+    "sendButtonEvent": {}
+   }
+  },
+  "de.bmw.infotainment.a4a.baiducarlife.carlifehmi.BaiduCarLifeManager": {
+   "fields": {
+    "projectedGuidanceActive": {
+     "getter": true,
+     "notifier": true
+    },
+    "projectedGuidanceMetadataAvailable": {
+     "getter": true,
+     "notifier": true
+    },
+    "projectedSpeechActive": {
+     "getter": true,
+     "notifier": true
+    },
+    "projectedUiActive": {
+     "getter": true,
+     "notifier": true
+    },
+    "sessionActive": {
+     "getter": true,
+     "notifier": true
+    }
+   },
+   "events": {},
+   "methods": {
+    "hideProjectedUi": {},
+    "notifyVoiceRecognitionState": {},
+    "requestProjectedUi": {}
+   }
+  },
+  "org.genivi.am.commandinterface.CommandControl": {
+   "fields": {
+    "listOfMainConnections": {
+     "getter": true,
+     "notifier": true
+    }
+   },
+   "events": {
+    "mainConnectionStateChanged": {},
+    "mainSinkNotificationConfigurationChanged": {},
+    "mainSinkSoundPropertyChanged": {},
+    "mainSourceNotificationConfigurationChanged": {},
+    "mainSourceSoundPropertyChanged": {},
+    "newMainConnection": {},
+    "newSink": {},
+    "newSource": {},
+    "numberOfSinkClassesChanged": {},
+    "numberOfSourceClassesChanged": {},
+    "removedMainConnection": {},
+    "removedSink": {},
+    "removedSource": {},
+    "sinkAvailabilityChanged": {},
+    "sinkMuteStateChanged": {},
+    "sinkNotification": {},
+    "sinkUpdated": {},
+    "sourceAvailabilityChanged": {},
+    "sourceNotification": {},
+    "sourceUpdated": {},
+    "systemPropertyChanged": {},
+    "timingInformationChanged": {},
+    "volumeChanged": {}
+   },
+   "methods": {
+    "connect": {},
+    "disconnect": {},
+    "getListMainConnections": {},
+    "getListMainSinkNotificationConfigurations": {},
+    "getListMainSinkSoundProperties": {},
+    "getListMainSinks": {},
+    "getListMainSourceNotificationConfigurations": {},
+    "getListMainSourceSoundProperties": {},
+    "getListMainSources": {},
+    "getListSinkClasses": {},
+    "getListSourceClasses": {},
+    "getListSystemProperties": {},
+    "getTimingInformation": {},
+    "getVolume": {},
+    "setConnectionVolumeStep": {},
+    "setMainSinkNotificationConfiguration": {},
+    "setMainSinkSoundProperty": {},
+    "setMainSourceNotificationConfiguration": {},
+    "setMainSourceSoundProperty": {},
+    "setSinkMuteState": {},
+    "setSystemProperty": {},
+    "setVolume": {},
+    "setVolumeInPercent": {},
+    "volumeStep": {}
+   }
+  },
+  "org.genivi.am.routinginterface.RoutingControlObserver": {
+   "fields": {
+    "routingReady": {
+     "getter": true,
+     "notifier": true
+    }
+   },
+   "events": {},
+   "methods": {
+    "confirmRoutingRundown": {},
+    "deregisterConverter": {},
+    "deregisterCrossfader": {},
+    "deregisterDomain": {},
+    "deregisterGateway": {},
+    "deregisterSink": {},
+    "deregisterSource": {},
+    "hookDomainRegistrationComplete": {},
+    "hookDomainStateChange": {},
+    "hookInterruptStatusChange": {},
+    "hookSinkAvailablityStatusChange": {},
+    "hookSinkNotificationDataChange": {},
+    "hookSourceAvailablityStatusChange": {},
+    "hookSourceNotificationDataChange": {},
+    "hookTimingInformationChanged": {},
+    "peekDomain": {},
+    "peekSink": {},
+    "peekSinkClassID": {},
+    "peekSource": {},
+    "peekSourceClassID": {},
+    "registerConverter": {},
+    "registerCrossfader": {},
+    "registerDomain": {},
+    "registerGateway": {},
+    "registerSink": {},
+    "registerSource": {},
+    "sendChangedData": {},
+    "updateConverter": {},
+    "updateGateway": {},
+    "updateSink": {},
+    "updateSource": {}
+   }
+  }
+ },
+ "instanceIDs": {
+  "de.bmw.infotainment.controlelements.SteeringWheelPushButton": {
+   "1": 1
+  },
+  "de.bmw.infotainment.entertainment.mediasource.MediaSource": {
+   "1": 1
+  },
+  "de.bmw.infotainment.hmi.hmimediastate.HmiMediaState": {
+   "HMI_CID": 1,
+   "HMI_FoMo_Left": 2,
+   "HMI_FoMo_Right": 3
+  },
+  "de.bmw.infotainment.entertainment.mediaplayer.MediaPlayer": {
+   "AlexaMedia": 62,
+   "AndroidAutoProjected": 41,
+   "AudioDemoModeMedia": 66,
+   "AudioVisualEffectsPlayer": 32,
+   "BrowserMedia": 60,
+   "BrowserTempLumMedia": 65,
+   "BrowserTempMedia": 61,
+   "CarLifeMedia": 37,
+   "CarPlayMedia": 10,
+   "DynamicInterrupt": 57,
+   "DynamicMedia": 55,
+   "DynamicOverlay": 56,
+   "DynamicTempLumMedia": 64,
+   "DynamicTempMedia": 58,
+   "ExternalDeviceBtA": 4,
+   "ExternalDeviceBtB": 5,
+   "ExternalDeviceUsbFrontA": 2,
+   "ExternalDeviceUsbFrontAInstanceRearL": 11,
+   "ExternalDeviceUsbFrontAInstanceRearR": 12,
+   "ExternalDeviceUsbFrontASingle": 33,
+   "ExternalDeviceUsbFrontB": 3,
+   "ExternalDeviceUsbFrontBInstanceRearL": 13,
+   "ExternalDeviceUsbFrontBInstanceRearR": 14,
+   "ExternalDeviceUsbFrontBSingle": 34,
+   "ExternalDeviceUsbRearA": 22,
+   "ExternalDeviceUsbRearAInstanceRearL": 25,
+   "ExternalDeviceUsbRearAInstanceRearR": 26,
+   "ExternalDeviceUsbRearASingle": 35,
+   "ExternalDeviceUsbRearB": 23,
+   "ExternalDeviceUsbRearBInstanceRearL": 27,
+   "ExternalDeviceUsbRearBInstanceRearR": 28,
+   "ExternalDeviceUsbRearBSingle": 36,
+   "HDMI": 24,
+   "IbaInstanceFront": 16,
+   "IbaInstanceRearL": 17,
+   "IbaInstanceRearR": 18,
+   "MiracastA": 19,
+   "MiracastB": 20,
+   "MiracastC": 15,
+   "MusicCollectionInstanceFront": 7,
+   "MusicCollectionInstanceRearL": 8,
+   "MusicCollectionInstanceRearR": 9,
+   "MyModesOverlay": 54,
+   "OapGenericInterrupt": 39,
+   "OapGenericMedia": 40,
+   "OapGenericOverlay": 38,
+   "OnlineEntertainmentComponent_1": 1,
+   "OpticalDriveFront": 6,
+   "OpticalDriveRear": 21,
+   "PanoramaDisplay": 50,
+   "TencentMppMedia": 53,
+   "TencentMppTempLumMedia": 63,
+   "TencentMppTempMedia": 59,
+   "VideoWidgetFrontInterruptExclusive": 29
+  },
+  "de.bmw.infotainment.a4a.baiducarlife.carlifemp.CarLifeMp": {
+   "CarLifeMpInst1": 128
+  },
+  "de.bmw.infotainment.a4a.baiducarlife.carlifehmi.BaiduCarLifeManager": {
+   "CarLifeManagerInst1": 128
+  },
+  "org.genivi.am.commandinterface.CommandControl": {
+   "1": 1
+  },
+  "org.genivi.am.routinginterface.RoutingControlObserver": {
+   "1": 1
+  }
+ },
+ "datatypes": {}
+}
