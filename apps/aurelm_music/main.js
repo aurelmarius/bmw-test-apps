@@ -101,9 +101,9 @@ function steps(s, x) {
     rows.push({ label: 'Sendspin', state: c.conn === 'connected' ? 'ok' : c.conn === 'connecting' || c.conn === 'starting' ? 'wait' : 'bad',
         detail: c.conn === 'connected' ? 'connected' + (c.playerId ? ', the player "' + (s.device || 'BMW iDrive') + '" (' + c.playerId + ')' : '') + (c.format ? ', ' + c.format.codec + ' ' + c.format.rate + ' Hz' : '')
             : (c.conn || '?') + (c.error ? ': ' + c.error : '') + (c.reconnects ? ' (' + c.reconnects + ' reconnects)' : '') });
-    rows.push({ label: 'Player', state: pl.error ? 'bad' : pl.running ? 'ok' : 'off',
-        detail: pl.error ? pl.error : pl.running ? 'playing into ' + (pl.open ? (pl.open.device || pl.open.out) : '?') + ', ' + Math.round((pl.played || 0) / 48000) + ' s played' +
-            (pl.underruns ? ', ' + pl.underruns + ' underruns' : '') + (c.ahead ? ', ' + Math.round(c.ahead / 1000) + ' s buffered' : '') : 'starts with the music' });
+    rows.push({ label: 'Player', state: pl.error ? 'bad' : pl.waiting ? 'wait' : pl.running ? 'ok' : 'off',
+        detail: pl.error ? pl.error : pl.running ? (pl.waiting ? 'the speakers do not read it yet: ' : 'playing into ') + (pl.open ? (pl.open.device || pl.open.out) : '?') + ', ' + Math.round((pl.played || 0) / 48000) + ' s played' +
+            (pl.unread ? ', ' + Math.round(pl.unread / 48000) + ' s not read' : '') + (pl.underruns ? ', ' + pl.underruns + ' underruns' : '') + (c.ahead ? ', ' + Math.round(c.ahead / 1000) + ' s buffered' : '') : 'starts with the music' });
     const ca = x.carAudio || {};
     rows.push({ label: 'Speakers', state: ca.taken ? 'bad' : ca.error ? 'bad' : ca.connected ? 'ok' : 'off',
         detail: ca.taken ? 'in use by another app (myAirPlay, TVH Player, Emby): stop it there' : ca.error ? ca.error : ca.connected ? 'on the main speakers (source 287)' : 'connected while music plays' });
@@ -328,17 +328,33 @@ mgu.run({
             const focus0 = disp0._focus.bind(disp0);
             disp0._focus = (p) => { focus0(p); follow(p && p.k); };
         }
+        // the knob through the rows: the page moves only when the knob goes on to another row, the way it went
+        // (down: the row turned to goes to the top, the next one under it; up: the row above it comes back).
+        // Moving along a row never moves the page (0.1.0 moved it back and forth at each turn).
+        let lastAt = null;
         function follow(key) {
-            const m = /^tgt:(?:[a-z]+):(\d+):(?:\d+)$/.exec(key || '') || /^tgt:li:(\d+)$/.exec(key || '');
-            if (!m) return;
+            const m = /^tgt:([a-z]+):(\d+):(?:\d+)$/.exec(key || '') || /^tgt:(li):(\d+)$/.exec(key || '');
+            if (!m) { lastAt = null; return; }
             const s = scroller();
             if (!s) return;
-            const line = Number(m[1]), slot = line - s.obj.first, shown = s.step === STEP.list ? 8 : 2;
+            const scope = tab + '/' + stack.length + '/' + m[1], line = Number(m[2]);
+            const prev = lastAt && lastAt.scope === scope ? lastAt.line : null;
+            lastAt = { scope, line };
+            if (prev === line) return;
+            const shown = s.step === STEP.list ? 8 : 2, slot = line - s.obj.first;
             let to = s.obj.first;
-            if (slot >= shown - 1 && line < s.max + shown - 1) to = Math.min(s.max, line - shown + 2);
-            else if (slot <= 0 && line > 0) to = Math.max(0, line - 1);
+            if (slot < 0) to = Math.max(0, line - 1);
+            else if (slot >= shown) to = Math.min(s.max, line - shown + 2);
+            else if ((prev == null || line > prev) && slot >= shown - 1) to = Math.min(s.max, line - shown + 2);
+            else if (prev != null && line < prev && slot <= 0) to = Math.max(0, line - 1);
             if (to !== s.obj.first) { s.obj.first = to; if (s.more && to >= s.max - 1) s.more(); render(); }
         }
+        /**
+         * The knob's way to the rows not shown: a thin place on the top edge for the row above (its last cover)
+         * and one on the bottom edge for the row under (its first); turned to, the page moves (follow) and the knob
+         * is on the real cover. They are the first and the last of the page's places, as the rows are in the ring.
+         */
+        function peek(cv, touch, key) { if (touch && key) cv.target(24, key.top ? TOP + 1 : H - 5, W - 48, 3, () => {}, key.k, 0); }
         if (ctx.onTab) ctx.onTab((i) => { tab = i; stack.length = 0; acc = 0; if (i === T_PLAY) queue.at = 0; return render(); });
 
         /* ---------- drawing ---------- */
@@ -436,8 +452,11 @@ mgu.run({
             const rows = visibleRows();
             const s = { obj: home, max: Math.max(0, rows.length - 2) };
             home.first = Math.min(home.first, s.max);
-            rows.slice(home.first, home.first + 3).forEach((r) => loadRow(r));
+            rows.slice(Math.max(0, home.first - 1), home.first + 3).forEach((r) => loadRow(r));
+            const lastOf = (r) => (r && r.items ? (r.items.length > 9 ? 8 : Math.max(0, r.items.length - 1)) : 0);
+            if (home.first > 0) peek(cv, touch, { top: true, k: 'h:' + (home.first - 1) + ':' + lastOf(rows[home.first - 1]) });
             rows.slice(home.first, home.first + 2).forEach((r, k) => drawShelf(cv, t, touch, r.name, r.items, r.loading, TOP + 4 + k * 226, 'h:' + (home.first + k), () => { stack.push({ kind: 'row', row: r, first: 0 }); render(); }));
+            if (home.first + 2 < rows.length) peek(cv, touch, { k: 'h:' + (home.first + 2) + ':0' });
             arrows(cv, t, touch, s, rows.length, W - 24, TOP + 22);
         }
         function drawShelf(cv, t, touch, name, items, loading, y, key, more) {
@@ -460,11 +479,14 @@ mgu.run({
             const lines = Math.ceil(items.length / per);
             const s = { obj, max: Math.max(0, lines - 2), more };
             obj.first = Math.min(obj.first, s.max);
-            for (let li = obj.first; li < Math.min(lines, obj.first + 3); li++) {
+            if (obj.first > 0) peek(cv, touch, { top: true, k: keyPrefix + ':' + (obj.first - 1) + ':' + (per - 1) });
+            let li = obj.first;
+            for (; li < Math.min(lines, obj.first + 3); li++) {
                 const y = y0 + (li - obj.first) * lineH;
                 if (y + size > H) break;
                 items.slice(li * per, li * per + per).forEach((it, i) => tile(cv, t, touch, it, 24 + i * (size + gap), y, size, keyPrefix + ':' + li + ':' + i));
             }
+            if (li < lines) peek(cv, touch, { k: keyPrefix + ':' + li + ':0' });
             return s;
         }
         function drawLibrary(cv, t, touch) {
@@ -495,7 +517,9 @@ mgu.run({
             if (!r.length) return message(cv, t, 'Nothing found');
             const s = { obj: search, max: Math.max(0, r.length - 2) };
             search.first = Math.min(search.first, s.max);
+            if (search.first > 0) { const pr = r[search.first - 1].items || []; peek(cv, touch, { top: true, k: 's:' + (search.first - 1) + ':' + (pr.length > 9 ? 8 : Math.max(0, pr.length - 1)) }); }
             r.slice(search.first, search.first + 2).forEach((sec, k) => drawShelf(cv, t, touch, sec.name, sec.items, false, TOP + 60 + k * 212, 's:' + (search.first + k), () => { stack.push({ kind: 'row', row: { name: sec.name, items: sec.items }, first: 0 }); render(); }));
+            if (search.first + 2 < r.length) peek(cv, touch, { k: 's:' + (search.first + 2) + ':0' });
             arrows(cv, t, touch, s, r.length, W - 24, TOP + 30);
         }
         function drawKeys(cv, t, touch) {
