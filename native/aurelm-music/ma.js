@@ -29,7 +29,7 @@
 const { EventEmitter } = require('events');
 const ws = require('./ws');
 
-const LEAD_US = 400000;          // sound handed to the player this far before it is due (its ALSA buffer is 120 ms)
+const LEAD_US = 400000;          // sound handed to the player this far before it is due (its ALSA buffer is 64 ms)
 const LATE_US = 150000;          // sound later than this is dropped (after a stall)
 
 /** a monotonic clock in microseconds */

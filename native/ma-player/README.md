@@ -20,8 +20,11 @@ a second after the input stopped).
 (`mgu_alsa,audio`) before it reads a byte, and refuses to play as root: the smartx sound plugin refuses root and the
 tools' uids (Emby 0.2.1). libasound is opened at run time (dlopen), so the binary links only the C library.
 `MGU_AUDIO`: `alsa:<device>` (default `alsa:plug:smartx:CarLifeMedia_CF_48_STEREO`), `wav:<path>` (tests) or `null`;
-`MGU_ALSA_US`: the ALSA buffer (default 120000 us). The pacing is the service's: it hands each packet over 0.4 s
-before its Sendspin timestamp, and a blocking ALSA write holds it back.
+`MGU_ALSA_US`: the ALSA buffer (default 64000 us: smartx's 3 periods of 1024 frames, as Emby's player). The pacing
+is the service's: it hands each packet over 0.4 s before its Sendspin timestamp, and a full device holds it back.
+The device is opened non-blocking, as Emby's player: sound nobody reads (source 287 not connected yet) is dropped
+after 250 ms and counted (`unread`, `waiting` in the ticks; `reading` once it is read again), and the device is
+re-armed every 2 s meanwhile. 0.1.0 opened it blocking and stayed in `snd_pcm_writei` for ever in the car.
 
 ## Build
 

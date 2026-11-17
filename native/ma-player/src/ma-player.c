@@ -19,7 +19,13 @@
  * refuses to go on as root. libasound is opened at run time (dlopen), so the binary links only the C library.
  *
  *   MGU_AUDIO   alsa:<device> (default alsa:plug:smartx:CarLifeMedia_CF_48_STEREO) | wav:<path> (tests) | null
- *   MGU_ALSA_US the ALSA buffer in microseconds (default 120000)
+ *   MGU_ALSA_US the ALSA buffer in microseconds (default 64000: smartx's 3 periods of 1024 frames, measured
+ *               by Moonride, as Emby's player and the AirPlay receiver)
+ *
+ * The device is opened NONBLOCKING, as Emby's player: an input nobody reads (source 287 not connected yet: the
+ * first 30 s of a stream come before the app has connected it) never parks the player. 0.1.0 opened it blocking
+ * and stayed in snd_pcm_writei for ever, "0 s played" (in the car, 17/11). Sound not taken within 250 ms is
+ * dropped and counted (unread); while nobody reads, the device is re-armed (drop, prepare) every 2 s.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -79,7 +85,9 @@ static snd_pcm_t *pcm;
 static FILE *wav;
 static unsigned long long wav_bytes;
 static unsigned cur_rate, cur_ch;
-static long long played_frames, underruns, dropped;
+static long long played_frames, underruns, dropped, unread_frames;
+static long long unread_since;   /* ms: nobody has read the device since then (0: it reads) */
+static long long rearmed_at;
 
 static int alsa_load(void) {
     if (A.lib) return 0;
@@ -110,7 +118,7 @@ static void out_close(void) {
 
 static int out_open(unsigned rate, unsigned ch) {
     out_close();
-    cur_rate = rate; cur_ch = ch;
+    cur_rate = rate; cur_ch = ch; unread_since = 0;
     if (out_kind == OUT_NULL) { event("{\"ev\":\"open\",\"out\":\"null\",\"rate\":%u,\"channels\":%u}", rate, ch); return 0; }
     if (out_kind == OUT_WAV) {
         wav = fopen(out_target, "wb");
@@ -120,11 +128,11 @@ static int out_open(unsigned rate, unsigned ch) {
         return 0;
     }
     if (alsa_load()) return -1;
-    int rc = A.open(&pcm, out_target, 0 /* playback */, 0 /* blocking */);
+    int rc = A.open(&pcm, out_target, 0 /* playback */, 1 /* SND_PCM_NONBLOCK */);
     if (rc < 0) { event("{\"ev\":\"error\",\"error\":\"snd_pcm_open %s: %s\"}", out_target, A.strerror(rc)); pcm = NULL; return -1; }
     const char *us = getenv("MGU_ALSA_US");
     /* S16_LE = 2, RW_INTERLEAVED = 3, soft resample on (44.1 kHz into the 48 kHz device) */
-    rc = A.set_params(pcm, 2, 3, ch, rate, 1, us ? (unsigned)atoi(us) : 120000);
+    rc = A.set_params(pcm, 2, 3, ch, rate, 1, us && atoi(us) > 0 ? (unsigned)atoi(us) : 64000);
     if (rc < 0) { event("{\"ev\":\"error\",\"error\":\"snd_pcm_set_params: %s\"}", A.strerror(rc)); A.close(pcm); pcm = NULL; return -1; }
     event("{\"ev\":\"open\",\"out\":\"alsa\",\"device\":\"%s\",\"rate\":%u,\"channels\":%u}", out_target, rate, ch);
     return 0;
@@ -142,14 +150,27 @@ static void out_write(int16_t *s, long frames) {
     if (out_kind == OUT_NULL) { played_frames += frames; return; }
     if (out_kind == OUT_WAV) { if (wav) { fwrite(s, 2 * cur_ch, (size_t)frames, wav); wav_bytes += (unsigned long long)frames * 2 * cur_ch; } played_frames += frames; return; }
     if (!pcm) { dropped += frames; return; }
+    long long waited = 0;
     while (frames > 0) {
         long w = A.writei(pcm, s, (unsigned long)frames);
-        if (w == -EAGAIN) continue;
+        if (w == -EAGAIN) {
+            /* full: wait for room (that is the pacing), but not for a device nobody reads */
+            long long t = now_ms();
+            if (unread_since) {
+                if (t - unread_since >= 2000 && t - rearmed_at >= 2000) { rearmed_at = t; A.drop(pcm); A.prepare(pcm); continue; }
+                unread_frames += frames; return;
+            }
+            if (waited >= 250) { unread_since = t; unread_frames += frames; return; }
+            struct timespec ts = { 0, 5 * 1000000 };
+            nanosleep(&ts, NULL); waited += 5;
+            continue;
+        }
         if (w < 0) {
             if (w == -EPIPE) underruns++;
             if (A.recover(pcm, (int)w, 1) < 0) { event("{\"ev\":\"error\",\"error\":\"snd_pcm_writei: %s\"}", A.strerror((int)w)); dropped += frames; return; }
             continue;
         }
+        if (unread_since) { event("{\"ev\":\"reading\",\"after_ms\":%lld}", now_ms() - unread_since); unread_since = 0; }
         played_frames += w; frames -= w; s += w * cur_ch;
     }
 }
@@ -208,7 +229,7 @@ int main(void) {
         if (pr == 0) {
             if (played_frames != ticked_played) {
                 ticked_played = played_frames; last_tick = now_ms();
-                event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"idle\":true}", played_frames, packets, bad, underruns, dropped);
+                event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s,\"idle\":true}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false");
             }
             continue;
         }
@@ -270,7 +291,7 @@ int main(void) {
         long long t = now_ms();
         if (t - last_tick >= 1000) {
             last_tick = t; ticked_played = played_frames;
-            event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld}", played_frames, packets, bad, underruns, dropped);
+            event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false");
         }
     }
 end:

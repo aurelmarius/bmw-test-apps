@@ -9,7 +9,8 @@
  *
  *   const p = createPlayer({ bin, env, log, onEvent });
  *   p.attach(readable)     the client's fd 4
- *   p.state()              { running, open, error, played, underruns, restarts }
+ *   p.state()              { running, open, error, played, underruns, unread, waiting, restarts }
+ *                          (waiting: nobody reads the sound device: source 287 not connected to the speakers)
  *   p.stop()
  */
 const cp = require('child_process');
@@ -20,7 +21,7 @@ const GROUPS = 'mgu_alsa,audio';
 function createPlayer(o) {
     const log = o.log || (() => {});
     let child = null, fmt = null, vol = null, lastAudio = 0, restarts = 0, lastStart = 0;
-    const st = { running: false, open: null, error: null, played: 0, underruns: 0, restarts: 0, ended: null };
+    const st = { running: false, open: null, error: null, played: 0, underruns: 0, unread: 0, waiting: false, restarts: 0, ended: null };
     let buf = Buffer.alloc(0);
 
     function start() {
@@ -47,7 +48,8 @@ function createPlayer(o) {
                 try { e = JSON.parse(line.slice(4)); } catch (x) { continue; }
                 if (e.ev === 'open') { st.open = e; log('ma-player: ' + (e.out === 'alsa' ? e.device : e.out) + ' ' + e.rate + ' Hz ' + e.channels + ' ch'); }
                 else if (e.ev === 'error') { st.error = e.error; log('ma-player: ' + e.error); }
-                else if (e.ev === 'tick') { st.played = e.played; st.underruns = e.underruns; }
+                else if (e.ev === 'tick') { st.played = e.played; st.underruns = e.underruns; st.unread = e.unread || 0; st.waiting = !!e.waiting; }
+                else if (e.ev === 'reading') log('ma-player: the speakers read the sound now (after ' + e.after_ms + ' ms)');
                 if (o.onEvent) o.onEvent(e);
             }
         });

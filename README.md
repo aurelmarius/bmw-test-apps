@@ -44,8 +44,11 @@ Details: [`native/aurelm-emby/README.md`](native/aurelm-emby/README.md), the pla
 ### 🎵 Music Assistant (`aurelm_music`) + Music Assistant service (`aurelm-music`)
 *Your [Music Assistant](https://github.com/music-assistant) server in the car, in the style of Spotify.*
 
-**Status:** step 1 (0.1.0), not yet run in a car. Built on what Media Probe found in the car (2026-11-13) and a probe
-against Music Assistant 2.10.9.
+**Status:** 0.1.1. First car run of 0.1.0 (2026-11-17, Music Assistant 2.10.12): sign-in, Home, covers, Now Playing,
+the cluster card and the steering wheel worked; no sound (the player waited for ever on a sound device nobody read
+yet) and the knob made Home jump back and forth. 0.1.1: the sound device is non-blocking, as Emby's player (sound
+not read yet is dropped, playing starts as soon as source 287 is connected), and the page moves only when the knob
+goes on to another row.
 
 - **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
   Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;
