@@ -200,6 +200,11 @@ test('sign in with user and password: a long-lived token kept, a Sendspin player
     assert.ok(/^aurelm-music-[0-9a-f]{12}$/.test(ma.hello.client_id));
     assert.strictEqual(ma.tokens.filter((t) => /^BMW iDrive [0-9a-f]{6}$/.test(t.name)).length, 1);
     await until(() => ma.state, 5000, 'client/state after the time sync');
+    // the timing it asks the server to schedule by (a mobile network): 5 s queued, 2 s to the first sound
+    assert.strictEqual(ma.state.available, true);
+    assert.strictEqual(ma.state.player.min_buffer_ms, 5000);
+    assert.strictEqual(ma.state.player.required_lead_time_ms, 2000);
+    assert.deepStrictEqual(ma.state.player.supported_commands, ['volume', 'mute']);
     assert.strictEqual(ma.state.player.state, 'synchronized');
     await until(() => svc.status().client.conn === 'connected', 3000, 'connected in the status');
     assert.strictEqual(svc.status().account.userName, 'Aurel Sandu');

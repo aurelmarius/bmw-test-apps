@@ -276,6 +276,18 @@ function createMa(o) {
             unpaired_access: { enabled: false },
         });
     }
+    /*
+     * The player's state, with the timing the server schedules by: the car is on a mobile network, so it asks for
+     * 5 s of sound queued at all times (min_buffer_ms; the default, 1 s, is what a live source such as Spotify
+     * through librespot gets: its stream stuttered and fell behind over the mobile network, while Apple Music,
+     * a file the server sends 30 s ahead, played clean) and 2 s from a start or a seek to the first sound
+     * (required_lead_time_ms). aiosendspin honours up to 30 s of each. `available` replaces the legacy `state`.
+     */
+    const MIN_BUFFER_MS = 5000, LEAD_TIME_MS = 2000;
+    function sendState() {
+        sendJson('client/state', { available: true, player: { state: 'synchronized', volume: st.volume, muted: st.muted, output_delay_ms: 0,
+            required_lead_time_ms: LEAD_TIME_MS, min_buffer_ms: MIN_BUFFER_MS, supported_commands: ['volume', 'mute'] } });
+    }
     function timeTick() { sendJson('client/time', { client_transmitted: nowUs() }); }
     function onTime(p) {
         const t4 = nowUs();
@@ -288,7 +300,7 @@ function createMa(o) {
         if (clockOff === null) clockOff = offset;
         if (!stateSent) {
             stateSent = true;
-            sendJson('client/state', { player: { state: 'synchronized', volume: st.volume, muted: st.muted } });
+            sendState();
         }
     }
     function mergeMeta(m) {
@@ -362,7 +374,7 @@ function createMa(o) {
             if (c.command === 'volume' && c.volume != null) st.volume = c.volume;
             if (c.command === 'mute' && c.mute != null) st.muted = !!c.mute;
             sink.volume(st.muted ? 0 : st.volume / 100);
-            sendJson('client/state', { player: { state: 'synchronized', volume: st.volume, muted: st.muted } });
+            sendState();
             emitStatus();
             return;
         }
