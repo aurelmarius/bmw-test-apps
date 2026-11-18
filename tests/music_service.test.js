@@ -94,6 +94,10 @@ function fakeMa() {
             case 'players/all': return json(200, S.clientId ? [{ player_id: 'upTEST', provider: 'universal_player', available: true, output_protocols: [{ output_protocol_id: S.clientId }] }] : []);
             case 'player_queues/play_media': setTimeout(stream, 50); return json(200, null);
             case 'player_queues/next': return json(200, null);
+            case 'player_queues/autoplay': if (S.oldServer) return json(500, { error: 'no such command' }); S.autoplay = !!a.autoplay_enabled; return json(200, null);
+            case 'player_queues/dont_stop_the_music': S.autoplay = !!a.dont_stop_the_music_enabled; return json(200, null);
+            case 'player_queues/get': return json(200, Object.assign({ current_index: 0, shuffle_enabled: false, repeat_mode: 'off' }, S.oldServer ? { dont_stop_the_music_enabled: !!S.autoplay } : { autoplay_enabled: !!S.autoplay }));
+            case 'player_queues/items': return json(200, []);
             case 'player_queues/seek': sendText({ type: 'stream/clear', payload: { roles: ['player'] } }); return json(200, null);
             default: return json(200, null);
             }
@@ -238,6 +242,17 @@ test('play: the sound at the server\'s times into the player, the metadata and t
     // next goes to the queue
     const n = await svc.command({ cmd: 'req', what: 'control', args: { cmd: 'next' } });
     assert.ok(n.ok && ma.calls.some((x) => /^player_queues\/next .*upTEST/.test(x)));
+    // Autoplay (infinite play): on, read back with the queue; on a server that only knows "don't stop the music", too
+    assert.ok((await svc.command({ cmd: 'req', what: 'control', args: { cmd: 'autoplay', arg: true } })).ok);
+    assert.ok(ma.calls.some((x) => /^player_queues\/autoplay .*"autoplay_enabled":true/.test(x)), ma.calls.join('\n'));
+    let q = await svc.command({ cmd: 'req', what: 'queue' });
+    assert.strictEqual(q.data.autoplay, true);
+    ma.oldServer = true;
+    assert.ok((await svc.command({ cmd: 'req', what: 'control', args: { cmd: 'autoplay', arg: false } })).ok);
+    assert.ok(ma.calls.some((x) => /^player_queues\/dont_stop_the_music .*"dont_stop_the_music_enabled":false/.test(x)));
+    q = await svc.command({ cmd: 'req', what: 'queue' });
+    assert.strictEqual(q.data.autoplay, false);
+    ma.oldServer = false;
     // a seek: the server clears the stream, the client drops what it still had
     ma.calls.length = 0;
     await svc.command({ cmd: 'req', what: 'play', args: { uri: 'library://album/230' } });

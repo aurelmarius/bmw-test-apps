@@ -55,7 +55,9 @@ clock), as Emby's player does, instead of as fast as the device takes it; chunks
 server's catch-up) are dropped, `stream/clear` with `from_timestamp` keeps what comes before it, and the same format
 again no longer reopens the device. **Test sound** on the Status page plays a 440 Hz tone (2 s), then the same tone
 decoded from Opus (3 s): both clean means the device and the decoder are right. The Status page counts the stream's
-chunks (late, over others, gaps) and the device's depth.
+chunks (late, over others, gaps) and the device's depth. 0.1.3: **Autoplay** (Music Assistant's infinite play: similar music added when
+the queue runs out) on the Playing page, as in the phone app (`player_queues/autoplay`, or `dont_stop_the_music` on an
+older server).
 
 - **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
   Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;
