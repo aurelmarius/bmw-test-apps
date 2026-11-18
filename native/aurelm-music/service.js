@@ -33,7 +33,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 const PAGE_PORT = 8495;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -268,6 +268,10 @@ function createService(opts) {
                 st.client = { conn: 'signed-out' };
                 images.clear();
             }
+        } else if (cmd === 'testsound') {
+            let opus = null;
+            try { opus = fs.readFileSync(path.join(__dirname, 'tone.opuspk')); } catch (e) { log('sound check: no tone.opuspk: ' + e.message); }
+            if (!player.testSound(opus)) return Object.assign(status(), { error: 'Music plays: pause it first' });
         } else if (cmd === 'exit') { setTimeout(() => stop(0), 100); }
         return status();
     }

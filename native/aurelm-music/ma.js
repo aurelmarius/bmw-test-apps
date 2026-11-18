@@ -29,12 +29,22 @@
 const { EventEmitter } = require('events');
 const ws = require('./ws');
 
-const LEAD_US = 400000;          // sound handed to the player this far before it is due (its ALSA buffer is 64 ms)
+const LEAD_US = 1000000;         // sound handed to the player this far before it is due: the player writes it on time
+                                 // (each chunk carries when it is due; 0.1.1 let the device set the pace)
 const LATE_US = 150000;          // sound later than this is dropped (after a stall)
 
 /** a monotonic clock in microseconds */
-const T0 = process.hrtime();
-function nowUs() { const d = process.hrtime(T0); return d[0] * 1e6 + Math.floor(d[1] / 1000); }
+// CLOCK_MONOTONIC (libuv's hrtime), as ma-player's: the times handed to the player are in this clock
+function nowUs() { const d = process.hrtime(); return d[0] * 1e6 + Math.floor(d[1] / 1000); }
+
+/** samples (48 kHz) in an Opus packet, from its TOC byte (RFC 6716 3.1); 0: not known */
+function opusSamples(p) {
+    if (!p || !p.length) return 0;
+    const toc = p[0], cfg = toc >> 3, c = toc & 3;
+    const size = cfg < 12 ? [480, 960, 1920, 2880][cfg & 3] : cfg < 16 ? [480, 960][cfg & 1] : [120, 240, 480, 960][cfg & 3];
+    const n = c === 0 ? 1 : c < 3 ? 2 : (p.length > 1 ? p[1] & 0x3f : 0);
+    return size * n;
+}
 
 /** "mass.sandu.casa", "https://mass.sandu.casa/", "http://192.168.0.241:8095" -> "https://mass.sandu.casa" ... */
 function serverUrl(s) {
@@ -223,7 +233,19 @@ function createMa(o) {
     let sock = null, retry = null, timeTimer = null, pumpTimer = null, stateSent = false;
     let offset = null;                 // server µs - our µs
     const samples = [];                // [delay, offset] of the last time exchanges
-    let queueA = [];                   // [{ t (our µs), data }]
+    let queueA = [];                   // [{ t (our µs), ts (server µs), end (server µs), data }], in time order
+    let lastEnd = 0;                   // server µs: where the last chunk queued ends (the server's clock: a new
+                                       // offset does not move it)
+    // counted since the stream started (the Status page): what came, what was dropped and why
+    const stats = { chunks: 0, overlaps: 0, gaps: 0, late: 0, handed: 0, since: 0 };
+    function chunkUs(data) {
+        const f = st.format;
+        if (!f) return 0;
+        if (f.codec === 'opus') return Math.round(opusSamples(data) * 1e6 / 48000);
+        if (f.codec === 'pcm') return Math.round(data.length / (f.channels * (f.bits / 8)) * 1e6 / f.rate);
+        return 0;
+    }
+    function resetQueue() { queueA = []; lastEnd = 0; }
     function setConn(c, err) { st.conn = c; st.error = err || null; emitStatus(); }
     let statusTimer = null;
     function emitStatus() { if (statusTimer) return; statusTimer = setTimeout(() => { statusTimer = null; ev.emit('status', status()); }, 100); }
@@ -298,7 +320,8 @@ function createMa(o) {
                     st.format = { key, codec: f.codec, rate: f.sample_rate, channels: f.channels, bits: f.bit_depth };
                     log('Sendspin: stream ' + key);
                 }
-                queueA = [];
+                resetQueue();
+                Object.assign(stats, { chunks: 0, overlaps: 0, gaps: 0, late: 0, handed: 0, since: Date.now() });
                 sink.format(st.format);
                 sink.volume(st.muted ? 0 : st.volume / 100);
             }
@@ -308,7 +331,14 @@ function createMa(o) {
         if (type === 'stream/clear' || type === 'stream/end') {
             const roles = p.roles;
             if (!roles || roles.indexOf('player') >= 0 || roles.indexOf('player@v1') >= 0) {
-                queueA = [];
+                if (type === 'stream/clear' && p.from_timestamp != null && offset !== null) {
+                    // only what is at or after from_timestamp goes; the rest plays on
+                    queueA = queueA.filter((c) => c.ts < p.from_timestamp);
+                    lastEnd = queueA.length ? queueA[queueA.length - 1].end : 0;
+                    emitStatus();
+                    return;
+                }
+                resetQueue();
                 sink.clear();
                 if (type === 'stream/end') { st.format = null; }
             }
@@ -332,9 +362,16 @@ function createMa(o) {
         const kind = b[0];
         if (kind === 4 && b.length >= 13) {
             if (offset === null || !st.format) return;
-            const t = readTs(b) - offset;
-            queueA.push({ t, data: b.slice(13) });
+            const ts = readTs(b), t = ts - offset, data = b.slice(13);
+            const end = ts + chunkUs(data);
+            stats.chunks++;
             st.lastAudioAt = Date.now();
+            // a chunk over sound already queued (a catch-up, a resend): the first one stays, so one encoder's packets
+            // go to the decoder in order
+            if (lastEnd && ts < lastEnd - 2000) { stats.overlaps++; return; }
+            if (lastEnd && ts > lastEnd + 2000) stats.gaps++;
+            queueA.push({ t, ts, end, data });
+            lastEnd = end;
             return;
         }
         if (kind >= 8 && kind <= 11) {
@@ -353,9 +390,10 @@ function createMa(o) {
         while (queueA.length && queueA[0].t - now <= LEAD_US) {
             const c = queueA.shift();
             if (now - c.t > LATE_US) { n++; continue; }
-            sink.audio(c.data);
+            sink.audio(c.data, c.t);
+            stats.handed++;
         }
-        if (n) log('Sendspin: dropped ' + n + ' late chunks');
+        if (n) { stats.late += n; log('Sendspin: dropped ' + n + ' late chunks'); }
         st.ahead = queueA.length ? Math.round((queueA[queueA.length - 1].t - now) / 1000) : 0;
     }
 
@@ -364,7 +402,7 @@ function createMa(o) {
         clearTimeout(retry);
         const u = account.server.replace(/^http/i, 'ws') + '/sendspin';
         setConn('connecting');
-        offset = null; samples.length = 0; stateSent = false;
+        offset = null; samples.length = 0; stateSent = false; resetQueue();
         const s = ws.connect({ url: u, connect: (a) => nx.socket(a), readyEvent: /^wss:/.test(u) ? 'secureConnect' : 'connect' });
         sock = s;
         s.on('open', () => { s.send(JSON.stringify({ type: 'auth', token: account.token })); });
@@ -398,14 +436,15 @@ function createMa(o) {
     function stop() {
         stopped = true;
         clearTimeout(retry); clearInterval(timeTimer); clearInterval(pumpTimer);
-        queueA = [];
+        resetQueue();
         if (sock) { const s = sock; sock = null; try { s.close(); } catch (e) { /* gone */ } }
         sink.clear();
         st.conn = 'signed-out'; st.format = null;
         emitStatus();
     }
     function status() {
-        return Object.assign({}, st, { meta: st.meta ? Object.assign({}, st.meta) : null, signedIn: !!account, server: account ? account.server : null });
+        return Object.assign({}, st, { meta: st.meta ? Object.assign({}, st.meta) : null, signedIn: !!account, server: account ? account.server : null,
+            stream: Object.assign({}, stats) });
     }
     async function signOut() {
         const a = account;
@@ -425,4 +464,4 @@ function createMa(o) {
         art: () => art, account: () => account });
 }
 
-module.exports = { createMa, serverUrl, slim, nowUs, LEAD_US };
+module.exports = { createMa, serverUrl, slim, nowUs, opusSamples, LEAD_US };
