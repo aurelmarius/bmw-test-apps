@@ -713,7 +713,19 @@ mgu.run({
                     control('autoplay', !on, 'Autoplay').then(() => { queue.at = 0; loadQueue(); });
                 }, 'autoplay', 20);
             }
-            if (c.ahead) cv.text(Math.round(c.ahead / 1000) + ' s buffered', x + (queue.autoplay != null ? 196 : 0), TOP + 422, 16, t.dim, { literal: true });
+            // Crossfade: Music Assistant blends one track into the next (its length is set in MA's queue settings)
+            let pillX = x + (queue.autoplay != null ? 192 : 0);
+            if (queue.crossfade != null) {
+                const on = !!queue.crossfade, ay = TOP + 396;
+                cv.roundRect(pillX, ay, 186, 40, 20, on ? withAlpha(GREEN, 0.3) : withAlpha('#ffffff', 0.08));
+                cv.text('CROSSFADE ' + (on ? 'ON' : 'OFF'), pillX + 93, ay + 26, 15, on ? GREEN : t.dim, { align: 'center', font: 'bold', literal: true });
+                if (touch) cv.target(pillX, ay, 186, 40, () => {
+                    queue.crossfade = !on; render();
+                    control('crossfade', !on, 'Crossfade').then(() => { queue.at = 0; loadQueue(); });
+                }, 'crossfade', 20);
+                pillX += 202;
+            }
+            if (c.ahead) cv.text(Math.round(c.ahead / 1000) + ' s buffered', pillX, TOP + 422, 16, t.dim, { literal: true });
             // up next
             const qx = 1110, qw = 466;
             cv.fillRect(qx - 20, TOP + 10, 1, 450, withAlpha('#ffffff', 0.12));
