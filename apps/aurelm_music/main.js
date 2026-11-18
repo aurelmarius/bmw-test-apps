@@ -111,7 +111,7 @@ function steps(s, x) {
         detail: sm.chunks + ' chunks in ' + Math.round((Date.now() - sm.since) / 1000) + ' s, ' + sm.handed + ' to the player, ' + sm.late + ' late, ' + sm.overlaps + ' over others, ' + sm.gaps + ' gaps' + (c.audioHeader ? ', ' + c.audioHeader + '-byte headers' : '') });
     const ca = x.carAudio || {};
     rows.push({ label: 'Speakers', state: ca.taken ? 'bad' : ca.error ? 'bad' : ca.connected ? 'ok' : 'off',
-        detail: ca.taken ? 'in use by another app (myAirPlay, TVH Player, Emby): stop it there' : ca.error ? ca.error : ca.connected ? 'on the main speakers (source 287)' : 'connected while music plays' });
+        detail: ca.yieldedTo ? 'given to ' + ca.yieldedTo + ' (it started after the music): press play to take them back' : ca.taken ? 'in use by another app (myAirPlay, TVH Player, Emby): stop it there' : ca.error ? ca.error : ca.connected ? 'on the main speakers (source 287)' : 'connected while music plays' });
     const cl = x.cluster;
     if (cl) rows.push({ label: 'Cluster', state: cl.state === 'shown' ? 'ok' : cl.state === 'error' ? 'bad' : cl.state === 'off' || cl.state === 'missing' ? 'off' : 'wait', detail: cl.detail });
     rows.push({ label: 'Wheel', state: x.wheel.seen ? 'ok' : 'off', detail: x.wheel.seen ? 'last: ' + x.wheel.last : x.wheel.on ? 'press skip on the steering wheel while music plays' : 'off in the settings' });
@@ -218,7 +218,16 @@ mgu.run({
         }
 
         /* ---------- the speakers and the cluster ---------- */
-        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
+        // the latest app to want the speakers gets them (car_audio.js): another one (TVH Player, Emby, myAirPlay) started
+        // after the music: it is paused, and the sound device let go at once
+        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Music Assistant', yieldStops: true,
+            onYield: (by) => {
+                log.info('music: ' + by + ' took the speakers: pausing');
+                soundUntil = 0;
+                req('control', { cmd: 'pause' }).catch(() => {});
+                ask('player-stop', {}, 5000);
+                say('Paused: ' + by + ' plays on the speakers now');
+            } });
         let soundUntil = 0;
         function sync() {
             const on = musicOn() || !!(st && st.player && st.player.running);

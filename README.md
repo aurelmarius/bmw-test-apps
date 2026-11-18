@@ -75,6 +75,11 @@ a live source (Spotify through librespot) only as far as the player asks, and th
 server's default, 1 s, too little over a mobile network. 0.1.6 tells the server, in its `client/state`, to keep
 5 s queued (`min_buffer_ms`) and to start 2 s after a play or a seek (`required_lead_time_ms`), with `available`
 in place of the legacy state: against aiosendspin 10.2.1 with a live source, 5 s ahead instead of 1 s.
+0.1.6 in the car: Apple Music and Spotify clean. 0.1.7 (with Emby 0.3.13 here, TVH Player 1.0.3 and myAirPlay
+1.0.1 in bmw-apps): **the speakers go to the app started last**. Music Assistant playing, TVH Player started: the
+channel came without its sound, since each app left another's 287 connection alone. Each app now keeps a claim in
+/tmp/aurelm-287 (when it started wanting the speakers); the one holding 287 that sees a newer claim lets go, and
+Music Assistant then pauses and lets the sound device go (play takes the speakers back).
 
 - **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
   Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;
