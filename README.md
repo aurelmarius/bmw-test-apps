@@ -80,6 +80,13 @@ in place of the legacy state: against aiosendspin 10.2.1 with a live source, 5 s
 channel came without its sound, since each app left another's 287 connection alone. Each app now keeps a claim in
 /tmp/aurelm-287 (when it started wanting the speakers); the one holding 287 that sees a newer claim lets go, and
 Music Assistant then pauses and lets the sound device go (play takes the speakers back).
+0.1.8: the app ended and started again when a finger scrolled Home. It drew a frame at once on each change (each
+move of the finger, each cover arriving) besides the kit's loop, which on the GPU already draws one each time the
+renderer can take it: frames the renderer had not asked for, many a second. On the GPU the app now only marks the
+change; the loop draws it. The pages follow the finger pixel by pixel (Home, Library, Search, an album's tracks), the
+progress bar can be dragged (the time follows the finger, the seek goes where it lifts; the kit's targets take a
+`drag` function), and the Status page shows the last crash read from the app's log. The cluster card: right 120 px,
+down 40 px by default, and the dark field behind it smaller and see-through.
 
 - **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
   Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;

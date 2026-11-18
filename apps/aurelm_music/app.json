@@ -2,7 +2,7 @@
   "id": "aurelm_music",
   "title": "Music Assistant",
   "description": "Your Music Assistant server in the car: the home page's recommendations with their covers, the library (playlists, albums, artists, radio, tracks), search, and what plays with its cover, its progress and what comes next. The music comes over Sendspin and plays on the car's speakers; skip on the steering wheel goes to the next or the previous track; the track shows on the instrument cluster. Sign in once from the phone (QR code). Needs the Music Assistant service.",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "vendor": "custom",
   "loggingId": "OA9U",
   "iconGlyph": "MA",
@@ -75,7 +75,8 @@
       "key": "clusterX",
       "label": "Cluster card: left / right",
       "type": "choice",
-      "default": "0",
+      "default": "120",
+      "reset": 1,
       "options": [
         ["-160", "left 160 px"], ["-120", "left 120 px"], ["-80", "left 80 px"], ["-40", "left 40 px"], ["0", "as placed"],
         ["40", "right 40 px"], ["80", "right 80 px"], ["120", "right 120 px"], ["160", "right 160 px"]
@@ -85,7 +86,8 @@
       "key": "clusterY",
       "label": "Cluster card: up / down",
       "type": "choice",
-      "default": "0",
+      "default": "40",
+      "reset": 1,
       "options": [
         ["-160", "up 160 px"], ["-120", "up 120 px"], ["-80", "up 80 px"], ["-40", "up 40 px"], ["0", "as placed"],
         ["40", "down 40 px"], ["80", "down 80 px"], ["120", "down 120 px"], ["160", "down 160 px"]

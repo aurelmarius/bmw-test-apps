@@ -16,6 +16,7 @@
  *
  * Talks to the service over /run/aurelm-music.sock (a JSON object per line).
  */
+const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const mgu = require('./kit/mgu');
@@ -122,6 +123,21 @@ mgu.run({
     async start(ctx) {
         const { ui, log } = ctx;
         let st = null, busy = null, polling = false, askedExit = false, toast = null;
+        let scrub = null;   // the progress bar under a finger: { f, at, down }
+        // the last time the app ended on an error (the kit writes it to <data>/aurelm_music.log): on the Status page,
+        // so a crash in the car can be read off the screen
+        const lastCrash = (() => {
+            if (!ctx.dataDir) return null;
+            let text = '';
+            ['aurelm_music.log.1', 'aurelm_music.log'].forEach((f) => { try { text += fs.readFileSync(path.join(ctx.dataDir, f), 'utf8'); } catch (e) { /* none */ } });
+            const at = text.lastIndexOf(' FATAL uncaught: ');
+            if (at < 0) return null;
+            const lineStart = text.lastIndexOf('\n', at) + 1;
+            const when = text.slice(lineStart, lineStart + 19).replace('T', ' ');
+            const lines = text.slice(at + 17).split('\n');
+            const where = lines.slice(1, 12).find((l) => /aurelm_music|kit\//.test(l)) || lines[1] || '';
+            return 'Last crash ' + when + ' UTC: ' + ascii(lines[0]).slice(0, 110) + ' ' + ascii(where.trim().replace(/^at /, '@ ').replace(/.*\/(source|aurelm_music)\//, '')).slice(0, 90);
+        })();
         let tab = Number(process.env.MUSIC_PREVIEW_TAB || T_HOME) || T_HOME, code = null, codeFor = null;
         const say = (text, bad) => { toast = { text, bad, at: Date.now() }; render(); };
 
@@ -279,7 +295,7 @@ mgu.run({
         const search = { q: '', results: null, loading: false, error: null, keys: true, first: 0 };
         function runSearch() {
             if (!search.q.trim()) return;
-            search.loading = true; search.keys = false; search.results = null; search.error = null; search.first = 0; render();
+            search.loading = true; search.keys = false; search.results = null; search.error = null; search.first = 0; search.frac = 0; render();
             req('search', { q: search.q.trim() }, 45000).then((r) => { search.results = r; search.loading = false; render(); },
                 (e) => { search.loading = false; search.error = e.message; render(); });
         }
@@ -306,28 +322,27 @@ mgu.run({
         }
 
         /* ---------- scrolling: a finger dragged on the page, the knob along the targets ---------- */
-        let acc = 0;
-        const STEP = { home: 226, grid: 196, list: 46 };
+        const STEP = { home: 226, grid: 196, list: 46, search: 212 };
         function scroller() {
             if (stack.length) { const e = stack[stack.length - 1]; return e.kind === 'row' ? { obj: e, step: STEP.grid, max: Math.max(0, Math.ceil(((e.row.items || []).length) / 9) - 2) } : { obj: e, step: STEP.list, max: Math.max(0, ((e.data && e.data.children) || []).length - 8) }; }
             if (tab === T_HOME) return { obj: home, step: STEP.home, max: Math.max(0, visibleRows().length - 2) };
             if (tab === T_LIB) { const l = libList(); return { obj: lib, step: STEP.grid, max: Math.max(0, Math.ceil(l.items.length / 9) - 2), more: () => moreLib(l, KINDS[lib.kind][0]) }; }
-            if (tab === T_SEARCH && search.results) return { obj: search, step: STEP.home, max: Math.max(0, search.results.length - 2) };
+            if (tab === T_SEARCH && search.results) return { obj: search, step: STEP.search, max: Math.max(0, search.results.length - 2) };
             return null;
         }
         if (ctx.onScroll) {
             ctx.onScroll((dy) => {
                 const s = scroller();
                 if (!s) return false;
+                // the page follows the finger pixel by pixel (0.1.7: a whole row at a time): `first` is the row at the
+                // top, `frac` how far it has gone up out of sight
                 const k = ctx.display && ctx.display.place && ctx.display.place.scale ? ctx.display.place.scale : 1;
-                acc += dy / k;
-                const steps2 = acc > 0 ? Math.floor(acc / s.step) : Math.ceil(acc / s.step);
-                if (!steps2) return true;
-                acc -= steps2 * s.step;
-                const to = Math.max(0, Math.min(s.max, s.obj.first + steps2));
-                if (to === s.obj.first) return false;
-                s.obj.first = to;
-                if (s.more && to >= s.max - 1) s.more();
+                const pos0 = s.obj.first * s.step + (s.obj.frac || 0);
+                const pos = Math.max(0, Math.min(s.max * s.step, pos0 + dy / k));
+                if (Math.abs(pos - pos0) < 0.5) return pos > 0 && pos < s.max * s.step;
+                s.obj.first = Math.floor(pos / s.step);
+                s.obj.frac = pos - s.obj.first * s.step;
+                if (s.more && s.obj.first >= s.max - 1) s.more();
                 render();
                 return true;
             });
@@ -335,7 +350,7 @@ mgu.run({
         const disp0 = ctx.display;
         if (disp0 && typeof disp0._ring === 'function') {
             const ring0 = disp0._ring.bind(disp0);
-            disp0._ring = () => ring0().filter((p) => !p.scroll);
+            disp0._ring = () => ring0().filter((p) => !p.scroll && p.k !== 'tgt:seekbar');   // the progress bar is for a finger
         }
         if (disp0 && typeof disp0._focus === 'function') {
             // the knob on the last line shown (or the first) moves the page a line on, so the next one is there to turn to
@@ -361,7 +376,7 @@ mgu.run({
             else if (slot >= shown) to = Math.min(s.max, line - shown + 2);
             else if ((prev == null || line > prev) && slot >= shown - 1) to = Math.min(s.max, line - shown + 2);
             else if (prev != null && line < prev && slot <= 0) to = Math.max(0, line - 1);
-            if (to !== s.obj.first) { s.obj.first = to; if (s.more && to >= s.max - 1) s.more(); render(); }
+            if (to !== s.obj.first || s.obj.frac) { s.obj.first = to; s.obj.frac = 0; if (s.more && to >= s.max - 1) s.more(); render(); }
         }
         /**
          * The knob's way to the rows not shown: a thin place on the top edge for the row above (its last cover)
@@ -369,10 +384,24 @@ mgu.run({
          * is on the real cover. They are the first and the last of the page's places, as the rows are in the ring.
          */
         function peek(cv, touch, key) { if (touch && key) cv.target(24, key.top ? TOP + 1 : H - 5, W - 48, 3, () => {}, key.k, 0); }
-        if (ctx.onTab) ctx.onTab((i) => { tab = i; stack.length = 0; acc = 0; if (i === T_PLAY) queue.at = 0; return render(); });
+        if (ctx.onTab) ctx.onTab((i) => { tab = i; stack.length = 0; if (i === T_PLAY) queue.at = 0; return render(); });
 
         /* ---------- drawing ---------- */
+        /*
+         * A frame now. On the GPU (the car) the kit's loop draws one each time the renderer can take it (ctx.loop
+         * below), so a change only waits for the next of those: 0.1.7 drew at once on each change too (each move of a
+         * finger scrolling, each cover arriving), frames the renderer had not asked for, many a second while
+         * scrolling (in the car: the app ended and started again). Without the GPU the loop runs twice a second:
+         * a change is drawn at once.
+         */
         function render() {
+            const d = ctx.display;
+            let gpu = false;
+            try { gpu = !!(d && d.active && d.active('MAIN')); } catch (e) { /* no display */ }
+            if (gpu) return undefined;
+            return draw();
+        }
+        function draw() {
             const t = ctx.theme();
             const cv = ctx.canvas(W, H).clear(t.bg);
             const c = client();
@@ -415,8 +444,8 @@ mgu.run({
             cv.quad([[x - 80, y + 8], [x - 70, y - 4], [x - 60, y + 8], [x - 60, y + 8]], up ? t.text : withAlpha('#ffffff', 0.2));
             cv.quad([[x - 34, y - 4], [x - 14, y - 4], [x - 24, y + 8], [x - 24, y + 8]], down ? t.text : withAlpha('#ffffff', 0.2));
             if (touch) {
-                cv.target(x - 92, y - 18, 44, 40, () => { s.obj.first = Math.max(0, s.obj.first - 1); render(); }, 'up', 8);
-                cv.target(x - 46, y - 18, 44, 40, () => { s.obj.first = Math.min(s.max, s.obj.first + 1); if (s.more && s.obj.first >= s.max - 1) s.more(); render(); }, 'down', 8);
+                cv.target(x - 92, y - 18, 44, 40, () => { s.obj.first = Math.max(0, s.obj.first - (s.obj.frac ? 0 : 1)); s.obj.frac = 0; render(); }, 'up', 8);
+                cv.target(x - 46, y - 18, 44, 40, () => { s.obj.first = Math.min(s.max, s.obj.first + 1); s.obj.frac = 0; if (s.more && s.obj.first >= s.max - 1) s.more(); render(); }, 'down', 8);
             }
         }
         function message(cv, t, text, sub) {
@@ -466,10 +495,14 @@ mgu.run({
             const rows = visibleRows();
             const s = { obj: home, max: Math.max(0, rows.length - 2) };
             home.first = Math.min(home.first, s.max);
+            if (home.first >= s.max) home.frac = 0;
             rows.slice(Math.max(0, home.first - 1), home.first + 3).forEach((r) => loadRow(r));
             const lastOf = (r) => (r && r.items ? (r.items.length > 9 ? 8 : Math.max(0, r.items.length - 1)) : 0);
             if (home.first > 0) peek(cv, touch, { top: true, k: 'h:' + (home.first - 1) + ':' + lastOf(rows[home.first - 1]) });
-            rows.slice(home.first, home.first + 2).forEach((r, k) => drawShelf(cv, t, touch, r.name, r.items, r.loading, TOP + 4 + k * 226, 'h:' + (home.first + k), () => { stack.push({ kind: 'row', row: r, first: 0 }); render(); }));
+            const off = home.frac || 0;
+            if (off && cv.clip) cv.clip(0, TOP, W, H - TOP);
+            rows.slice(home.first, home.first + (off ? 3 : 2)).forEach((r, k) => drawShelf(cv, t, touch, r.name, r.items, r.loading, TOP + 4 + k * 226 - off, 'h:' + (home.first + k), () => { stack.push({ kind: 'row', row: r, first: 0 }); render(); }));
+            if (off && cv.noclip) cv.noclip();
             if (home.first + 2 < rows.length) peek(cv, touch, { k: 'h:' + (home.first + 2) + ':0' });
             arrows(cv, t, touch, s, rows.length, W - 24, TOP + 22);
         }
@@ -493,13 +526,17 @@ mgu.run({
             const lines = Math.ceil(items.length / per);
             const s = { obj, max: Math.max(0, lines - 2), more };
             obj.first = Math.min(obj.first, s.max);
+            if (obj.first >= s.max) obj.frac = 0;
+            const off = obj.frac || 0;
             if (obj.first > 0) peek(cv, touch, { top: true, k: keyPrefix + ':' + (obj.first - 1) + ':' + (per - 1) });
+            if (off && cv.clip) cv.clip(0, y0 - 6, W, H - y0 + 6);
             let li = obj.first;
-            for (; li < Math.min(lines, obj.first + 3); li++) {
-                const y = y0 + (li - obj.first) * lineH;
-                if (y + size > H) break;
+            for (; li < Math.min(lines, obj.first + 4); li++) {
+                const y = y0 + (li - obj.first) * lineH - off;
+                if (y + (off ? 0 : size) > H) break;
                 items.slice(li * per, li * per + per).forEach((it, i) => tile(cv, t, touch, it, 24 + i * (size + gap), y, size, keyPrefix + ':' + li + ':' + i));
             }
+            if (off && cv.noclip) cv.noclip();
             if (li < lines) peek(cv, touch, { k: keyPrefix + ':' + li + ':0' });
             return s;
         }
@@ -509,7 +546,7 @@ mgu.run({
                 const x = 24 + i * 150, on = i === lib.kind;
                 cv.roundRect(x, TOP + 6, 136, 40, 20, on ? GREEN : withAlpha('#ffffff', 0.1));
                 cv.text(k[1], x + 68, TOP + 33, 18, on ? '#000000' : t.text, { align: 'center', font: 'bold', literal: true });
-                if (touch) cv.target(x, TOP + 6, 136, 40, () => { lib.kind = i; lib.first = 0; render(); }, 'kind' + i, 20);
+                if (touch) cv.target(x, TOP + 6, 136, 40, () => { lib.kind = i; lib.first = 0; lib.frac = 0; render(); }, 'kind' + i, 20);
             });
             const l = libList();
             if (!l.items.length) { message(cv, t, l.loading ? 'Loading...' : l.error ? 'Could not load: ' + l.error : 'Nothing here yet'); return; }
@@ -531,8 +568,12 @@ mgu.run({
             if (!r.length) return message(cv, t, 'Nothing found');
             const s = { obj: search, max: Math.max(0, r.length - 2) };
             search.first = Math.min(search.first, s.max);
+            if (search.first >= s.max) search.frac = 0;
+            const off = search.frac || 0;
             if (search.first > 0) { const pr = r[search.first - 1].items || []; peek(cv, touch, { top: true, k: 's:' + (search.first - 1) + ':' + (pr.length > 9 ? 8 : Math.max(0, pr.length - 1)) }); }
-            r.slice(search.first, search.first + 2).forEach((sec, k) => drawShelf(cv, t, touch, sec.name, sec.items, false, TOP + 60 + k * 212, 's:' + (search.first + k), () => { stack.push({ kind: 'row', row: { name: sec.name, items: sec.items }, first: 0 }); render(); }));
+            if (off && cv.clip) cv.clip(0, TOP + 58, W, H - TOP - 58);
+            r.slice(search.first, search.first + (off ? 3 : 2)).forEach((sec, k) => drawShelf(cv, t, touch, sec.name, sec.items, false, TOP + 60 + k * 212 - off, 's:' + (search.first + k), () => { stack.push({ kind: 'row', row: { name: sec.name, items: sec.items }, first: 0 }); render(); }));
+            if (off && cv.noclip) cv.noclip();
             if (search.first + 2 < r.length) peek(cv, touch, { k: 's:' + (search.first + 2) + ':0' });
             arrows(cv, t, touch, s, r.length, W - 24, TOP + 30);
         }
@@ -596,10 +637,13 @@ mgu.run({
             const rows = 9, rowH = 46, x0 = 320, w = 1256, y0 = TOP + 56;
             const s = { obj: e, max: Math.max(0, kids.length - rows + 1) };
             e.first = Math.min(e.first, s.max);
+            if (e.first >= s.max) e.frac = 0;
+            const off = e.frac || 0;
             arrows(cv, t, touch, s, kids.length, W - 24, TOP + 26);
             const playing = client().meta && client().meta.title;
-            kids.slice(e.first, e.first + rows).forEach((k, i) => {
-                const y = y0 + i * rowH, n = e.first + i, isOn = playing && ascii(k.name) === ascii(playing);
+            if (off && cv.clip) cv.clip(x0 - 8, y0, w + 8, rows * rowH);
+            kids.slice(e.first, e.first + rows + (off ? 1 : 0)).forEach((k, i) => {
+                const y = y0 + i * rowH - off, n = e.first + i, isOn = playing && ascii(k.name) === ascii(playing);
                 if (isOn) cv.fillRect(x0 - 8, y, w + 8, rowH - 4, withAlpha(GREEN, 0.18));
                 if (k.type === 'track' || k.type === 'podcast_episode') cv.text(String(n + 1), x0 + 24, y + 29, 18, isOn ? GREEN : t.dim, { align: 'right', literal: true });
                 else covers.draw(cv, k.img, x0, y + 2, 38, 4, k.name);
@@ -608,6 +652,7 @@ mgu.run({
                 if (k.duration) cv.text(mss(k.duration * 1000), x0 + w - 16, y + 29, 18, t.dim, { align: 'right', literal: true });
                 if (touch) cv.target(x0 - 8, y, w + 8, rowH - 4, () => (k.type === 'track' && it.type !== 'artist' ? play(it, k) : act(k)), 'li:' + n, 6);
             });
+            if (off && cv.noclip) cv.noclip();
         }
 
         /** Playing: the cover, what plays, the progress, the controls; the queue on the right */
@@ -627,12 +672,19 @@ mgu.run({
             const by = TOP + 230;
             cv.roundRect(x, by, w, 6, 3, withAlpha('#ffffff', 0.15));
             if (dur && pos != null) {
-                const f = Math.max(0, Math.min(1, pos / dur));
-                cv.roundRect(x, by, Math.max(6, w * f), 6, 3, c.playback === 'paused' ? t.dim : GREEN);
-                cv.circle(x + w * f, by + 3, 9, '#ffffff');
-                cv.text(mss(pos), x, by + 34, 18, t.dim, { literal: true });
+                // a finger on the bar: the bar and the time follow it, and the seek goes where it lifts
+                const sc = scrub && Date.now() - scrub.at < 4000 ? scrub : null;
+                const f = sc ? sc.f : Math.max(0, Math.min(1, pos / dur));
+                cv.roundRect(x, by, Math.max(6, w * f), 6, 3, c.playback === 'paused' && !sc ? t.dim : GREEN);
+                cv.circle(x + w * f, by + 3, sc && sc.down ? 14 : 9, '#ffffff');
+                cv.text(mss(sc ? f * dur : pos), x, by + 34, 18, sc ? t.text : t.dim, { literal: true });
                 cv.text(mss(dur), x + w, by + 34, 18, t.dim, { align: 'right', literal: true });
-                // a tap on the bar seeks there (ctx.onTap, below: a page tap that is on no target)
+                if (touch) cv.target(x - 16, by - 26, w + 32, 58, () => {}, 'seekbar', 0, (phase, px) => {
+                    const fx = Math.max(0, Math.min(1, (px - x) / w));
+                    scrub = { f: fx, at: Date.now(), down: phase !== 3 };
+                    if (phase === 3) control('seek', Math.round(fx * dur / 1000), 'Seek');
+                    render();
+                });
             } else if (c.playback === 'playing') cv.text('LIVE', x, by + 34, 18, GREEN, { font: 'bold', literal: true });
             // the controls
             const cy = TOP + 340, cx = x + w / 2;
@@ -705,18 +757,11 @@ mgu.run({
                     }, () => { busy = null; render(); });
                 }, 'testsound', 24);
             }
-            const n = Math.max(2, Math.floor((H - 10 - (TOP + 34 + rows.length * rowH)) / 20));
+            if (lastCrash) cv.text(clip(cv, lastCrash, 15, 1520, 'label'), 44, TOP + 34 + rows.length * rowH + 4, 15, RED, { literal: true });
+            const n = Math.max(2, Math.floor((H - 10 - (TOP + 34 + rows.length * rowH + (lastCrash ? 22 : 0))) / 20));
             (st && st.log ? st.log : []).slice(-n).forEach((l, i, a) => cv.text(clip(cv, l, 15, 1520, 'label'), 44, H - 12 - (a.length - 1 - i) * 20, 15, t.dim, { literal: true }));
         }
 
-        // a tap on the progress bar: seek where it was tapped
-        if (ctx.onTap) ctx.onTap((x) => {
-            if (tab !== T_PLAY || stack.length) return;
-            const c = client(), m = c.meta;
-            if (!m || !m.durationMs || x < 440 || x > 1060) return;
-            const f = Math.max(0, Math.min(1, (x - 450) / 600));
-            control('seek', Math.round(f * m.durationMs / 1000), 'Seek');
-        });
 
         // the status every second while the page shows; in the background every 2 s while music plays (the speakers,
         // the cluster)
@@ -731,7 +776,7 @@ mgu.run({
         await poll();
         if (process.env.MUSIC_PREVIEW_OPEN) openItem({ uri: process.env.MUSIC_PREVIEW_OPEN, name: '', sub: '', type: 'album' });
         if (process.env.MUSIC_PREVIEW_SEARCH) { search.q = process.env.MUSIC_PREVIEW_SEARCH; if (process.env.MUSIC_PREVIEW_SEARCH_RUN) runSearch(); }
-        ctx.loop('MAIN', 2, render);
+        ctx.loop('MAIN', 2, draw);
         render().then(() => log.info('Music Assistant first frame done')).catch((e) => log.warn('first render: ' + e));
     },
 });

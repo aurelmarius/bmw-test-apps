@@ -120,7 +120,9 @@ class Recorder {
      * key names it from frame to frame (the controller stays on it). Drawn by the caller; where the kit
      * runs the screen (display.js) it rings the one the controller is on.
      */
-    target(x, y, w, h, run, key, r) { this.targets.push({ x, y, w, h, run, key: String(key), r }); return this; }
+    /** a place the touch and the controller act on; drag (optional): fn(phase 1 down | 2 move | 3 up, x, y) gets a
+     *  finger put down on it until it lifts (a progress bar dragged), instead of a tap or the page's scrolling */
+    target(x, y, w, h, run, key, r, drag) { this.targets.push({ x, y, w, h, run, key: String(key), r, drag }); return this; }
 
     /* ---------- canvas.js API ---------- */
     /** mgu-render/1: video `id`'s newest frame fitted into x, y, w, h (aspect kept, centred). Not on the software path.
