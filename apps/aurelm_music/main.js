@@ -103,7 +103,12 @@ function steps(s, x) {
             : (c.conn || '?') + (c.error ? ': ' + c.error : '') + (c.reconnects ? ' (' + c.reconnects + ' reconnects)' : '') });
     rows.push({ label: 'Player', state: pl.error ? 'bad' : pl.waiting ? 'wait' : pl.running ? 'ok' : 'off',
         detail: pl.error ? pl.error : pl.running ? (pl.waiting ? 'the speakers do not read it yet: ' : 'playing into ') + (pl.open ? (pl.open.device || pl.open.out) : '?') + ', ' + Math.round((pl.played || 0) / 48000) + ' s played' +
-            (pl.unread ? ', ' + Math.round(pl.unread / 48000) + ' s not read' : '') + (pl.underruns ? ', ' + pl.underruns + ' underruns' : '') + (c.ahead ? ', ' + Math.round(c.ahead / 1000) + ' s buffered' : '') : 'starts with the music' });
+            (pl.unread ? ', ' + Math.round(pl.unread / 48000) + ' s not read' : '') + (pl.underruns ? ', ' + pl.underruns + ' underruns' : '') + (c.ahead ? ', ' + Math.round(c.ahead / 1000) + ' s buffered' : '') +
+            (pl.devMs != null ? ', device ' + pl.devMs + ' ms (max ' + (pl.devMaxMs || 0) + ')' : '') + (pl.late ? ', ' + pl.late + ' late' : '') + (pl.bad ? ', ' + pl.bad + ' bad packets' : '') +
+            (pl.test && Date.now() < pl.test.until ? ' - SOUND CHECK: a tone, then the same tone from Opus' : '') : 'starts with the music' });
+    const sm = c.stream;
+    if (sm && sm.chunks) rows.push({ label: 'Stream', state: sm.overlaps || sm.late ? 'wait' : 'ok',
+        detail: sm.chunks + ' chunks in ' + Math.round((Date.now() - sm.since) / 1000) + ' s, ' + sm.handed + ' to the player, ' + sm.late + ' late, ' + sm.overlaps + ' over others, ' + sm.gaps + ' gaps' });
     const ca = x.carAudio || {};
     rows.push({ label: 'Speakers', state: ca.taken ? 'bad' : ca.error ? 'bad' : ca.connected ? 'ok' : 'off',
         detail: ca.taken ? 'in use by another app (myAirPlay, TVH Player, Emby): stop it there' : ca.error ? ca.error : ca.connected ? 'on the main speakers (source 287)' : 'connected while music plays' });
@@ -666,6 +671,21 @@ mgu.run({
                 cv.text(clip(cv, r.detail || '', 20, textW, 'label'), 230, y, 20, r.state === 'off' ? t.dim : t.text, { literal: true });
             });
             if (page) return drawCode(cv, t, page, 1150, 60);
+            // the sound check: a tone, then the same tone decoded from Opus (the device and the decoder, without the stream)
+            if (cv.own && cv.target) {
+                const bx = W - 250, by = TOP + 14;
+                cv.roundRect(bx, by, 220, 48, 24, withAlpha('#ffffff', 0.12));
+                cv.text('Test sound', bx + 110, by + 32, 20, t.text, { align: 'center', font: 'bold', literal: true });
+                cv.target(bx, by, 220, 48, () => {
+                    busy = 'Sound check...'; render();
+                    ask('testsound', {}, 15000).then((r) => {
+                        busy = null;
+                        if (r && r.version) st = r;
+                        if (r && r.error) say(r.error, true); else say('A tone (2 s), then the same tone from Opus (3 s): both should sound clean');
+                        render();
+                    }, () => { busy = null; render(); });
+                }, 'testsound', 24);
+            }
             const n = Math.max(2, Math.floor((H - 10 - (TOP + 34 + rows.length * rowH)) / 20));
             (st && st.log ? st.log : []).slice(-n).forEach((l, i, a) => cv.text(clip(cv, l, 15, 1520, 'label'), 44, H - 12 - (a.length - 1 - i) * 20, 15, t.dim, { literal: true }));
         }

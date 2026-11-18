@@ -48,7 +48,7 @@ function createPlayer(o) {
                 try { e = JSON.parse(line.slice(4)); } catch (x) { continue; }
                 if (e.ev === 'open') { st.open = e; log('ma-player: ' + (e.out === 'alsa' ? e.device : e.out) + ' ' + e.rate + ' Hz ' + e.channels + ' ch'); }
                 else if (e.ev === 'error') { st.error = e.error; log('ma-player: ' + e.error); }
-                else if (e.ev === 'tick') { st.played = e.played; st.underruns = e.underruns; st.unread = e.unread || 0; st.waiting = !!e.waiting; }
+                else if (e.ev === 'tick') { st.played = e.played; st.underruns = e.underruns; st.unread = e.unread || 0; st.waiting = !!e.waiting; st.late = e.late || 0; st.bad = e.bad || 0; st.devMs = e.dev_ms; st.devMaxMs = e.dev_max_ms; }
                 else if (e.ev === 'reading') log('ma-player: the speakers read the sound now (after ' + e.after_ms + ' ms)');
                 if (o.onEvent) o.onEvent(e);
             }
@@ -69,7 +69,7 @@ function createPlayer(o) {
         // a player started now gets the format (and the volume) from start()
         if (type === 'F') { fmt = f; if (child) write(f); else start(); return; }
         if (type === 'V') { vol = f; write(f); return; }
-        if (type === 'A') {
+        if (type === 'A' || type === 'T') {
             lastAudio = Date.now();
             if (!child) start();
             write(f);
@@ -102,8 +102,48 @@ function createPlayer(o) {
         setTimeout(() => { try { c.kill('SIGTERM'); } catch (e) { /* gone */ } }, 1500);
         child = null; st.running = false; st.open = null;
     }
+    /**
+     * The sound check (Status, Test sound): 2 s of a 440 Hz tone as PCM, then 3 s of the same tone as Opus (the
+     * packets in tone.opuspk, from FFmpeg), through the player as the music goes: timed frames into the same device.
+     * A clean tone, then a clean tone: the device and the decoder are right, and a garbled song is the stream's.
+     * false: music plays (it would be cut).
+     */
+    function testSound(opus) {
+        if (st.test && Date.now() < st.test.until) return true;   // already playing it
+        if (lastAudio && Date.now() - lastAudio < 3000) return false;
+        const fr = (type, payload) => { const h = Buffer.alloc(5); h[0] = type.charCodeAt(0); h.writeUInt32BE(payload.length, 1); return Buffer.concat([h, payload]); };
+        const timed = (due, data) => { const d = Buffer.alloc(8); d.writeUInt32BE(Math.floor(due / 4294967296), 0); d.writeUInt32BE(due % 4294967296, 4); return fr('T', Buffer.concat([d, data])); };
+        const h = process.hrtime();
+        let due = h[0] * 1e6 + Math.floor(h[1] / 1000) + 2500000;   // 2.5 s: time for the app to connect the speakers
+        const frames = [fr('C', Buffer.alloc(0)), fr('F', Buffer.from('pcm 48000 2 16'))];
+        let ph = 0;
+        for (let i = 0; i < 100; i++) {   // 100 x 20 ms
+            const b = Buffer.alloc(960 * 4);
+            for (let k = 0; k < 960; k++) { const v = Math.round(8000 * Math.sin(ph)); ph += 2 * Math.PI * 440 / 48000; b.writeInt16LE(v, k * 4); b.writeInt16LE(v, k * 4 + 2); }
+            frames.push(timed(due, b)); due += 20000;
+        }
+        due += 500000;
+        if (opus && opus.length) {
+            frames.push(fr('F', Buffer.from('opus 48000 2 16')));
+            for (let i = 0, n = 0; i < opus.length && n < 150; n++) {
+                const len = opus.readUInt16BE(i), pk = opus.slice(i + 2, i + 2 + len);
+                i += 2 + len;
+                frames.push(timed(due, pk)); due += 20000;
+            }
+        }
+        if (fmt) frames.push(fmt);
+        st.test = { at: Date.now(), until: Date.now() + Math.ceil((due - (h[0] * 1e6 + Math.floor(h[1] / 1000))) / 1000) + 500 };
+        log('sound check: a 440 Hz tone as PCM (2 s), then as Opus (3 s), in 2.5 s');
+        lastAudio = Date.now();
+        start();
+        if (!child) { lastStart = 0; start(); }
+        frames.forEach((f) => write(f));
+        // the idle stop counts from the last sound: the check's end
+        lastAudio = st.test.until;
+        return true;
+    }
     function killSync() { if (child) { try { child.kill('SIGKILL'); } catch (e) { /* gone */ } child = null; } }
-    return { attach, stop, killSync, state: () => Object.assign({}, st, { audioAgo: lastAudio ? Date.now() - lastAudio : null }) };
+    return { attach, stop, killSync, testSound, state: () => Object.assign({}, st, { audioAgo: lastAudio ? Date.now() - lastAudio : null }) };
 }
 
 module.exports = { createPlayer, IDLE_MS };

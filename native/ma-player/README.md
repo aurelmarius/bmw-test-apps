@@ -8,7 +8,8 @@ as Emby's and TVH Player's players do.
 | Frame (u8 type, u32 BE length, payload) | Does |
 |---|---|
 | `F` `"<codec> <rate> <channels> <bits>"` | the format: `opus` (decoded at 48 kHz) or `pcm` (s16le); a new one reopens the output |
-| `A` | one Opus packet, or PCM bytes |
+| `A` | one Opus packet, or PCM bytes, written at once |
+| `T` | u64 BE due time (CLOCK_MONOTONIC µs), then an Opus packet or PCM: written no earlier than due minus what the device still holds (`snd_pcm_delay`), so the clock sets the pace, never only the device |
 | `V` `"<0..1>"` | the volume, applied to the samples |
 | `C` | drop what ALSA still holds (a seek, a new track, a pause) |
 | `Q` | quit |

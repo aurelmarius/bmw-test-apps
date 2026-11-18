@@ -7,6 +7,9 @@
  * the app routes to the main speakers (car_audio.js), as Emby's and TVH Player's players do.
  *
  * Frames on stdin: u8 type, u32 big-endian length, the payload:
+ *   'T' timed     u64 BE due (CLOCK_MONOTONIC us: when its first sample is to leave the speakers) + an Opus
+ *                 packet or PCM: written no earlier than due minus what the device still holds (as Emby's player:
+ *                 the pace is the clock's, never only the device's: smartx may take sound faster than it plays it)
  *   'F' format   "<codec> <rate> <channels> <bits>"   codec opus | pcm (s16le); a new format closes and reopens
  *   'A' audio    one Opus packet, or PCM bytes
  *   'V' volume   "<0..1>" (text)
@@ -64,6 +67,11 @@ static long long now_ms(void) {
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
 }
+static long long mono_us(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (long long)t.tv_sec * 1000000 + t.tv_nsec / 1000;
+}
 
 /* ---------------------------------------------------------------- the output: ALSA, a WAV file, or nothing */
 typedef struct snd_pcm snd_pcm_t;
@@ -72,6 +80,7 @@ static struct {
     int (*open)(snd_pcm_t **, const char *, int, int);
     int (*set_params)(snd_pcm_t *, int, int, unsigned, unsigned, int, unsigned);
     long (*writei)(snd_pcm_t *, const void *, unsigned long);
+    int (*delay)(snd_pcm_t *, long *);
     int (*recover)(snd_pcm_t *, int, int);
     int (*drop)(snd_pcm_t *);
     int (*prepare)(snd_pcm_t *);
@@ -88,13 +97,14 @@ static unsigned cur_rate, cur_ch;
 static long long played_frames, underruns, dropped, unread_frames;
 static long long unread_since;   /* ms: nobody has read the device since then (0: it reads) */
 static long long rearmed_at;
+static long long late_chunks, paced_ms_max;   /* written later than due + 100 ms; the deepest device seen */
 
 static int alsa_load(void) {
     if (A.lib) return 0;
     A.lib = dlopen("libasound.so.2", RTLD_NOW);
     if (!A.lib) { event("{\"ev\":\"error\",\"error\":\"dlopen libasound.so.2: %s\"}", dlerror()); return -1; }
 #define SYM(f, n) if (!(*(void **)&A.f = dlsym(A.lib, n))) { event("{\"ev\":\"error\",\"error\":\"libasound has no %s\"}", n); return -1; }
-    SYM(open, "snd_pcm_open") SYM(set_params, "snd_pcm_set_params") SYM(writei, "snd_pcm_writei")
+    SYM(open, "snd_pcm_open") SYM(set_params, "snd_pcm_set_params") SYM(writei, "snd_pcm_writei") SYM(delay, "snd_pcm_delay")
     SYM(recover, "snd_pcm_recover") SYM(drop, "snd_pcm_drop") SYM(prepare, "snd_pcm_prepare")
     SYM(close, "snd_pcm_close") SYM(strerror, "snd_strerror")
 #undef SYM
@@ -139,6 +149,7 @@ static int out_open(unsigned rate, unsigned ch) {
 }
 
 static float volume = 1.0f;
+static int out_ready;   /* the output is open at cur_rate / cur_ch */
 
 /* frames of interleaved s16 at the current format, the volume applied in place */
 static void out_write(int16_t *s, long frames) {
@@ -172,6 +183,29 @@ static void out_write(int16_t *s, long frames) {
         }
         if (unread_since) { event("{\"ev\":\"reading\",\"after_ms\":%lld}", now_ms() - unread_since); unread_since = 0; }
         played_frames += w; frames -= w; s += w * cur_ch;
+    }
+}
+
+/* microseconds of sound the device still holds (0: none, or not known) */
+static long long out_delay_us(void) {
+    if (out_kind != OUT_ALSA || !pcm || !A.delay) return 0;
+    long d = 0;
+    if (A.delay(pcm, &d) != 0 || d <= 0) return 0;
+    long long us = (long long)d * 1000000 / (cur_rate ? cur_rate : 48000);
+    return us > 500000 ? 500000 : us;
+}
+
+/* waits until a chunk due at `due` (monotonic us) goes into the device: due minus what the device still holds */
+static void pace(long long due) {
+    if (!due) return;
+    for (;;) {
+        long long now = mono_us(), dev = out_delay_us();
+        if (dev / 1000 > paced_ms_max) paced_ms_max = dev / 1000;
+        long long early = due - now - dev;
+        if (early <= 2000) { if (early < -100000) late_chunks++; return; }
+        if (early > 1000000) early = 1000000;
+        struct timespec ts = { (time_t)((early - 1000) / 1000000), (long)(((early - 1000) % 1000000) * 1000) };
+        nanosleep(&ts, NULL);
     }
 }
 
@@ -229,7 +263,7 @@ int main(void) {
         if (pr == 0) {
             if (played_frames != ticked_played) {
                 ticked_played = played_frames; last_tick = now_ms();
-                event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s,\"idle\":true}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false");
+                event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s,\"late\":%lld,\"dev_ms\":%lld,\"idle\":true}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false", late_chunks, out_delay_us() / 1000);
             }
             continue;
         }
@@ -251,28 +285,42 @@ int main(void) {
                 codec = 1; rate = 48000;
             } else if (!strcmp(c, "pcm") && bits == 16) codec = 2;
             else { event("{\"ev\":\"error\",\"error\":\"unsupported format %s/%u\"}", c, bits); codec = 0; break; }
-            if (out_open(rate, ch)) codec = 0;
+            /* the same format again (a stream/start in place): the device stays open, only the decoder is new */
+            if (out_ready && rate == cur_rate && ch == cur_ch) break;
+            if (out_open(rate, ch)) { codec = 0; out_ready = 0; } else out_ready = 1;
             break;
         }
         case 'A':
+        case 'T': {
             if (!codec) { dropped++; break; }
+            unsigned char *p = buf;
+            unsigned n_in = len;
+            long long due = 0;
+            if (h[0] == 'T') {
+                if (len < 8) { bad++; break; }
+                for (int i = 0; i < 8; i++) due = (due << 8) | buf[i];
+                p += 8; n_in -= 8;
+            }
             packets++;
             if (codec == 1) {
-                int n = opus_decode(dec, buf, (opus_int32)len, pcmbuf, MAX_PCM, 0);
+                int n = opus_decode(dec, p, (opus_int32)n_in, pcmbuf, MAX_PCM, 0);
                 if (n < 0) { bad++; break; }
+                pace(due);
                 out_write(pcmbuf, n);
             } else {
-                long frames = (long)(len / (2 * ch));
+                long frames = (long)(n_in / (2 * ch));
                 /* aligned copy: the frame buffer is bytes */
                 long done = 0;
+                pace(due);
                 while (done < frames) {
                     long n = frames - done > MAX_PCM ? MAX_PCM : frames - done;
-                    memcpy(pcmbuf, buf + done * 2 * ch, (size_t)(n * 2 * ch));
+                    memcpy(pcmbuf, p + done * 2 * ch, (size_t)(n * 2 * ch));
                     out_write(pcmbuf, n);
                     done += n;
                 }
             }
             break;
+        }
         case 'V': {
             buf[len < MAX_FRAME ? len : MAX_FRAME - 1] = 0;
             float v = (float)atof((char *)buf);
@@ -291,7 +339,7 @@ int main(void) {
         long long t = now_ms();
         if (t - last_tick >= 1000) {
             last_tick = t; ticked_played = played_frames;
-            event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false");
+            event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s,\"late\":%lld,\"dev_ms\":%lld,\"dev_max_ms\":%lld}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false", late_chunks, out_delay_us() / 1000, paced_ms_max);
         }
     }
 end:

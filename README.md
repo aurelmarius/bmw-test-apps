@@ -49,6 +49,13 @@ the cluster card and the steering wheel worked; no sound (the player waited for 
 yet) and the knob made Home jump back and forth. 0.1.1: the sound device is non-blocking, as Emby's player (sound
 not read yet is dropped, playing starts as soon as source 287 is connected), and the page moves only when the knob
 goes on to another row.
+0.1.1 in the car (2026-11-18): the sound reached the speakers, but as a garbled, metallic noise. 0.1.2: the player
+writes each chunk no earlier than it is due (the service hands it over 1 s ahead, with its time on the monotonic
+clock), as Emby's player does, instead of as fast as the device takes it; chunks over sound already queued (a
+server's catch-up) are dropped, `stream/clear` with `from_timestamp` keeps what comes before it, and the same format
+again no longer reopens the device. **Test sound** on the Status page plays a 440 Hz tone (2 s), then the same tone
+decoded from Opus (3 s): both clean means the device and the decoder are right. The Status page counts the stream's
+chunks (late, over others, gaps) and the device's depth.
 
 - **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
   Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;

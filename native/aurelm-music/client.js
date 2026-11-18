@@ -36,7 +36,14 @@ function frame(type, payload) {
 }
 const sink = {
     format(f) { frame('F', f.codec + ' ' + f.rate + ' ' + f.channels + ' ' + f.bits); },
-    audio(buf) { frame('A', buf); },
+    // timed: when its first sample is due, in CLOCK_MONOTONIC µs (ma-player writes it then, not before)
+    audio(buf, due) {
+        if (due == null) return frame('A', buf);
+        due = Math.max(0, Math.round(due));
+        const d = Buffer.alloc(8);
+        d.writeUInt32BE(Math.floor(due / 4294967296), 0); d.writeUInt32BE(due % 4294967296, 4);
+        frame('T', Buffer.concat([d, buf]));
+    },
     clear() { frame('C', ''); },
     volume(v) { frame('V', String(Math.max(0, Math.min(1, v)).toFixed(3))); },
 };
