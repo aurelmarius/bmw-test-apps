@@ -119,6 +119,12 @@ def main():
                 continue  # from mgu-store's (or Robert's) own sources
             if rid not in ids:
                 sys.exit(f"{c['id']} requires {rid}, which is not in packages/")
+            # an app requires its tool at the version in this release: the Store takes "requires" as the least
+            # version, so an app updated with an older one there leaves a changed service behind (Music Assistant
+            # 0.1.1-0.1.4 required aurelm-music 0.1.0: each service update was a second install by hand)
+            if c.get('kind') == 'app' and ids[rid].get('kind') == 'tool' and rv != ids[rid]['version']:
+                print(f"{c['id']}: requires {rid} {rv} -> {ids[rid]['version']} (the version in this release)")
+                c['requires'][rid] = ids[rid]['version']
 
     # 1. Write mgu-store.json (for car Store metadata)
     store_meta_path = os.path.join(ROOT, 'mgu-store.json')
