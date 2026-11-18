@@ -42,7 +42,10 @@ function wsFrame(op, payload) {
     const b = Buffer.alloc(10); b[0] = 0x80 | op; b[1] = 127; b.writeUInt32BE(0, 2); b.writeUInt32BE(p.length, 6);
     return Buffer.concat([b, p]);
 }
-function fakeMa() {
+function fakeMa(opts) {
+    // an audio chunk's header: 9 bytes (type, timestamp) as Music Assistant 2.10.12's aiosendspin sends it; 13 with the
+    // newer spec's send_ahead
+    const HDR = (opts && opts.hdr) || 9;
     const S = { tokens: [{ token_id: 't-ha', name: 'Home Assistant' }], calls: [], hello: null, sock: null, clientId: null, revoked: [], streaming: false };
     const T0 = Date.now();
     const serverUs = () => (Date.now() - T0) * 1000 + 5e9;   // a clock of its own, far from the client's
@@ -58,9 +61,9 @@ function fakeMa() {
         // all of it at once (as Music Assistant sends 30 s ahead), each packet's time 20 ms after the last
         const t0 = serverUs() + 300000;
         packets.forEach((p, i) => {
-            const h = Buffer.alloc(13); h[0] = 4;
+            const h = Buffer.alloc(HDR); h[0] = 4;
             const ts = t0 + i * 20000;
-            h.writeInt32BE(Math.floor(ts / 4294967296), 1); h.writeUInt32BE(ts % 4294967296, 5); h.writeUInt32BE(30000000, 9);
+            h.writeInt32BE(Math.floor(ts / 4294967296), 1); h.writeUInt32BE(ts % 4294967296, 5); if (HDR === 13) h.writeUInt32BE(30000000, 9);
             sendBin(Buffer.concat([h, p]));
         });
     }
@@ -138,6 +141,17 @@ function fakeMa() {
 
 /* ---------------------------------------------------------------- the service under test */
 let pagePort = 18495;
+// the WAV the player wrote: the share of its energy at 440 Hz (the fixture's tone), over its loud part
+function toneShare(file) {
+    const b = fs.readFileSync(file), d = b.slice(44), n = Math.floor(d.length / 4);
+    const x = []; for (let i = 0; i < n; i++) x.push(d.readInt16LE(i * 4));
+    const s0 = x.findIndex((v) => Math.abs(v) > 500);
+    if (s0 < 0) return 0;
+    const seg = x.slice(s0 + 4800, s0 + 4800 + 9600);
+    let total = 0, re = 0, im = 0;
+    seg.forEach((v, i) => { total += v * v; const a = 2 * Math.PI * 440 * i / 48000; re += v * Math.cos(a); im += v * Math.sin(a); });
+    return total ? (re * re + im * im) * 2 / seg.length / total : 0;
+}
 function setup() {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'music-'));
     // the player drops root to nobody: its WAV goes where nobody can write
@@ -263,10 +277,31 @@ test('play: the sound at the server\'s times into the player, the metadata and t
     svc.stop();
     ma.close();
     await wait(300);
-    // the WAV: 48 kHz stereo, the first stream whole (3 s), from real Opus
+    // the WAV: 48 kHz stereo, the first stream whole (3 s), from real Opus: a clean 440 Hz tone
     const h = fs.readFileSync(wav).slice(0, 44);
     assert.strictEqual(h.toString('latin1', 0, 4), 'RIFF');
     assert.strictEqual(h.readUInt32LE(24), 48000);
+    const share = toneShare(wav);
+    assert.ok(share > 0.9, 'a clean tone: ' + share.toFixed(3) + ' of the energy at 440 Hz');
+    assert.strictEqual(svc.status().client.audioHeader, 9);
+    try { fs.rmdirSync(shm); } catch (e) { /* the wav */ }
+});
+
+test('play from a server with the newer 13-byte audio header: found, the tone clean', async () => {
+    if (!fs.existsSync(PLAYER)) { console.log('     (skipped: build native/ma-player first)'); return; }
+    const ma = await fakeMa({ hdr: 13 });
+    const { svc, wav, shm } = setup();
+    svc.start();
+    await signIn(svc, ma, { token: 'pasted-token' });
+    await until(() => svc.status().client.conn === 'connected' && ma.state, 5000, 'connected');
+    assert.ok((await svc.command({ cmd: 'req', what: 'play', args: { uri: 'library://album/230' } })).ok);
+    await until(() => svc.status().player.played >= 144000 - 2000, 9000, 'all 3 s played');
+    assert.strictEqual(svc.status().client.audioHeader, 13);
+    svc.stop();
+    ma.close();
+    await wait(300);
+    const share = toneShare(wav);
+    assert.ok(share > 0.9, 'a clean tone: ' + share.toFixed(3));
     try { fs.rmdirSync(shm); } catch (e) { /* the wav */ }
 });
 

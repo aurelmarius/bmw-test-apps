@@ -251,6 +251,7 @@ function createMa(o) {
         return 0;
     }
     function resetQueue() { queueA = []; lastEnd = 0; }
+    function resetHeader() { hdr = null; hdrWait = []; }
     function setConn(c, err) { st.conn = c; st.error = err || null; emitStatus(); }
     let statusTimer = null;
     function emitStatus() { if (statusTimer) return; statusTimer = setTimeout(() => { statusTimer = null; ev.emit('status', status()); }, 100); }
@@ -322,6 +323,7 @@ function createMa(o) {
                 const f = p.player;
                 const key = [f.codec, f.sample_rate, f.channels, f.bit_depth].join(' ');
                 if (!st.format || st.format.key !== key) {
+                    if (st.format && st.format.codec !== f.codec) resetHeader();
                     st.format = { key, codec: f.codec, rate: f.sample_rate, channels: f.channels, bits: f.bit_depth };
                     log('Sendspin: stream ' + key);
                 }
@@ -343,7 +345,7 @@ function createMa(o) {
                     emitStatus();
                     return;
                 }
-                resetQueue();
+                resetQueue(); hdrWait = [];
                 sink.clear();
                 if (type === 'stream/end') { st.format = null; }
             }
@@ -363,11 +365,67 @@ function createMa(o) {
         if (type === 'server/error') { log('Sendspin: server error ' + JSON.stringify(p).slice(0, 200)); return; }
     }
     function readTs(b) { return b.readInt32BE(1) * 4294967296 + b.readUInt32BE(5); }
+    /*
+     * An audio chunk's header: type (1) and timestamp (8), then the audio, as aiosendspin 10.2.1 (Music Assistant
+     * 2.10.12) sends it to this client; the newer spec adds send_ahead (4 more bytes, 13 in all). 0.1.0-0.1.3 cut 13
+     * and fed the decoder packets without their first 4 bytes: the metallic noise in the car. The length is found
+     * on the first two chunks of a stream: the one where the audio's length (an Opus packet's TOC, or PCM bytes) is
+     * the step between their timestamps, the first byte the same Opus TOC, and bytes 9-12 a plausible send_ahead
+     * (under 10 min) in both: 13; else 9. For PCM: the one whose audio lasts exactly that step.
+     */
+    let hdr = null, hdrWait = [];
+    function headerOf(a, b) {
+        const f = st.format || {}, dt = readTs(b) - readTs(a);
+        // bytes 9-12 as send_ahead: a lead under 10 min in both (an Opus TOC there, 0xfc for music, is far more)
+        const lead = (x) => x.length > 13 ? x.readUInt32BE(9) : Infinity;
+        const plausible = lead(a) < 600e6 && lead(b) < 600e6;
+        if (f.codec === 'opus') {
+            const fits = (h) => {
+                if (a.length <= h || b.length <= h) return false;
+                const d = opusSamples(a.slice(h)) * 1e6 / 48000;
+                return !!d && Math.abs(d - dt) <= 2000 && a[h] === b[h];
+            };
+            // 13 first: with 13, byte 9 (send_ahead's top byte, often 0x00 or 0x01) can pass for a TOC too
+            if (plausible && fits(13)) return 13;
+            return 9;
+        }
+        // PCM: the header whose audio lasts exactly the step between the timestamps (4 bytes are one frame, ~21 µs)
+        const bpf = (f.channels || 2) * ((f.bits || 16) / 8), rate = f.rate || 48000;
+        for (const h of [9, 13]) {
+            const bytes = a.length - h;
+            if (bytes > 0 && bytes % bpf === 0 && Math.abs(bytes / bpf * 1e6 / rate - dt) <= 5) return h;
+        }
+        return plausible ? 13 : 9;
+    }
     function onBinary(b) {
         const kind = b[0];
-        if (kind === 4 && b.length >= 13) {
+        if (kind === 4 && b.length >= 9) {
             if (offset === null || !st.format) return;
-            const ts = readTs(b), t = ts - offset, data = b.slice(13);
+            if (hdr === null) {
+                hdrWait.push(b);
+                if (hdrWait.length < 2) return;
+                hdr = headerOf(hdrWait[0], hdrWait[1]);
+                st.audioHeader = hdr;
+                log('Sendspin: audio chunks have a ' + hdr + '-byte header');
+                const w = hdrWait; hdrWait = [];
+                w.forEach(audioChunk);
+                return;
+            }
+            return audioChunk(b);
+        }
+        if (kind >= 8 && kind <= 11) {
+            if (kind !== 8) return;   // channel 0: the album's
+            const png = b.slice(9);
+            art = png.length > 8 ? Buffer.from(png) : null;
+            st.artVer++;
+            o.onArt && o.onArt(art, st.artVer);
+            emitStatus();
+        }
+    }
+    function audioChunk(b) {
+        {
+            if (b.length <= hdr) return;
+            const ts = readTs(b), t = ts - offset, data = b.slice(hdr);
             const end = ts + chunkUs(data);
             stats.chunks++;
             st.lastAudioAt = Date.now();
@@ -377,15 +435,6 @@ function createMa(o) {
             if (lastEnd && ts > lastEnd + 2000) stats.gaps++;
             queueA.push({ t, ts, end, data });
             lastEnd = end;
-            return;
-        }
-        if (kind >= 8 && kind <= 11) {
-            if (kind !== 8) return;   // channel 0: the album's
-            const png = b.slice(9);
-            art = png.length > 8 ? Buffer.from(png) : null;
-            st.artVer++;
-            o.onArt && o.onArt(art, st.artVer);
-            emitStatus();
         }
     }
     function pump() {
@@ -407,7 +456,7 @@ function createMa(o) {
         clearTimeout(retry);
         const u = account.server.replace(/^http/i, 'ws') + '/sendspin';
         setConn('connecting');
-        offset = null; samples.length = 0; stateSent = false; resetQueue();
+        offset = null; samples.length = 0; stateSent = false; resetQueue(); resetHeader();
         const s = ws.connect({ url: u, connect: (a) => nx.socket(a), readyEvent: /^wss:/.test(u) ? 'secureConnect' : 'connect' });
         sock = s;
         s.on('open', () => { s.send(JSON.stringify({ type: 'auth', token: account.token })); });

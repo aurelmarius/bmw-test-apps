@@ -108,7 +108,7 @@ function steps(s, x) {
             (pl.test && Date.now() < pl.test.until ? ' - SOUND CHECK: a tone, then the same tone from Opus' : '') : 'starts with the music' });
     const sm = c.stream;
     if (sm && sm.chunks) rows.push({ label: 'Stream', state: sm.overlaps || sm.late ? 'wait' : 'ok',
-        detail: sm.chunks + ' chunks in ' + Math.round((Date.now() - sm.since) / 1000) + ' s, ' + sm.handed + ' to the player, ' + sm.late + ' late, ' + sm.overlaps + ' over others, ' + sm.gaps + ' gaps' });
+        detail: sm.chunks + ' chunks in ' + Math.round((Date.now() - sm.since) / 1000) + ' s, ' + sm.handed + ' to the player, ' + sm.late + ' late, ' + sm.overlaps + ' over others, ' + sm.gaps + ' gaps' + (c.audioHeader ? ', ' + c.audioHeader + '-byte headers' : '') });
     const ca = x.carAudio || {};
     rows.push({ label: 'Speakers', state: ca.taken ? 'bad' : ca.error ? 'bad' : ca.connected ? 'ok' : 'off',
         detail: ca.taken ? 'in use by another app (myAirPlay, TVH Player, Emby): stop it there' : ca.error ? ca.error : ca.connected ? 'on the main speakers (source 287)' : 'connected while music plays' });
