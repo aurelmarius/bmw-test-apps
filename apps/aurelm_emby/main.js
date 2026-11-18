@@ -270,7 +270,7 @@ mgu.run({
                 else if (disp) { disp.lastWords = null; if (disp._repaint) disp._repaint(); }
             } catch (e) { log.warn('emby page touch: ' + e); }
         }
-        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null });
+        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Emby' });
         // setting "Picture only while parked" (on by default): off, the picture stays while driving too (the
         // passengers' choice, e.g. cartoons for the children; the driver sees the centre screen)
         const parkedOnly = () => ctx.settings.get('parkedOnly') !== false;

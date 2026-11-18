@@ -33,7 +33,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.1.6';
+const VERSION = '0.1.7';
 const PAGE_PORT = 8495;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -268,6 +268,9 @@ function createService(opts) {
                 st.client = { conn: 'signed-out' };
                 images.clear();
             }
+        } else if (cmd === 'player-stop') {
+            // another app took the speakers: the sound device let go now, not after 30 s without sound
+            player.stop();
         } else if (cmd === 'testsound') {
             let opus = null;
             try { opus = fs.readFileSync(path.join(__dirname, 'tone.opuspk')); } catch (e) { log('sound check: no tone.opuspk: ' + e.message); }
