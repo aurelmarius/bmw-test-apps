@@ -27,7 +27,7 @@
     }
   },
   "requires": {
-    "aurelm-music": "0.1.0"
+    "aurelm-music": "0.1.4"
   },
   "screens": [
     {
