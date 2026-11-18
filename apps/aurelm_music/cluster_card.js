@@ -24,8 +24,9 @@ const LOGO = { w: 150, h: 150 };        // the cover, as BMW's widget has it (sq
 const MIN_MS = 5000;
 
 // as BMW's widget: no frame, the lines centred under the cover, white and a softer white; behind them a dark field
-// that fades out to the dial (an ellipse, opaque inside FADE_IN of its radius: it hides the widget underneath)
-const FIELD = [10, 12, 16], FADE_IN = 0.7;
+// that fades out to the dial (an ellipse, darkest inside FADE_IN of its radius). 0.1.8: smaller (SCALE of the card)
+// and see-through (ALPHA at most), so it takes less of the map beside it
+const FIELD = [10, 12, 16], FADE_IN = 0.55, SCALE = 0.82, ALPHA = 0.8;
 const TEXT = [255, 255, 255, 255], SOFT = [255, 255, 255, 205], DIM = [255, 255, 255, 150], BLUE = [64, 160, 235, 255], TRACK = [255, 255, 255, 46];
 
 /** the kit's fonts have ASCII only */
@@ -50,14 +51,14 @@ function clip(cv, s, size, w, font) {
 
 /** the dark field: opaque in the middle, smoothly transparent at the ellipse's edge */
 function field(cv) {
-    const rx = CARD.w / 2 - 2, ry = CARD.h / 2 - 2, cx = CARD.w / 2, cy = CARD.h / 2, d = cv.d;
+    const rx = (CARD.w / 2 - 2) * SCALE, ry = (CARD.h / 2 - 2) * SCALE, cx = CARD.w / 2, cy = CARD.h / 2, d = cv.d;
     for (let y = 0; y < CARD.h; y++) {
         for (let x = 0; x < CARD.w; x++) {
             const ex = (x + 0.5 - cx) / rx, ey = (y + 0.5 - cy) / ry, r = Math.sqrt(ex * ex + ey * ey);
             if (r >= 1) continue;
             const t = r <= FADE_IN ? 1 : 1 - (r - FADE_IN) / (1 - FADE_IN), a = t * t * (3 - 2 * t);
             const i = (y * CARD.w + x) * 4;
-            d[i] = FIELD[0]; d[i + 1] = FIELD[1]; d[i + 2] = FIELD[2]; d[i + 3] = Math.round(a * 255);
+            d[i] = FIELD[0]; d[i + 1] = FIELD[1]; d[i + 2] = FIELD[2]; d[i + 3] = Math.round(a * ALPHA * 255);
         }
     }
 }
