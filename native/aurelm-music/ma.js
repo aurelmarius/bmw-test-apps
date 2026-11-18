@@ -210,6 +210,9 @@ function createMa(o) {
         // only know it as "don't stop the music"
         case 'autoplay': return api('player_queues/autoplay', { queue_id: q, autoplay_enabled: !!arg })
             .catch(() => api('player_queues/dont_stop_the_music', { queue_id: q, dont_stop_the_music_enabled: !!arg }));
+        // Crossfade: Music Assistant mixes the end of a track into the next one in the stream it sends (Sendspin
+        // always plays in flow mode), so the car needs nothing for it
+        case 'crossfade': return api('player_queues/crossfade', { queue_id: q, crossfade_enabled: !!arg });
         case 'volume': return api('players/cmd/volume_set', { player_id: q, volume_level: Math.max(0, Math.min(100, Math.round(Number(arg) || 0))) });
         case 'play_index': return api('player_queues/play_index', { queue_id: q, index: arg });
         default: throw new Error('no command ' + cmd);
@@ -221,6 +224,7 @@ function createMa(o) {
         const cur = qs && qs.current_index != null ? qs.current_index : -1;
         const auto = qs ? (qs.autoplay_enabled != null ? qs.autoplay_enabled : qs.dont_stop_the_music_enabled) : null;
         return { index: cur, shuffle: qs && qs.shuffle_enabled, repeat: qs && qs.repeat_mode, autoplay: auto == null ? null : !!auto,
+            crossfade: qs && qs.crossfade_enabled != null ? !!qs.crossfade_enabled : null,
             items: (items || []).map((it, i) => Object.assign(slim(it.media_item || it) || {}, { name: it.name || (it.media_item && it.media_item.name) || '', queueItemId: it.queue_item_id, index: i })) };
     }
 
