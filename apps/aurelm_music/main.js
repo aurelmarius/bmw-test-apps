@@ -26,6 +26,7 @@ const G = require('./kit/gauges');
 const { setImage } = require('./kit/record');
 const qrcode = require('./qrcode');
 const { createCarAudio } = require('./car_audio');
+const { createCarVolume } = require('./car_volume');
 const { createClusterCard, ascii } = require('./cluster_card');
 const { createCovers } = require('./covers');
 
@@ -113,6 +114,10 @@ function steps(s, x) {
     const ca = x.carAudio || {};
     rows.push({ label: 'Speakers', state: ca.taken ? 'bad' : ca.error ? 'bad' : ca.connected ? 'ok' : 'off',
         detail: ca.yieldedTo ? 'given to ' + ca.yieldedTo + ' (it started after the music): press play to take them back' : ca.taken ? 'in use by another app (myAirPlay, TVH Player, Emby): stop it there' : ca.error ? ca.error : ca.connected ? 'on the main speakers (source 287)' : 'connected while music plays' });
+    const vo = x.volume;
+    if (vo) rows.push({ label: 'Volume', state: vo.error ? 'bad' : vo.changes ? 'ok' : vo.ready ? 'wait' : 'off',
+        detail: vo.error ? vo.error : (vo.volume != null ? vo.volume + ' of ' + vo.max + (vo.muted ? ', muted' : '') : 'not known yet') +
+            (vo.changes ? ', ' + vo.changes + ' changes seen' : vo.ready ? ': turn the volume knob' : '') + (vo.last ? ' - ' + vo.last : '') + (vo.other ? ' (other: ' + vo.other + ')' : '') });
     const cl = x.cluster;
     if (cl) rows.push({ label: 'Cluster', state: cl.state === 'shown' ? 'ok' : cl.state === 'error' ? 'bad' : cl.state === 'off' || cl.state === 'missing' ? 'off' : 'wait', detail: cl.detail });
     rows.push({ label: 'Wheel', state: x.wheel.seen ? 'ok' : 'off', detail: x.wheel.seen ? 'last: ' + x.wheel.last : x.wheel.on ? 'press skip on the steering wheel while music plays' : 'off in the settings' });
@@ -236,7 +241,17 @@ mgu.run({
         /* ---------- the speakers and the cluster ---------- */
         // the latest app to want the speakers gets them (car_audio.js): another one (TVH Player, Emby, myAirPlay) started
         // after the music: it is paused, and the sound device let go at once
-        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Music Assistant', yieldStops: true,
+        // one proxy per interface for the speakers and the volume (the audio manager's)
+        const proxies = {};
+        const sig = ctx.signals && ctx.signals.proxy ? Object.assign({}, ctx.signals, {
+            proxy: (iface, inst) => {
+                const k = iface + '/' + inst;
+                if (!proxies[k]) proxies[k] = ctx.signals.proxy(iface, inst).catch((e) => { delete proxies[k]; throw e; });
+                return proxies[k];
+            } }) : ctx.signals;
+        // the car's volume: a popup over the app when it changes (the HMI shows none on 287), all the time while muted
+        const volume = createCarVolume(sig, log, { onChange: () => render() });
+        const carAudio = createCarAudio(sig, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Music Assistant', yieldStops: true,
             onYield: (by) => {
                 log.info('music: ' + by + ' took the speakers: pausing');
                 soundUntil = 0;
@@ -418,12 +433,44 @@ mgu.run({
                 else if (tab === T_PLAY) drawPlaying(cv, t, touch);
                 else drawStatus(cv, t);
             } catch (e) { log.warn('music draw: ' + (e && e.stack || e)); }
+            const vp = process.env.MUSIC_PREVIEW_VOLUME ? (process.env.MUSIC_PREVIEW_VOLUME === 'mute' ? { volume: 18, muted: true, max: 40 } : { volume: Number(process.env.MUSIC_PREVIEW_VOLUME), muted: false, max: 40 }) : volume.popup();
+            if (vp) drawVolume(cv, t, vp);
             if (toast && Date.now() - toast.at < 5000) {
-                const w = Math.min(1200, cv.textWidth(ascii(toast.text), 20, { literal: true }) + 48);
-                cv.roundRect((W - w) / 2, H - 58, w, 42, 21, toast.bad ? [120, 30, 34, 235] : [30, 36, 44, 235]);
-                cv.text(clip(cv, toast.text, 20, w - 40, 'label'), W / 2, H - 30, 20, t.text, { align: 'center', literal: true });
+                const w = Math.min(1200, cv.textWidth(ascii(toast.text), 20, { literal: true }) + 48), ty = vp ? H - 196 : H - 58;
+                cv.roundRect((W - w) / 2, ty, w, 42, 21, toast.bad ? [120, 30, 34, 235] : [30, 36, 44, 235]);
+                cv.text(clip(cv, toast.text, 20, w - 40, 'label'), W / 2, ty + 28, 20, t.text, { align: 'center', literal: true });
             }
             return ui.image('MAIN_GFX', cv);
+        }
+
+        /**
+         * The volume popup, at the bottom, see-through: a speaker (its waves follow the volume; crossed out when muted),
+         * the bar and the number (or Mute). It takes no touch: what is under it still works.
+         */
+        function drawVolume(cv, t, v) {
+            const pw = 640, ph = 96, px = (W - pw) / 2, py = H - ph - 40, cy = py + ph / 2;
+            cv.roundRect(px - 4, py + 2, pw + 8, ph + 6, 26, [0, 0, 0, 70]);
+            cv.roundRect(px, py, pw, ph, 22, [30, 32, 38, 150]);
+            cv.strokeRoundRect(px, py, pw, ph, 22, 1, [255, 255, 255, 50]);
+            const col = v.muted ? [160, 160, 170, 255] : [255, 255, 255, 255], s = 48, sx = px + 28, sy = py + 24;
+            cv.fillRect(sx, sy + s * 0.32, s * 0.25, s * 0.36, col);
+            cv.quad([[sx + s * 0.25, sy + s * 0.32], [sx + s * 0.55, sy + s * 0.08], [sx + s * 0.55, sy + s * 0.92], [sx + s * 0.25, sy + s * 0.68]], col);
+            const level = v.volume == null ? 0 : v.volume / (v.max || 40);
+            if (v.muted) {
+                cv.line(sx + s * 0.68, sy + s * 0.32, sx + s * 0.98, sy + s * 0.68, 4, col);
+                cv.line(sx + s * 0.98, sy + s * 0.32, sx + s * 0.68, sy + s * 0.68, 4, col);
+            } else {
+                if (level > 0) cv.arc(sx + s * 0.55, cy, s * 0.19, s * 0.26, 50, 130, col);
+                if (level >= 0.35) cv.arc(sx + s * 0.55, cy, s * 0.39, s * 0.46, 50, 130, col);
+            }
+            const bx0 = px + 104, bx1 = px + pw - 150;
+            cv.roundRect(bx0, cy - 5, bx1 - bx0, 10, 5, [255, 255, 255, 45]);
+            if (!v.muted && level > 0) {
+                const fx = bx0 + (bx1 - bx0) * Math.min(1, level);
+                cv.roundRect(bx0, cy - 5, fx - bx0, 10, 5, GREEN);
+                cv.circle(fx, cy, 11, '#ffffff');
+            }
+            cv.text(v.muted ? 'Mute' : v.volume == null ? '-' : String(Math.round(v.volume)), px + pw - 28, cy + 12, 34, col, { align: 'right', font: 'bold', literal: true });
         }
 
         /** a tile: the cover, the name and what it is; a tap acts on it */
@@ -742,7 +789,7 @@ mgu.run({
         }
 
         function drawStatus(cv, t) {
-            const x = { carAudio: carAudio.state(), cluster: card.state(), wheel: Object.assign(wheel, { on: ctx.settings.get('wheel') !== false }) };
+            const x = { carAudio: carAudio.state(), volume: volume.state(), cluster: card.state(), wheel: Object.assign(wheel, { on: ctx.settings.get('wheel') !== false }) };
             const rows = steps(st, x);
             const COL = { ok: GREEN, wait: AMBER, bad: RED, off: withAlpha('#ffffff', 0.3) };
             const page = st && st.page && st.page.open ? st.page : null;
