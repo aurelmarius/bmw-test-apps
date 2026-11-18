@@ -20,7 +20,7 @@ const send = (m) => { try { if (process.connected) process.send(m); } catch (e) 
 const log = (line) => send({ ev: 'log', line });
 
 const nx = createNet({ leasePath: process.env.MUSIC_LEASE || undefined, systemDns: process.env.MUSIC_SYSTEM_DNS === '1' });
-const device = { id: process.env.MUSIC_DEVICE_ID || 'aurelm-music-unknown', name: process.env.MUSIC_DEVICE_NAME || 'BMW iDrive' };
+const device = { id: process.env.MUSIC_DEVICE_ID || 'aurelm-music-unknown', name: process.env.MUSIC_DEVICE_NAME || 'BMW iDrive', version: process.env.MUSIC_VERSION || null };
 
 /* ---------- the sound to the parent (fd 4) ---------- */
 let pipe = null, piped = 0;

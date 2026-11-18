@@ -199,6 +199,10 @@ test('sign in with user and password: a long-lived token kept, a Sendspin player
     assert.deepStrictEqual(ma.hello.supported_roles, ['player@v1', 'metadata@v1', 'artwork@v1', 'controller@v1']);
     assert.strictEqual(ma.hello['player@v1_support'].supported_formats[0].codec, 'opus');
     assert.ok(/^aurelm-music-[0-9a-f]{12}$/.test(ma.hello.client_id));
+    // shown by Music Assistant under the player's name
+    assert.strictEqual(ma.hello.device_info.manufacturer, 'BMW');
+    assert.strictEqual(ma.hello.device_info.product_name, 'iDrive 7');
+    assert.ok(/^aurelm-music \d+\.\d+\.\d+$/.test(ma.hello.device_info.software_version), JSON.stringify(ma.hello.device_info));
     assert.strictEqual(ma.tokens.filter((t) => /^BMW iDrive [0-9a-f]{6}$/.test(t.name)).length, 1);
     await until(() => ma.state, 5000, 'client/state after the time sync');
     // the timing it asks the server to schedule by (a mobile network): 5 s queued, 2 s to the first sound
