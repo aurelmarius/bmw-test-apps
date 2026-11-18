@@ -206,6 +206,10 @@ function createMa(o) {
         case 'skip': return api('player_queues/skip', { queue_id: q, seconds: Math.round(Number(arg) || 0) });
         case 'shuffle': return api('player_queues/shuffle', { queue_id: q, shuffle_enabled: !!arg });
         case 'repeat': return api('player_queues/repeat', { queue_id: q, repeat_mode: String(arg || 'off') });
+        // Autoplay (Music Assistant's "infinite play": similar tracks added when the queue runs out); older servers
+        // only know it as "don't stop the music"
+        case 'autoplay': return api('player_queues/autoplay', { queue_id: q, autoplay_enabled: !!arg })
+            .catch(() => api('player_queues/dont_stop_the_music', { queue_id: q, dont_stop_the_music_enabled: !!arg }));
         case 'volume': return api('players/cmd/volume_set', { player_id: q, volume_level: Math.max(0, Math.min(100, Math.round(Number(arg) || 0))) });
         case 'play_index': return api('player_queues/play_index', { queue_id: q, index: arg });
         default: throw new Error('no command ' + cmd);
@@ -215,7 +219,8 @@ function createMa(o) {
         const q = await needPlayer();
         const [qs, items] = await Promise.all([api('player_queues/get', { queue_id: q }), api('player_queues/items', { queue_id: q, limit: 50, offset: 0 })]);
         const cur = qs && qs.current_index != null ? qs.current_index : -1;
-        return { index: cur, shuffle: qs && qs.shuffle_enabled, repeat: qs && qs.repeat_mode,
+        const auto = qs ? (qs.autoplay_enabled != null ? qs.autoplay_enabled : qs.dont_stop_the_music_enabled) : null;
+        return { index: cur, shuffle: qs && qs.shuffle_enabled, repeat: qs && qs.repeat_mode, autoplay: auto == null ? null : !!auto,
             items: (items || []).map((it, i) => Object.assign(slim(it.media_item || it) || {}, { name: it.name || (it.media_item && it.media_item.name) || '', queueItemId: it.queue_item_id, index: i })) };
     }
 

@@ -642,13 +642,23 @@ mgu.run({
             const rep = ctl.repeat || 'off';
             btn(cx + 220, 26, rep !== 'off' ? withAlpha(GREEN, 0.3) : withAlpha('#ffffff', 0.08), (bx) => cv.text(rep === 'one' ? 'REP 1' : 'REP', bx, cy + 6, 14, rep !== 'off' ? GREEN : t.dim, { align: 'center', font: 'bold', literal: true }),
                 () => control('repeat', rep === 'off' ? 'all' : rep === 'all' ? 'one' : 'off', 'Repeat'), 'repeat');
-            if (c.ahead) cv.text(Math.round(c.ahead / 1000) + ' s buffered', x, TOP + 430, 16, t.dim, { literal: true });
+            // Autoplay: Music Assistant adds similar music when the queue runs out (its state comes with the queue)
+            if (queue.autoplay != null) {
+                const on = !!queue.autoplay, ay = TOP + 396;
+                cv.roundRect(x, ay, 176, 40, 20, on ? withAlpha(GREEN, 0.3) : withAlpha('#ffffff', 0.08));
+                cv.text('AUTOPLAY ' + (on ? 'ON' : 'OFF'), x + 88, ay + 26, 15, on ? GREEN : t.dim, { align: 'center', font: 'bold', literal: true });
+                if (touch) cv.target(x, ay, 176, 40, () => {
+                    queue.autoplay = !on; render();
+                    control('autoplay', !on, 'Autoplay').then(() => { queue.at = 0; loadQueue(); });
+                }, 'autoplay', 20);
+            }
+            if (c.ahead) cv.text(Math.round(c.ahead / 1000) + ' s buffered', x + (queue.autoplay != null ? 196 : 0), TOP + 422, 16, t.dim, { literal: true });
             // up next
             const qx = 1110, qw = 466;
             cv.fillRect(qx - 20, TOP + 10, 1, 450, withAlpha('#ffffff', 0.12));
             cv.text('Up next', qx, TOP + 36, 22, t.text, { font: 'bold', literal: true });
             const next = (queue.items || []).filter((q) => q.index > queue.index).slice(0, 8);
-            if (!next.length) cv.text(queue.loading ? 'Loading...' : 'Nothing queued after this', qx, TOP + 76, 18, t.dim, { literal: true });
+            if (!next.length) cv.text(queue.loading ? 'Loading...' : queue.autoplay ? 'Autoplay adds similar music next' : 'Nothing queued after this', qx, TOP + 76, 18, t.dim, { literal: true });
             next.forEach((q, i) => {
                 const y = TOP + 56 + i * 52;
                 covers.draw(cv, q.img, qx, y, 44, 4, q.name);
