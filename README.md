@@ -70,6 +70,11 @@ as Emby's player does on the same input: a chunk goes into the device once it is
 late is cut, so the sound comes back onto the clock; and the clock offset the sound goes by follows the measured one
 by 5 ms a second at most (a jump over the mobile network was a gap or a cut). The Status page's stream counts are
 fresh (they were the ones from the stream's start) and show the cuts and the largest lag.
+Then in the car: Apple Music clean, Spotify stuttering and falling behind. A file (Apple Music) is sent 30 s ahead;
+a live source (Spotify through librespot) only as far as the player asks, and the client asked for nothing: the
+server's default, 1 s, too little over a mobile network. 0.1.6 tells the server, in its `client/state`, to keep
+5 s queued (`min_buffer_ms`) and to start 2 s after a play or a seek (`required_lead_time_ms`), with `available`
+in place of the legacy state: against aiosendspin 10.2.1 with a live source, 5 s ahead instead of 1 s.
 
 - **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
   Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;
