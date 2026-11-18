@@ -58,6 +58,12 @@ decoded from Opus (3 s): both clean means the device and the decoder are right. 
 chunks (late, over others, gaps) and the device's depth. 0.1.3: **Autoplay** (Music Assistant's infinite play: similar music added when
 the queue runs out) on the Playing page, as in the phone app (`player_queues/autoplay`, or `dont_stop_the_music` on an
 older server).
+0.1.3 in the car: the test tone clean, the music still a metallic noise, and the Status page told why: 157 bad
+Opus packets and 4007 of 4573 chunks "over others". Run against aiosendspin 10.2.1 (Music Assistant 2.10.12's
+Sendspin) locally: its audio chunks carry a 9-byte header (type, timestamp), not the newer spec's 13 (with
+send_ahead), so every packet lost its first 4 bytes. 0.1.4 finds the header's length on a stream's first two
+chunks (9 or 13: the Opus TOC and the timestamps' step, or for PCM the exact length), and the tests now check
+that the tone comes out clean with both.
 
 - **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
   Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;
