@@ -152,7 +152,7 @@ function playRows(s, rows) {
     const a = fresh ? pl.audio : null, ca = s.carAudio || {};
     let snd;
     if (!a) snd = { state: 'wait', detail: fresh && pl.open && pl.running ? 'no sound in the stream yet' : 'waiting for the stream' };
-    else if (!a.ok) snd = { state: 'bad', detail: a.error };
+    else if (!a.ok) snd = a.retrying ? { state: 'wait', detail: 'the sound device is busy (another app\'s sound): taking it over... (' + a.error + ')' } : { state: 'bad', detail: a.error };
     else {
         const n = String(a.codec).toUpperCase() + ' ' + a.channels + 'ch' + (tk.aplayed ? ', ' + tk.aplayed + ' played' : '') + (tk.aunread ? ', ' + tk.aunread + ' unread' : '');
         if (ca.taken) snd = { state: 'bad', detail: n + '; the speakers are in use by AirPlay Test: stop it there' };
@@ -427,7 +427,8 @@ mgu.run({
             // sound opens a moment later). 0.2.1 let them go and took them again at every seek, and the sound stopped
             // coming in the car. Kept 5 s more after the film, for the next episode or a cast again.
             const pl = st && st.player;
-            const soundFailed = !!(pl && pl.running && pl.audio && pl.audio.ok === false);
+            // busy (the player tries again each second: Music Assistant lets go once it sees this app's claim): still wanted
+            const soundFailed = !!(pl && pl.running && pl.audio && pl.audio.ok === false && !pl.audio.retrying);
             const on = filmOn(pb) && !soundFailed;
             if (on) soundUntil = Date.now() + 5000;
             carAudio.want(on || Date.now() < soundUntil);

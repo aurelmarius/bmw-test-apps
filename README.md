@@ -87,6 +87,11 @@ change; the loop draws it. The pages follow the finger pixel by pixel (Home, Lib
 progress bar can be dragged (the time follows the finger, the seek goes where it lifts; the kit's targets take a
 `drag` function), and the Status page shows the last crash read from the app's log. The cluster card: right 120 px,
 down 40 px by default, and the dark field behind it smaller and see-through.
+Then in the car: TVH Player started while Music Assistant played stayed silent: its player's snd_pcm_open got
+"Device or resource busy" (Music Assistant's player held the device) and never tried again, and the app, its sound
+failed, stopped asking for the speakers, so Music Assistant never let go. Emby 0.3.14 (service 0.3.13) and TVH
+Player 1.0.4 (service 1.0.2, bmw-apps): the player tries the device again each second while it is busy, and the app
+keeps asking for the speakers meanwhile; Music Assistant lets go within 2 s and the film or channel has its sound.
 
 - **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
   Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;
