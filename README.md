@@ -64,6 +64,12 @@ Sendspin) locally: its audio chunks carry a 9-byte header (type, timestamp), not
 send_ahead), so every packet lost its first 4 bytes. 0.1.4 finds the header's length on a stream's first two
 chunks (9 or 13: the Opus TOC and the timestamps' step, or for PCM the exact length), and the tests now check
 that the tone comes out clean with both.
+0.1.4 in the car: the song, but stuttering all along, and the player counted nearly every chunk late. 0.1.5 plays
+as Emby's player does on the same input: a chunk goes into the device once it is due within 40 ms (0.1.2-0.1.4:
+2 ms, while smartx reads whole periods of ~21 ms), a chunk late by more than 50 ms is dropped and one whose start is
+late is cut, so the sound comes back onto the clock; and the clock offset the sound goes by follows the measured one
+by 5 ms a second at most (a jump over the mobile network was a gap or a cut). The Status page's stream counts are
+fresh (they were the ones from the stream's start) and show the cuts and the largest lag.
 
 - **Home**: Music Assistant's home rows (Recently played, Recently added, the providers' recommendations: Apple
   Music's, Spotify's, podcasts...), each with its covers; **Library**: playlists, albums, artists, radio, tracks;

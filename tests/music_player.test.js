@@ -83,6 +83,27 @@ test('the sound check: a clean 440 Hz tone as PCM, then as Opus, at its times', 
     fs.rmSync ? fs.rmSync(tmp, { recursive: true, force: true }) : null;
 });
 
+test('late sound is dropped, sound on time is written (back onto the clock)', async () => {
+    const cp = require('child_process');
+    const tmp = fs.mkdtempSync(path.join(fs.existsSync('/dev/shm') ? '/dev/shm' : os.tmpdir(), 'maplate-'));
+    fs.chmodSync(tmp, 0o777);
+    const c = cp.spawn(PLAYER, [], { env: { PATH: process.env.PATH, MGU_AUDIO: 'wav:' + path.join(tmp, 'late.wav'), MGU_RUN_AS: 'nobody', MGU_GROUPS: '' } });
+    let out = ''; c.stdout.on('data', (d) => { out += d; });
+    const fr = (t, p) => { const h = Buffer.alloc(5); h[0] = t.charCodeAt(0); h.writeUInt32BE(p.length, 1); return Buffer.concat([h, p]); };
+    const timed = (due, data) => { const d = Buffer.alloc(8); d.writeUInt32BE(Math.floor(due / 4294967296), 0); d.writeUInt32BE(due % 4294967296, 4); return fr('T', Buffer.concat([d, data])); };
+    const h = process.hrtime(), now = h[0] * 1e6 + Math.floor(h[1] / 1000);
+    c.stdin.write(fr('F', Buffer.from('pcm 48000 2 16')));
+    for (let i = 0; i < 10; i++) c.stdin.write(timed(now - 300000 + i * 20000, Buffer.alloc(3840)));   // 300 ms late: dropped
+    for (let i = 0; i < 10; i++) c.stdin.write(timed(now + 100000 + i * 20000, Buffer.alloc(3840)));   // on time: written
+    await wait(2300);   // a tick a second
+    c.stdin.end(fr('Q', Buffer.alloc(0)));
+    await new Promise((r) => c.on('exit', r));
+    const end = JSON.parse(out.trim().split('\n').filter((l) => /"ev":"end"/.test(l)).pop().slice(4));
+    const tick = out.trim().split('\n').filter((l) => /"ev":"tick"/.test(l)).map((l) => JSON.parse(l.slice(4))).pop();
+    assert.strictEqual(end.played, 9600, 'only the 10 chunks on time: ' + end.played);
+    assert.ok(tick && tick.late >= 8, 'the late ones counted: ' + JSON.stringify(tick));
+});
+
 (async () => {
     let failed = 0;
     for (const t of tests) {

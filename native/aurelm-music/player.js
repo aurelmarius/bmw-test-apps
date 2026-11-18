@@ -48,7 +48,7 @@ function createPlayer(o) {
                 try { e = JSON.parse(line.slice(4)); } catch (x) { continue; }
                 if (e.ev === 'open') { st.open = e; log('ma-player: ' + (e.out === 'alsa' ? e.device : e.out) + ' ' + e.rate + ' Hz ' + e.channels + ' ch'); }
                 else if (e.ev === 'error') { st.error = e.error; log('ma-player: ' + e.error); }
-                else if (e.ev === 'tick') { st.played = e.played; st.underruns = e.underruns; st.unread = e.unread || 0; st.waiting = !!e.waiting; st.late = e.late || 0; st.bad = e.bad || 0; st.devMs = e.dev_ms; st.devMaxMs = e.dev_max_ms; }
+                else if (e.ev === 'tick') { st.played = e.played; st.underruns = e.underruns; st.unread = e.unread || 0; st.waiting = !!e.waiting; st.late = e.late || 0; st.bad = e.bad || 0; st.devMs = e.dev_ms; st.devMaxMs = e.dev_max_ms; st.cut = e.cut || 0; st.lagMaxMs = e.lag_max_ms || 0; }
                 else if (e.ev === 'reading') log('ma-player: the speakers read the sound now (after ' + e.after_ms + ' ms)');
                 if (o.onEvent) o.onEvent(e);
             }

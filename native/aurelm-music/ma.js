@@ -236,7 +236,10 @@ function createMa(o) {
 
     /* ---------------------------------------------------------------- Sendspin */
     let sock = null, retry = null, timeTimer = null, pumpTimer = null, stateSent = false;
-    let offset = null;                 // server µs - our µs
+    let offset = null;                 // server µs - our µs, as the time exchanges measure it
+    let clockOff = null;               // the one the sound goes by: follows offset by 5 ms a second at most (a
+                                       // jump of the measure over a mobile network would be a gap or a cut in the
+                                       // music), at once only for a jump over 200 ms (a new connection)
     const samples = [];                // [delay, offset] of the last time exchanges
     let queueA = [];                   // [{ t (our µs), ts (server µs), end (server µs), data }], in time order
     let lastEnd = 0;                   // server µs: where the last chunk queued ends (the server's clock: a new
@@ -282,6 +285,7 @@ function createMa(o) {
         if (samples.length > 12) samples.shift();
         // the exchange with the least delay is the truest
         offset = samples.reduce((a, b) => (b[0] < a[0] ? b : a))[1];
+        if (clockOff === null) clockOff = offset;
         if (!stateSent) {
             stateSent = true;
             sendJson('client/state', { player: { state: 'synchronized', volume: st.volume, muted: st.muted } });
@@ -425,7 +429,7 @@ function createMa(o) {
     function audioChunk(b) {
         {
             if (b.length <= hdr) return;
-            const ts = readTs(b), t = ts - offset, data = b.slice(hdr);
+            const ts = readTs(b), t = ts - clockOff, data = b.slice(hdr);
             const end = ts + chunkUs(data);
             stats.chunks++;
             st.lastAudioAt = Date.now();
@@ -437,18 +441,28 @@ function createMa(o) {
             lastEnd = end;
         }
     }
+    let lastPump = 0, lastEmit = 0;
     function pump() {
-        if (!queueA.length) { st.ahead = 0; return; }
         const now = nowUs();
+        if (offset !== null) {
+            const d = offset - clockOff, step = Math.max(1, (now - (lastPump || now)) * 0.005);   // 5 ms a second
+            if (clockOff === null || Math.abs(d) > 200000) clockOff = offset;
+            else clockOff += Math.max(-step, Math.min(step, d));
+        }
+        lastPump = now;
+        // the Status page's stream counts, fresh while music comes
+        if (queueA.length && Date.now() - lastEmit > 1000) { lastEmit = Date.now(); emitStatus(); }
+        if (!queueA.length) { st.ahead = 0; return; }
         let n = 0;
-        while (queueA.length && queueA[0].t - now <= LEAD_US) {
-            const c = queueA.shift();
-            if (now - c.t > LATE_US) { n++; continue; }
-            sink.audio(c.data, c.t);
+        // each chunk's time on our clock now (the server's time less the offset the sound goes by)
+        while (queueA.length && queueA[0].ts - clockOff - now <= LEAD_US) {
+            const c = queueA.shift(), t = c.ts - clockOff;
+            if (now - t > LATE_US) { n++; continue; }
+            sink.audio(c.data, t);
             stats.handed++;
         }
         if (n) { stats.late += n; log('Sendspin: dropped ' + n + ' late chunks'); }
-        st.ahead = queueA.length ? Math.round((queueA[queueA.length - 1].t - now) / 1000) : 0;
+        st.ahead = queueA.length ? Math.round((queueA[queueA.length - 1].ts - clockOff - now) / 1000) : 0;
     }
 
     function connect() {
@@ -456,7 +470,7 @@ function createMa(o) {
         clearTimeout(retry);
         const u = account.server.replace(/^http/i, 'ws') + '/sendspin';
         setConn('connecting');
-        offset = null; samples.length = 0; stateSent = false; resetQueue(); resetHeader();
+        offset = null; clockOff = null; samples.length = 0; stateSent = false; resetQueue(); resetHeader();
         const s = ws.connect({ url: u, connect: (a) => nx.socket(a), readyEvent: /^wss:/.test(u) ? 'secureConnect' : 'connect' });
         sock = s;
         s.on('open', () => { s.send(JSON.stringify({ type: 'auth', token: account.token })); });

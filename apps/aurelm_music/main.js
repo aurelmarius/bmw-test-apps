@@ -104,7 +104,7 @@ function steps(s, x) {
     rows.push({ label: 'Player', state: pl.error ? 'bad' : pl.waiting ? 'wait' : pl.running ? 'ok' : 'off',
         detail: pl.error ? pl.error : pl.running ? (pl.waiting ? 'the speakers do not read it yet: ' : 'playing into ') + (pl.open ? (pl.open.device || pl.open.out) : '?') + ', ' + Math.round((pl.played || 0) / 48000) + ' s played' +
             (pl.unread ? ', ' + Math.round(pl.unread / 48000) + ' s not read' : '') + (pl.underruns ? ', ' + pl.underruns + ' underruns' : '') + (c.ahead ? ', ' + Math.round(c.ahead / 1000) + ' s buffered' : '') +
-            (pl.devMs != null ? ', device ' + pl.devMs + ' ms (max ' + (pl.devMaxMs || 0) + ')' : '') + (pl.late ? ', ' + pl.late + ' late' : '') + (pl.bad ? ', ' + pl.bad + ' bad packets' : '') +
+            (pl.devMs != null ? ', device ' + pl.devMs + ' ms (max ' + (pl.devMaxMs || 0) + ')' : '') + (pl.late ? ', ' + pl.late + ' late' : '') + (pl.cut ? ', ' + pl.cut + ' cut' : '') + (pl.lagMaxMs ? ', lag max ' + pl.lagMaxMs + ' ms' : '') + (pl.bad ? ', ' + pl.bad + ' bad packets' : '') +
             (pl.test && Date.now() < pl.test.until ? ' - SOUND CHECK: a tone, then the same tone from Opus' : '') : 'starts with the music' });
     const sm = c.stream;
     if (sm && sm.chunks) rows.push({ label: 'Stream', state: sm.overlaps || sm.late ? 'wait' : 'ok',
