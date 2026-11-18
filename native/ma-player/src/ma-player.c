@@ -195,17 +195,36 @@ static long long out_delay_us(void) {
     return us > 500000 ? 500000 : us;
 }
 
-/* waits until a chunk due at `due` (monotonic us) goes into the device: due minus what the device still holds */
-static void pace(long long due) {
-    if (!due) return;
+/*
+ * Emby's player's loop (native/emby-player, which plays clean through this same smartx input): a chunk goes into the
+ * device once it is due within 40 ms, counting what the device still holds (it then has 40 ms in hand: smartx reads
+ * whole periods of 1024 frames, ~21 ms; 0.1.2-0.1.4 waited until 2 ms, and the sound stuttered); a chunk all late
+ * by more than 50 ms is dropped and one whose start is late by more than 40 ms is cut there, so the sound comes back
+ * onto the clock instead of staying behind it. Returns the frames to leave out from its start (frames: all of it).
+ */
+static long long lag_ms_max, cut_chunks;
+static long pace(long long due, long frames) {
+    if (!due || frames <= 0) return 0;
+    long long dur = (long long)frames * 1000000 / (cur_rate ? cur_rate : 48000);
     for (;;) {
         long long now = mono_us(), dev = out_delay_us();
         if (dev / 1000 > paced_ms_max) paced_ms_max = dev / 1000;
-        long long early = due - now - dev;
-        if (early <= 2000) { if (early < -100000) late_chunks++; return; }
-        if (early > 1000000) early = 1000000;
-        struct timespec ts = { (time_t)((early - 1000) / 1000000), (long)(((early - 1000) % 1000000) * 1000) };
-        nanosleep(&ts, NULL);
+        long long ahead = due - (now + dev);
+        if (ahead > 40000) {
+            long long w = ahead > 60000 ? 20000 : ahead - 20000;
+            struct timespec ts = { 0, (long)(w * 1000) };
+            nanosleep(&ts, NULL);
+            continue;
+        }
+        if (-ahead / 1000 > lag_ms_max) lag_ms_max = -ahead / 1000;
+        if (ahead + dur < -50000) { late_chunks++; return frames; }
+        if (ahead < -40000) {
+            long skip = (long)((-ahead) * (cur_rate ? cur_rate : 48000) / 1000000);
+            if (skip >= frames) { late_chunks++; return frames; }
+            cut_chunks++;
+            return skip;
+        }
+        return 0;
     }
 }
 
@@ -263,7 +282,7 @@ int main(void) {
         if (pr == 0) {
             if (played_frames != ticked_played) {
                 ticked_played = played_frames; last_tick = now_ms();
-                event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s,\"late\":%lld,\"dev_ms\":%lld,\"idle\":true}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false", late_chunks, out_delay_us() / 1000);
+                event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s,\"late\":%lld,\"cut\":%lld,\"lag_max_ms\":%lld,\"dev_ms\":%lld,\"idle\":true}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false", late_chunks, cut_chunks, lag_ms_max, out_delay_us() / 1000);
             }
             continue;
         }
@@ -305,13 +324,12 @@ int main(void) {
             if (codec == 1) {
                 int n = opus_decode(dec, p, (opus_int32)n_in, pcmbuf, MAX_PCM, 0);
                 if (n < 0) { bad++; break; }
-                pace(due);
-                out_write(pcmbuf, n);
+                long skip = pace(due, n);   /* decoded either way: the decoder's state follows every packet */
+                if (skip < n) out_write(pcmbuf + skip * ch, n - skip);
             } else {
                 long frames = (long)(n_in / (2 * ch));
                 /* aligned copy: the frame buffer is bytes */
-                long done = 0;
-                pace(due);
+                long done = pace(due, frames);
                 while (done < frames) {
                     long n = frames - done > MAX_PCM ? MAX_PCM : frames - done;
                     memcpy(pcmbuf, p + done * 2 * ch, (size_t)(n * 2 * ch));
@@ -339,7 +357,7 @@ int main(void) {
         long long t = now_ms();
         if (t - last_tick >= 1000) {
             last_tick = t; ticked_played = played_frames;
-            event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s,\"late\":%lld,\"dev_ms\":%lld,\"dev_max_ms\":%lld}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false", late_chunks, out_delay_us() / 1000, paced_ms_max);
+            event("{\"ev\":\"tick\",\"played\":%lld,\"packets\":%lld,\"bad\":%lld,\"underruns\":%lld,\"dropped\":%lld,\"unread\":%lld,\"waiting\":%s,\"late\":%lld,\"cut\":%lld,\"lag_max_ms\":%lld,\"dev_ms\":%lld,\"dev_max_ms\":%lld}", played_frames, packets, bad, underruns, dropped, unread_frames, unread_since ? "true" : "false", late_chunks, cut_chunks, lag_ms_max, out_delay_us() / 1000, paced_ms_max);
         }
     }
 end:
