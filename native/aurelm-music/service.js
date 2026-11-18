@@ -33,7 +33,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.1.8';
+const VERSION = '0.1.9';
 const PAGE_PORT = 8495;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -93,7 +93,7 @@ function createService(opts) {
     function startChild() {
         if (child) return;
         childStarts++;
-        const env = Object.assign({ PATH: process.env.PATH || '/usr/bin:/bin', MUSIC_DEVICE_ID: device.id, MUSIC_DEVICE_NAME: device.name,
+        const env = Object.assign({ PATH: process.env.PATH || '/usr/bin:/bin', MUSIC_DEVICE_ID: device.id, MUSIC_DEVICE_NAME: device.name, MUSIC_VERSION: VERSION,
             MUSIC_LEASE: o.leasePath }, o.childEnv);
         // fd 4: the sound, from the client to the player
         const fopts = { env, stdio: ['ignore', 'inherit', 'inherit', 'ipc', 'pipe'] };

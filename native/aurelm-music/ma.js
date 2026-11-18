@@ -267,6 +267,8 @@ function createMa(o) {
     function hello() {
         sendJson('client/hello', {
             name: device.name, client_id: device.id, version: 1,
+            // what Music Assistant shows under the player's name (else "Unknown Manufacturer / Unknown model")
+            device_info: Object.assign({ manufacturer: 'BMW', product_name: 'iDrive 7' }, device.version ? { software_version: 'aurelm-music ' + device.version } : {}),
             supported_roles: ['player@v1', 'metadata@v1', 'artwork@v1', 'controller@v1'],
             'player@v1_support': {
                 supported_formats: [
