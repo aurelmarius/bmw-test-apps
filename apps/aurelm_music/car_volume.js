@@ -15,6 +15,7 @@
  */
 const AM = 'org.genivi.am.commandinterface.CommandControl';
 const SHOW_MS = 2000;
+const MAX = 62;
 
 const num = (v) => {
     if (typeof v === 'number' && isFinite(v)) return v;
@@ -110,10 +111,9 @@ function createCarVolume(signals, log, o) {
     }
     start();
 
-    /** the bar's end: the car's scale is not known for sure, so the smallest usual one that holds what was seen */
+    /** the bar's end: the car's main volume goes from 0 to 62 (seen in the car); more if more is ever seen */
     function max() {
-        const m = st.maxSeen || 0;
-        return m <= 40 ? 40 : m <= 100 ? 100 : m;
+        return Math.max(MAX, st.maxSeen || 0);
     }
     return {
         popup() {
