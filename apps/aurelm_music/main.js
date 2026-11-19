@@ -543,7 +543,22 @@ mgu.run({
         /** Home: the rows, two at a time, up to 8 covers each (a ninth opens the whole row) */
         // the sections chosen off (EDIT HOME): their ids, kept with the app's settings
         const hiddenRows = () => { const v = ctx.settings.get('homeHidden'); return Array.isArray(v) ? v : []; };
-        function visibleRows() { const off = hiddenRows(); return (home.rows || []).filter((r) => !(r.items && r.items.length === 0) && off.indexOf(r.itemId) < 0); }
+        // their order (EDIT HOME's arrows): the ids in order, kept with the settings; a section not in it (new on the
+        // server) comes after, in the server's order
+        function orderedRows() {
+            const ord = ctx.settings.get('homeOrder'), o = Array.isArray(ord) ? ord : [];
+            const rank = (r, i) => { const k = o.indexOf(r.itemId); return k >= 0 ? k : 1000 + i; };
+            return (home.rows || []).map((r, i) => ({ r, k: rank(r, i) })).sort((a, b) => a.k - b.k).map((x) => x.r);
+        }
+        function visibleRows() { const off = hiddenRows(); return orderedRows().filter((r) => !(r.items && r.items.length === 0) && off.indexOf(r.itemId) < 0); }
+        function moveRow(id, dir) {
+            const ids = orderedRows().map((r) => r.itemId), i = ids.indexOf(id), j = i + dir;
+            if (i < 0 || j < 0 || j >= ids.length) return;
+            ids[i] = ids[j]; ids[j] = id;
+            ctx.settings.set('homeOrder', ids);
+            home.first = 0; home.frac = 0;
+            render();
+        }
         function toggleRow(id) {
             const off = hiddenRows().slice(), i = off.indexOf(id);
             if (i >= 0) off.splice(i, 1); else off.push(id);
@@ -579,13 +594,13 @@ mgu.run({
         /** EDIT HOME: every section Music Assistant has for the home page, a tap shows or hides it */
         function drawEditHome(cv, t, touch) {
             cv.text('Home sections', 160, TOP + 36, 26, t.text, { font: 'bold', literal: true });
-            cv.text('Tap a section to show or hide it on Home', 420, TOP + 34, 18, t.dim, { literal: true });
-            const all = home.rows || [], off = hiddenRows();
-            if (touch && off.length) {
+            cv.text('Tap a section to show or hide it, the arrows move it up or down', 420, TOP + 34, 18, t.dim, { literal: true });
+            const all = orderedRows(), off = hiddenRows(), ord = ctx.settings.get('homeOrder');
+            if (touch && (off.length || (Array.isArray(ord) && ord.length))) {
                 const ax = W - 190;
                 cv.roundRect(ax, TOP + 8, 160, 36, 18, withAlpha('#ffffff', 0.12));
-                cv.text('Show all', ax + 80, TOP + 32, 17, t.text, { align: 'center', font: 'bold', literal: true });
-                cv.target(ax, TOP + 8, 160, 36, () => { ctx.settings.set('homeHidden', []); home.first = 0; home.frac = 0; render(); }, 'showall', 18);
+                cv.text('Reset', ax + 80, TOP + 32, 17, t.text, { align: 'center', font: 'bold', literal: true });
+                cv.target(ax, TOP + 8, 160, 36, () => { ctx.settings.set('homeHidden', []); ctx.settings.set('homeOrder', []); home.first = 0; home.frac = 0; render(); }, 'reset', 18);
             }
             if (!all.length) { cv.text(home.error ? home.error : 'Loading...', 24, TOP + 100, 20, t.dim, { literal: true }); return; }
             const cols = all.length > 20 ? 3 : 2, per = Math.ceil(all.length / cols), colW = Math.floor((W - 48) / cols), rowH = Math.min(42, Math.floor((H - TOP - 80) / per));
@@ -594,8 +609,18 @@ mgu.run({
                 const empty = r.items && r.items.length === 0;
                 cv.roundRect(x, y, 28, 28, 6, on ? GREEN : withAlpha('#ffffff', 0.12));
                 if (on) cv.polyline([[x + 7, y + 14], [x + 12, y + 20], [x + 21, y + 8]], 3, '#000000');
-                cv.text(clip(cv, r.name + (empty ? '  (empty now)' : ''), 20, colW - 60, 'label'), x + 42, y + 21, 20, on ? t.text : t.dim, { literal: true });
-                if (touch) cv.target(x - 6, y - 4, colW - 12, rowH, () => toggleRow(r.itemId), 'sec:' + i, 8);
+                cv.text(clip(cv, r.name + (empty ? '  (empty now)' : ''), 20, colW - 170, 'label'), x + 42, y + 21, 20, on ? t.text : t.dim, { literal: true });
+                if (touch) cv.target(x - 6, y - 4, colW - 130, rowH, () => toggleRow(r.itemId), 'sec:' + i, 8);
+                // up / down: a small triangle in a round button each
+                const arrow = (bx, up, enabled, key, fn) => {
+                    cv.roundRect(bx, y - 2, 44, 32, 16, withAlpha('#ffffff', enabled ? 0.12 : 0.04));
+                    const c = enabled ? t.text : withAlpha('#ffffff', 0.25), mx = bx + 22, my = y + 14;
+                    cv.quad(up ? [[mx - 8, my + 5], [mx, my - 5], [mx + 8, my + 5], [mx + 8, my + 5]] : [[mx - 8, my - 5], [mx + 8, my - 5], [mx, my + 5], [mx, my + 5]], c);
+                    if (touch && enabled) cv.target(bx, y - 2, 44, 32, fn, key, 16);
+                };
+                const ax = x + colW - 124;
+                arrow(ax, true, i > 0, 'up:' + i, () => moveRow(r.itemId, -1));
+                arrow(ax + 52, false, i < all.length - 1, 'dn:' + i, () => moveRow(r.itemId, 1));
             });
         }
         function drawShelf(cv, t, touch, name, items, loading, y, key, more) {
