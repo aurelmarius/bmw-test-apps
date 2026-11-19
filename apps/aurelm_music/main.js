@@ -249,7 +249,7 @@ mgu.run({
                 if (!proxies[k]) proxies[k] = ctx.signals.proxy(iface, inst).catch((e) => { delete proxies[k]; throw e; });
                 return proxies[k];
             } }) : ctx.signals;
-        // the car's volume: a popup over the app when it changes (the HMI shows none on 287), all the time while muted
+        // the car's volume: a popup over the app when it changes (the HMI shows none on 287): sink 1, the car's main volume, all the time while muted
         const volume = createCarVolume(sig, log, { onChange: () => render() });
         const carAudio = createCarAudio(sig, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Music Assistant', yieldStops: true,
             onYield: (by) => {

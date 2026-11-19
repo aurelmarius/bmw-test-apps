@@ -4,8 +4,9 @@
  *
  * On the CarLife source (287) the HMI shows no volume popup of its own, so the app draws one. The audio manager
  * (org.genivi.am.commandinterface.CommandControl) tells every change: the broadcast `volumeChanged` (sinkID, volume)
- * and `sinkMuteStateChanged` (sinkID, muteState); `getListMainSinks` gives where it starts. Only the main sink (1024,
- * the one 287 is routed to) counts. The names of the fields are read loosely (anything with "sink", "vol", "mute"),
+ * and `sinkMuteStateChanged` (sinkID, muteState); `getListMainSinks` gives where it starts. Only the car's main volume
+ * counts: sink 1 (seen in the car: the knob changes sink 1; 1024, where 287 is routed, stays at 0).
+ * The names of the fields are read loosely (anything with "sink", "vol", "mute"),
  * and the last event is kept as it came, for the Status page: the car decides what they look like.
  *
  *   const vol = createCarVolume(signals, log, { onChange: render });
@@ -52,7 +53,7 @@ const short = (v) => { let s; try { s = JSON.stringify(v); } catch (e) { s = Str
 
 function createCarVolume(signals, log, o) {
     o = o || {};
-    const SINK = o.sink || 1024;
+    const SINK = o.sink || 1;
     const now = o.now || Date.now;
     const st = { volume: null, muted: null, changes: 0, maxSeen: null, at: 0, last: null, other: null, error: null, ready: false };
     const changed = () => { try { if (o.onChange) o.onChange(); } catch (e) { /* drawing */ } };

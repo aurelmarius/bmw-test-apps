@@ -42,7 +42,7 @@ test('payloads read loosely', () => {
 
 test('where it starts: no popup; a change: 2 s; mute: while muted; other sinks ignored', async () => {
     let t = 1000;
-    const sig = fakeSignals({ listMainSinks: [{ sinkID: 1, volume: 3, muteState: 'MS_UNMUTED' }, { sinkID: 1024, name: 'main', volume: 14, muteState: 'MS_UNMUTED' }], error: 'E_OK' });
+    const sig = fakeSignals({ listMainSinks: [{ sinkID: 1024, volume: 0, muteState: 'MS_UNMUTED' }, { sinkID: 1, name: 'main', volume: 14, muteState: 'MS_UNMUTED' }], error: 'E_OK' });
     let changes = 0;
     const vol = createCarVolume(sig, log, { now: () => t, onChange: () => changes++ });
     await wait(30);
@@ -53,27 +53,27 @@ test('where it starts: no popup; a change: 2 s; mute: while muted; other sinks i
     assert.strictEqual(s.ready, true);
     assert.strictEqual(vol.popup(), null, 'no popup for where it starts');
     // the knob
-    sig.emit('volumeChanged', { sinkID: 1024, volume: 18 });
+    sig.emit('volumeChanged', { sinkID: 1, volume: 18 });
     assert.deepStrictEqual(vol.popup(), { volume: 18, muted: false, max: 40 });
     t += 1900; assert.ok(vol.popup(), 'still shown at 1.9 s');
     t += 200; assert.strictEqual(vol.popup(), null, 'gone after 2 s');
     // the same value again: nothing
-    sig.emit('volumeChanged', { sinkID: 1024, volume: 18 });
+    sig.emit('volumeChanged', { sinkID: 1, volume: 18 });
     assert.strictEqual(vol.popup(), null);
-    // another sink: ignored, but kept for the Status page
-    sig.emit('volumeChanged', { sinkID: 7, volume: 30 });
+    // another sink (1024, where 287 is routed): ignored, but kept for the Status page
+    sig.emit('volumeChanged', { sinkID: 1024, volume: 30 });
     assert.strictEqual(vol.popup(), null);
-    assert.ok(/sink 7/.test(vol.state().other));
+    assert.ok(/sink 1024/.test(vol.state().other));
     // mute: shown as long as it lasts
-    sig.emit('sinkMuteStateChanged', { sinkID: 1024, muteState: 'MS_MUTED' });
+    sig.emit('sinkMuteStateChanged', { sinkID: 1, muteState: 'MS_MUTED' });
     t += 60000;
     assert.deepStrictEqual(vol.popup(), { volume: 18, muted: true, max: 40 });
     // unmuted: the volume for 2 s
-    sig.emit('sinkMuteStateChanged', { sinkID: 1024, muteState: 'MS_UNMUTED' });
+    sig.emit('sinkMuteStateChanged', { sinkID: 1, muteState: 'MS_UNMUTED' });
     assert.deepStrictEqual(vol.popup(), { volume: 18, muted: false, max: 40 });
     t += 2100; assert.strictEqual(vol.popup(), null);
     // a scale past 40: the bar ends at 100
-    sig.emit('volumeChanged', { sinkID: 1024, volume: 55 });
+    sig.emit('volumeChanged', { sinkID: 1, volume: 55 });
     assert.strictEqual(vol.popup().max, 100);
     s = vol.state();
     assert.ok(s.changes >= 4 && changes >= 4, JSON.stringify(s));
@@ -81,7 +81,7 @@ test('where it starts: no popup; a change: 2 s; mute: while muted; other sinks i
 });
 
 test('muted where it starts: the popup shows', async () => {
-    const sig = fakeSignals([{ sinkID: 1024, volume: 9, muteState: 'MS_MUTED' }]);
+    const sig = fakeSignals([{ sinkID: 1, volume: 9, muteState: 'MS_MUTED' }]);
     const vol = createCarVolume(sig, log, {});
     await wait(30);
     assert.deepStrictEqual(vol.popup(), { volume: 9, muted: true, max: 40 });
