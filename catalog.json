@@ -114,17 +114,17 @@
     {
       "id": "aurelm_music",
       "kind": "app",
-      "version": "0.1.16",
+      "version": "0.1.17",
       "title": "Music Assistant",
       "description": "Your Music Assistant server in the car: the home page's recommendations with their covers, the library (playlists, albums, artists, radio, tracks), search, and what plays with its cover, its progress and what comes next. The music comes over Sendspin and plays on the car's speakers; skip on the steering wheel goes to the next or the previous track; the track shows on the instrument cluster. Sign in once from the phone (QR code). Needs the Music Assistant service.",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_music@0.1.16.tgz",
-        "size": 597087,
-        "sha256": "91ab727c86b5d22e45d4ca0c6d1e134dd012129c63fafd4fe8a8bad26233a889",
-        "url": "packages/aurelm_music@0.1.16.tgz"
+        "name": "aurelm_music@0.1.17.tgz",
+        "size": 597652,
+        "sha256": "2a888a2e354c68adf0c55caeb73f95f0483a6f7390b5d493efba5c7af82e96f3",
+        "url": "packages/aurelm_music@0.1.17.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_music.png",
