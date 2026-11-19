@@ -433,7 +433,7 @@ mgu.run({
                 else if (tab === T_PLAY) drawPlaying(cv, t, touch);
                 else drawStatus(cv, t);
             } catch (e) { log.warn('music draw: ' + (e && e.stack || e)); }
-            const vp = process.env.MUSIC_PREVIEW_VOLUME ? (process.env.MUSIC_PREVIEW_VOLUME === 'mute' ? { volume: 18, muted: true, max: 40 } : { volume: Number(process.env.MUSIC_PREVIEW_VOLUME), muted: false, max: 40 }) : volume.popup();
+            const vp = process.env.MUSIC_PREVIEW_VOLUME ? (process.env.MUSIC_PREVIEW_VOLUME === 'mute' ? { volume: 18, muted: true, max: 62 } : { volume: Number(process.env.MUSIC_PREVIEW_VOLUME), muted: false, max: 62 }) : volume.popup();
             if (vp) drawVolume(cv, t, vp);
             if (toast && Date.now() - toast.at < 5000) {
                 const w = Math.min(1200, cv.textWidth(ascii(toast.text), 20, { literal: true }) + 48), ty = vp ? H - 196 : H - 58;
@@ -455,7 +455,7 @@ mgu.run({
             const col = v.muted ? [160, 160, 170, 255] : [255, 255, 255, 255], s = 48, sx = px + 28, sy = py + 24;
             cv.fillRect(sx, sy + s * 0.32, s * 0.25, s * 0.36, col);
             cv.quad([[sx + s * 0.25, sy + s * 0.32], [sx + s * 0.55, sy + s * 0.08], [sx + s * 0.55, sy + s * 0.92], [sx + s * 0.25, sy + s * 0.68]], col);
-            const level = v.volume == null ? 0 : v.volume / (v.max || 40);
+            const level = v.volume == null ? 0 : v.volume / (v.max || 62);
             if (v.muted) {
                 cv.line(sx + s * 0.68, sy + s * 0.32, sx + s * 0.98, sy + s * 0.68, 4, col);
                 cv.line(sx + s * 0.98, sy + s * 0.32, sx + s * 0.68, sy + s * 0.68, 4, col);

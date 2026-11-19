@@ -54,7 +54,7 @@ test('where it starts: no popup; a change: 2 s; mute: while muted; other sinks i
     assert.strictEqual(vol.popup(), null, 'no popup for where it starts');
     // the knob
     sig.emit('volumeChanged', { sinkID: 1, volume: 18 });
-    assert.deepStrictEqual(vol.popup(), { volume: 18, muted: false, max: 40 });
+    assert.deepStrictEqual(vol.popup(), { volume: 18, muted: false, max: 62 });
     t += 1900; assert.ok(vol.popup(), 'still shown at 1.9 s');
     t += 200; assert.strictEqual(vol.popup(), null, 'gone after 2 s');
     // the same value again: nothing
@@ -67,14 +67,16 @@ test('where it starts: no popup; a change: 2 s; mute: while muted; other sinks i
     // mute: shown as long as it lasts
     sig.emit('sinkMuteStateChanged', { sinkID: 1, muteState: 'MS_MUTED' });
     t += 60000;
-    assert.deepStrictEqual(vol.popup(), { volume: 18, muted: true, max: 40 });
+    assert.deepStrictEqual(vol.popup(), { volume: 18, muted: true, max: 62 });
     // unmuted: the volume for 2 s
     sig.emit('sinkMuteStateChanged', { sinkID: 1, muteState: 'MS_UNMUTED' });
-    assert.deepStrictEqual(vol.popup(), { volume: 18, muted: false, max: 40 });
+    assert.deepStrictEqual(vol.popup(), { volume: 18, muted: false, max: 62 });
     t += 2100; assert.strictEqual(vol.popup(), null);
-    // a scale past 40: the bar ends at 100
-    sig.emit('volumeChanged', { sinkID: 1, volume: 55 });
-    assert.strictEqual(vol.popup().max, 100);
+    // the car's top (62) is the bar's end; past it, what was seen
+    sig.emit('volumeChanged', { sinkID: 1, volume: 62 });
+    assert.strictEqual(vol.popup().max, 62);
+    sig.emit('volumeChanged', { sinkID: 1, volume: 70 });
+    assert.strictEqual(vol.popup().max, 70);
     s = vol.state();
     assert.ok(s.changes >= 4 && changes >= 4, JSON.stringify(s));
     assert.ok(/volume/.test(s.last));
@@ -84,7 +86,7 @@ test('muted where it starts: the popup shows', async () => {
     const sig = fakeSignals([{ sinkID: 1, volume: 9, muteState: 'MS_MUTED' }]);
     const vol = createCarVolume(sig, log, {});
     await wait(30);
-    assert.deepStrictEqual(vol.popup(), { volume: 9, muted: true, max: 40 });
+    assert.deepStrictEqual(vol.popup(), { volume: 9, muted: true, max: 62 });
 });
 
 test('no SOME/IP (the PC): no popup, the reason kept', async () => {
