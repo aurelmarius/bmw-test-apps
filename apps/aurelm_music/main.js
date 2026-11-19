@@ -345,7 +345,7 @@ mgu.run({
         /* ---------- scrolling: a finger dragged on the page, the knob along the targets ---------- */
         const STEP = { home: 226, grid: 196, list: 46, search: 212 };
         function scroller() {
-            if (stack.length) { const e = stack[stack.length - 1]; return e.kind === 'row' ? { obj: e, step: STEP.grid, max: Math.max(0, Math.ceil(((e.row.items || []).length) / 9) - 2) } : { obj: e, step: STEP.list, max: Math.max(0, ((e.data && e.data.children) || []).length - 8) }; }
+            if (stack.length) { const e = stack[stack.length - 1]; if (e.kind === 'edit') return { obj: e, step: STEP.list, max: 0 }; return e.kind === 'row' ? { obj: e, step: STEP.grid, max: Math.max(0, Math.ceil(((e.row.items || []).length) / 9) - 2) } : { obj: e, step: STEP.list, max: Math.max(0, ((e.data && e.data.children) || []).length - 8) }; }
             if (tab === T_HOME) return { obj: home, step: STEP.home, max: Math.max(0, visibleRows().length - 2) };
             if (tab === T_LIB) { const l = libList(); return { obj: lib, step: STEP.grid, max: Math.max(0, Math.ceil(l.items.length / 9) - 2), more: () => moreLib(l, KINDS[lib.kind][0]) }; }
             if (tab === T_SEARCH && search.results) return { obj: search, step: STEP.search, max: Math.max(0, search.results.length - 2) };
@@ -541,7 +541,16 @@ mgu.run({
         }
 
         /** Home: the rows, two at a time, up to 8 covers each (a ninth opens the whole row) */
-        function visibleRows() { return (home.rows || []).filter((r) => !(r.items && r.items.length === 0)); }
+        // the sections chosen off (EDIT HOME): their ids, kept with the app's settings
+        const hiddenRows = () => { const v = ctx.settings.get('homeHidden'); return Array.isArray(v) ? v : []; };
+        function visibleRows() { const off = hiddenRows(); return (home.rows || []).filter((r) => !(r.items && r.items.length === 0) && off.indexOf(r.itemId) < 0); }
+        function toggleRow(id) {
+            const off = hiddenRows().slice(), i = off.indexOf(id);
+            if (i >= 0) off.splice(i, 1); else off.push(id);
+            ctx.settings.set('homeHidden', off);
+            home.first = 0; home.frac = 0;
+            render();
+        }
         function drawHome(cv, t, touch) {
             if (!home.rows) { message(cv, t, home.error ? 'Could not load the home page' : 'Loading...', home.error || ''); if (home.error && touch) cv.target(600, 200, 400, 80, () => loadHome(), 'retry', 8); return; }
             if (touch) cv.scroll = true;
@@ -558,6 +567,36 @@ mgu.run({
             if (off && cv.noclip) cv.noclip();
             if (home.first + 2 < rows.length) peek(cv, touch, { k: 'h:' + (home.first + 2) + ':0' });
             arrows(cv, t, touch, s, rows.length, W - 24, TOP + 22);
+            // the sections shown: chosen on their own page
+            if (touch) {
+                const ex = W - 370, ey = TOP + 4;
+                cv.roundRect(ex, ey, 160, 34, 17, withAlpha('#ffffff', 0.12));
+                cv.text('EDIT HOME', ex + 80, ey + 23, 15, t.text, { align: 'center', font: 'bold', literal: true });
+                cv.target(ex, ey, 160, 34, () => { stack.push({ kind: 'edit', first: 0 }); render(); }, 'edithome', 17);
+            }
+            if (!rows.length) message(cv, t, 'No sections shown', 'Choose them with EDIT HOME.');
+        }
+        /** EDIT HOME: every section Music Assistant has for the home page, a tap shows or hides it */
+        function drawEditHome(cv, t, touch) {
+            cv.text('Home sections', 160, TOP + 36, 26, t.text, { font: 'bold', literal: true });
+            cv.text('Tap a section to show or hide it on Home', 420, TOP + 34, 18, t.dim, { literal: true });
+            const all = home.rows || [], off = hiddenRows();
+            if (touch && off.length) {
+                const ax = W - 190;
+                cv.roundRect(ax, TOP + 8, 160, 36, 18, withAlpha('#ffffff', 0.12));
+                cv.text('Show all', ax + 80, TOP + 32, 17, t.text, { align: 'center', font: 'bold', literal: true });
+                cv.target(ax, TOP + 8, 160, 36, () => { ctx.settings.set('homeHidden', []); home.first = 0; home.frac = 0; render(); }, 'showall', 18);
+            }
+            if (!all.length) { cv.text(home.error ? home.error : 'Loading...', 24, TOP + 100, 20, t.dim, { literal: true }); return; }
+            const cols = all.length > 20 ? 3 : 2, per = Math.ceil(all.length / cols), colW = Math.floor((W - 48) / cols), rowH = Math.min(42, Math.floor((H - TOP - 80) / per));
+            all.forEach((r, i) => {
+                const x = 24 + Math.floor(i / per) * colW, y = TOP + 64 + (i % per) * rowH, on = off.indexOf(r.itemId) < 0;
+                const empty = r.items && r.items.length === 0;
+                cv.roundRect(x, y, 28, 28, 6, on ? GREEN : withAlpha('#ffffff', 0.12));
+                if (on) cv.polyline([[x + 7, y + 14], [x + 12, y + 20], [x + 21, y + 8]], 3, '#000000');
+                cv.text(clip(cv, r.name + (empty ? '  (empty now)' : ''), 20, colW - 60, 'label'), x + 42, y + 21, 20, on ? t.text : t.dim, { literal: true });
+                if (touch) cv.target(x - 6, y - 4, colW - 12, rowH, () => toggleRow(r.itemId), 'sec:' + i, 8);
+            });
         }
         function drawShelf(cv, t, touch, name, items, loading, y, key, more) {
             cv.text(clip(cv, name, 24, 1100, 'bold'), 24, y + 24, 24, t.text, { font: 'bold', literal: true });
@@ -665,6 +704,7 @@ mgu.run({
             cv.roundRect(24, TOP + 6, 110, 40, 20, withAlpha('#ffffff', 0.12));
             cv.text('< Back', 79, TOP + 33, 18, t.text, { align: 'center', font: 'bold', literal: true });
             if (touch) cv.target(24, TOP + 6, 110, 40, back, 'back', 20);
+            if (e.kind === 'edit') return drawEditHome(cv, t, touch);
             if (e.kind === 'row') {
                 cv.text(clip(cv, e.row.name, 26, 1100, 'bold'), 160, TOP + 36, 26, t.text, { font: 'bold', literal: true });
                 const s = drawGrid(cv, t, touch, e.row.items || [], e, TOP + 62, 'r');
@@ -864,6 +904,7 @@ mgu.run({
         }, 1000);
         if (ui.onVisible) ui.onVisible(() => { sync(); render(); });
         await poll();
+        if (process.env.MUSIC_PREVIEW_EDITHOME) stack.push({ kind: 'edit', first: 0 });
         if (process.env.MUSIC_PREVIEW_OPEN) openItem({ uri: process.env.MUSIC_PREVIEW_OPEN, name: '', sub: '', type: 'album' });
         if (process.env.MUSIC_PREVIEW_SEARCH) { search.q = process.env.MUSIC_PREVIEW_SEARCH; if (process.env.MUSIC_PREVIEW_SEARCH_RUN) runSearch(); }
         ctx.loop('MAIN', 2, draw);
