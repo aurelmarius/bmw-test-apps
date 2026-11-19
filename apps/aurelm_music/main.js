@@ -756,8 +756,12 @@ mgu.run({
             const rep = ctl.repeat || 'off';
             btn(cx + 220, 26, rep !== 'off' ? withAlpha(GREEN, 0.3) : withAlpha('#ffffff', 0.08), (bx) => cv.text(rep === 'one' ? 'REP 1' : 'REP', bx, cy + 6, 14, rep !== 'off' ? GREEN : t.dim, { align: 'center', font: 'bold', literal: true }),
                 () => control('repeat', rep === 'off' ? 'all' : rep === 'all' ? 'one' : 'off', 'Repeat'), 'repeat');
+            // a radio station (live, no length): no autoplay or crossfade (they act on tracks), and in place of what
+            // comes next, the library's stations, to change to
+            const curItem = (queue.items || []).filter((q) => q.index === queue.index)[0];
+            const radio = !dur && (!curItem || curItem.type === 'radio' || curItem.type == null);
             // Autoplay: Music Assistant adds similar music when the queue runs out (its state comes with the queue)
-            if (queue.autoplay != null) {
+            if (!radio && queue.autoplay != null) {
                 const on = !!queue.autoplay, ay = TOP + 396;
                 cv.roundRect(x, ay, 176, 40, 20, on ? withAlpha(GREEN, 0.3) : withAlpha('#ffffff', 0.08));
                 cv.text('AUTOPLAY ' + (on ? 'ON' : 'OFF'), x + 88, ay + 26, 15, on ? GREEN : t.dim, { align: 'center', font: 'bold', literal: true });
@@ -767,8 +771,8 @@ mgu.run({
                 }, 'autoplay', 20);
             }
             // Crossfade: Music Assistant blends one track into the next (its length is set in MA's queue settings)
-            let pillX = x + (queue.autoplay != null ? 192 : 0);
-            if (queue.crossfade != null) {
+            let pillX = x + (!radio && queue.autoplay != null ? 192 : 0);
+            if (!radio && queue.crossfade != null) {
                 const on = !!queue.crossfade, ay = TOP + 396;
                 cv.roundRect(pillX, ay, 186, 40, 20, on ? withAlpha(GREEN, 0.3) : withAlpha('#ffffff', 0.08));
                 cv.text('CROSSFADE ' + (on ? 'ON' : 'OFF'), pillX + 93, ay + 26, 15, on ? GREEN : t.dim, { align: 'center', font: 'bold', literal: true });
@@ -782,6 +786,7 @@ mgu.run({
             // up next
             const qx = 1110, qw = 466;
             cv.fillRect(qx - 20, TOP + 10, 1, 450, withAlpha('#ffffff', 0.12));
+            if (radio) return drawStations(cv, t, touch, qx, qw, m, curItem);
             cv.text('Up next', qx, TOP + 36, 22, t.text, { font: 'bold', literal: true });
             const next = (queue.items || []).filter((q) => q.index > queue.index).slice(0, 8);
             if (!next.length) cv.text(queue.loading ? 'Loading...' : queue.autoplay ? 'Autoplay adds similar music next' : 'Nothing queued after this', qx, TOP + 76, 18, t.dim, { literal: true });
@@ -791,6 +796,26 @@ mgu.run({
                 cv.text(clip(cv, q.name, 18, qw - 60, 'label'), qx + 56, y + 20, 18, t.text, { literal: true });
                 cv.text(clip(cv, q.sub, 16, qw - 60, 'label'), qx + 56, y + 40, 16, t.dim, { literal: true });
                 if (touch) cv.target(qx - 6, y - 4, qw, 50, () => control('play_index', q.queueItemId || q.index, 'Play'), 'q:' + i, 6);
+            });
+        }
+
+        /** the library's radio stations beside a station playing: the one playing marked, a tap plays another */
+        function drawStations(cv, t, touch, qx, qw, m, curItem) {
+            cv.text('Radio stations', qx, TOP + 36, 22, t.text, { font: 'bold', literal: true });
+            let l = lib.lists.radios;
+            if (!l) { l = lib.lists.radios = { items: [], loading: false, done: false, error: null }; moreLib(l, 'radios'); }
+            if (!l.items.length) {
+                cv.text(l.loading ? 'Loading...' : l.error ? clip(cv, l.error, 18, qw, 'label') : 'No radio stations in the library', qx, TOP + 76, 18, t.dim, { literal: true });
+                return;
+            }
+            const names = [m.album, curItem && curItem.name].filter(Boolean).map((n) => String(n).toLowerCase());
+            l.items.slice(0, 8).forEach((r, i) => {
+                const y = TOP + 56 + i * 52, on = names.indexOf(String(r.name || '').toLowerCase()) >= 0;
+                if (on) cv.roundRect(qx - 8, y - 4, qw + 4, 52, 8, withAlpha(GREEN, 0.16));
+                covers.draw(cv, r.img, qx, y, 44, 4, r.name);
+                cv.text(clip(cv, r.name, 18, qw - 60, 'label'), qx + 56, y + 20, 18, on ? GREEN : t.text, { literal: true });
+                cv.text(clip(cv, on ? 'Playing now' : r.sub, 16, qw - 60, 'label'), qx + 56, y + 40, 16, t.dim, { literal: true });
+                if (touch && !on) cv.target(qx - 6, y - 4, qw, 50, () => play(r), 'st:' + i, 6);
             });
         }
 
