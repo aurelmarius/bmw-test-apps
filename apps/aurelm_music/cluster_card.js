@@ -10,7 +10,8 @@
  * (robertnisipeanu/idrive-apps, the Store; Waze on cluster installs it): an image layer on its `panel` target.
  *
  *   const card = createClusterCard({ log, png, Canvas (the kit's), info, cover, enabled, offset });
- *   info()  -> { id, name, sub, pos, dur, paused, loading } | null      cover(id) -> { w, h, data } | null (RGBA)
+ *   info()  -> { id, name, sub, pos, dur, paused, loading, vol } | null   (vol: { volume, muted, max } while the
+ *              volume popup shows: it takes the place of the time and the progress, drawn at once)      cover(id) -> { w, h, data } | null (RGBA)
  *   card.update()     called each second: shows, hides, draws again when what it shows changes (at most every 5 s)
  *   card.state()      { state: 'off'|'missing'|'waiting'|'shown'|..., detail }
  */
@@ -21,7 +22,7 @@ const SOCKET = '/dev/shm/cluster-render/render.sock';
 const CARD = { w: 520, h: 420 };
 const PLACE = { x: 1130, y: 140 };      // panel pixels (1920x720): centred on the right dial's media widget (1390, 345)
 const LOGO = { w: 150, h: 150 };        // the cover, as BMW's widget has it (square)
-const MIN_MS = 5000;
+const MIN_MS = 5000, VOL_MS = 150;
 
 // as BMW's widget: no frame, the lines centred under the cover, white and a softer white; behind them a dark field
 // that fades out to the dial (an ellipse, darkest inside FADE_IN of its radius). 0.1.8: smaller (SCALE of the card)
@@ -78,7 +79,8 @@ function render(i, Canvas) {
     cv.text(clip(cv, ascii(i.name), 34, w, 'label'), cx, y, 34, TEXT, { align: 'center', literal: true });
     y += 40;
     if (i.sub) { cv.text(clip(cv, ascii(i.sub), 28, w, 'label'), cx, y, 28, SOFT, { align: 'center', literal: true }); y += 38; }
-    if (i.loading) cv.text('Loading...', cx, y, 26, DIM, { align: 'center', literal: true });
+    if (i.vol) drawVolume(cv, cx, y, i.vol);
+    else if (i.loading) cv.text('Loading...', cx, y, 26, DIM, { align: 'center', literal: true });
     else if (i.dur) {
         cv.text((i.paused ? 'Paused  ' : '') + hm(i.pos) + ' / ' + hm(i.dur), cx, y, 26, i.paused ? SOFT : TEXT, { align: 'center', literal: true });
         y += 16;
@@ -89,12 +91,31 @@ function render(i, Canvas) {
     return cv;
 }
 
+/** the car's volume in place of the time: a speaker (crossed out when muted), the bar and the number (or Mute) */
+function drawVolume(cv, cx, y, v) {
+    const col = v.muted ? DIM : TEXT, s = 30, sx = cx - 150, sy = y - 24;
+    cv.fillRect(sx, sy + s * 0.32, s * 0.25, s * 0.36, col);
+    cv.quad([[sx + s * 0.25, sy + s * 0.32], [sx + s * 0.55, sy + s * 0.08], [sx + s * 0.55, sy + s * 0.92], [sx + s * 0.25, sy + s * 0.68]], col);
+    const level = v.volume == null ? 0 : v.volume / (v.max || 62), my = sy + s / 2;
+    if (v.muted) {
+        cv.line(sx + s * 0.68, sy + s * 0.32, sx + s * 0.98, sy + s * 0.68, 3, col);
+        cv.line(sx + s * 0.98, sy + s * 0.32, sx + s * 0.68, sy + s * 0.68, 3, col);
+    } else {
+        if (level > 0) cv.arc(sx + s * 0.55, my, s * 0.19, s * 0.27, 50, 130, col);
+        if (level >= 0.35) cv.arc(sx + s * 0.55, my, s * 0.40, s * 0.48, 50, 130, col);
+    }
+    const bx = cx - 100, bw = 168;
+    cv.roundRect(bx, my - 3, bw, 6, 3, TRACK);
+    if (!v.muted && level > 0) cv.roundRect(bx, my - 3, Math.max(6, bw * Math.min(1, level)), 6, 3, BLUE);
+    cv.text(v.muted ? 'Mute' : v.volume == null ? '-' : String(Math.round(v.volume)), cx + 152, my + 10, 28, col, { align: 'right', literal: true });
+}
+
 function createClusterCard(o) {
     const log = o.log || { info() {}, warn() {} };
     const CLIENT_PATH = o.clientPath || CLIENT, SOCKET_PATH = o.socketPath || SOCKET;
     let cr = null, layer = null, loadError = null;
     let st = { state: 'off', detail: 'off in the settings' };
-    let key = null, drawnAt = 0, shownWant = false, place = null;
+    let key = null, drawnAt = 0, shownWant = false, place = null, drawnVol = '', later = null;
     const covers = new Map();   // item id -> { state, img, at }
 
     function client() {
@@ -135,7 +156,7 @@ function createClusterCard(o) {
 
     function hide(why) {
         if (layer && shownWant) { cr.set(layer, { visible: 0 }); shownWant = false; log.info('cluster: card hidden (' + why + ')'); }
-        key = null;
+        key = null; drawnVol = '';
     }
 
     function update() {
@@ -153,12 +174,16 @@ function createClusterCard(o) {
         } else if (place !== x + ',' + y) { c.set(layer, { x, y }); place = x + ',' + y; }
         i.cover = coverOf(i.id);
         // what is drawn changes with the track, the cover, paused or loading and the minute (the progress)
-        const k = [i.id, i.name, i.sub, i.cover ? i.cover.w : 0, Math.floor((i.pos || 0) / 5), i.dur, !!i.paused, !!i.loading].join('|');
-        if (k !== key && Date.now() - drawnAt >= MIN_MS) {
+        // the volume (while its popup shows, and the moment it goes) is drawn at once, at most every VOL_MS
+        const vk = i.vol ? (i.vol.muted ? 'm' : 'v' + i.vol.volume) : '';
+        const k = [i.id, i.name, i.sub, i.cover ? i.cover.w : 0, Math.floor((i.pos || 0) / 5), i.dur, !!i.paused, !!i.loading, vk].join('|');
+        const urgent = vk !== drawnVol;
+        const since = Date.now() - drawnAt;
+        if (k !== key && (since >= MIN_MS || (urgent && since >= VOL_MS))) {
             const cv = render(i, o.Canvas);
             c.pixels(layer, null, Buffer.from(cv.d.buffer, cv.d.byteOffset, cv.d.length));
-            key = k; drawnAt = Date.now();
-        }
+            key = k; drawnAt = Date.now(); drawnVol = vk;
+        } else if (urgent && !later) later = setTimeout(() => { later = null; update(); }, VOL_MS - since);
         if (!shownWant) { c.set(layer, { visible: 1 }); shownWant = true; log.info('cluster: card for ' + ascii(i.name) + ' at ' + x + ',' + y); }
     }
 

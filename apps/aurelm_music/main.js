@@ -250,7 +250,13 @@ mgu.run({
                 return proxies[k];
             } }) : ctx.signals;
         // the car's volume: a popup over the app when it changes (the HMI shows none on 287): sink 1, the car's main volume, all the time while muted
-        const volume = createCarVolume(sig, log, { onChange: () => render() });
+        const volume = createCarVolume(sig, log, { onChange: () => {
+            render();
+            // the cluster card shows it too, at once, and goes back to the time when the popup goes
+            try { card.update(); } catch (e) { /* not yet */ }
+            clearTimeout(volEnd); volEnd = setTimeout(() => { try { card.update(); } catch (e) { /* gone */ } }, 2100);
+        } });
+        let volEnd = null;
         const carAudio = createCarAudio(sig, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Music Assistant', yieldStops: true,
             onYield: (by) => {
                 log.info('music: ' + by + ' took the speakers: pausing');
@@ -275,7 +281,7 @@ mgu.run({
                 if (!musicOn() || !m || !m.title) return null;
                 const pos = position(c);
                 return { id: (st.artVer || 0) + '|' + m.title, name: m.title, sub: m.artist || m.album || '', pos: pos != null ? pos / 1000 : null,
-                    dur: m.durationMs ? m.durationMs / 1000 : null, paused: c.playback === 'paused', loading: false };
+                    dur: m.durationMs ? m.durationMs / 1000 : null, paused: c.playback === 'paused', loading: false, vol: volume.popup() };
             } });
         setInterval(() => { try { card.update(); } catch (e) { log.warn('cluster: ' + (e && e.stack || e)); } }, 1000);
         if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => { card.close(); carAudio.want(false); });
@@ -449,8 +455,8 @@ mgu.run({
          */
         function drawVolume(cv, t, v) {
             const pw = 640, ph = 96, px = (W - pw) / 2, py = H - ph - 40, cy = py + ph / 2;
-            cv.roundRect(px - 4, py + 2, pw + 8, ph + 6, 26, [0, 0, 0, 70]);
-            cv.roundRect(px, py, pw, ph, 22, [30, 32, 38, 150]);
+            cv.roundRect(px - 4, py + 2, pw + 8, ph + 6, 26, [0, 0, 0, 90]);
+            cv.roundRect(px, py, pw, ph, 22, [30, 32, 38, 215]);
             cv.strokeRoundRect(px, py, pw, ph, 22, 1, [255, 255, 255, 50]);
             const col = v.muted ? [160, 160, 170, 255] : [255, 255, 255, 255], s = 48, sx = px + 28, sy = py + 24;
             cv.fillRect(sx, sy + s * 0.32, s * 0.25, s * 0.36, col);
