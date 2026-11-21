@@ -33,7 +33,7 @@ const nftm = require('./nft');
 const pagem = require('./page');
 const { createPlayer } = require('./player');
 
-const VERSION = '0.3.13';
+const VERSION = '0.3.14';
 const PAGE_PORT = 8490;
 const PAGE_MINUTES = 10;
 const IDLE_MS = 10 * 60 * 1000;
@@ -291,8 +291,8 @@ function createService(opts) {
         } else if (cmd === 'track' && (m.kind === 'audio' || m.kind === 'subs') && isFinite(Number(m.index))) {
             toChild({ op: 'track', kind: m.kind, index: Number(m.index) });
         } else if (cmd === 'prefs') {
-            const p = { maxBitrate: Number(m.maxBitrate) || 8000000, adaptive: m.adaptive !== false };
-            if (!prefs || p.maxBitrate !== prefs.maxBitrate || p.adaptive !== prefs.adaptive) {
+            const p = { maxBitrate: Number(m.maxBitrate) || 8000000, adaptive: m.adaptive !== false, phoneVolume: m.phoneVolume === true };
+            if (!prefs || p.maxBitrate !== prefs.maxBitrate || p.adaptive !== prefs.adaptive || p.phoneVolume !== !!prefs.phoneVolume) {
                 prefs = p;
                 try { writeJson('prefs.json', prefs); } catch (e) { log('prefs: ' + e.message); }
                 toChild({ op: 'prefs', prefs });

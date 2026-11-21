@@ -119,7 +119,11 @@ function createPlayback(o) {
     const sink = o.sink;
     // the quality: the most the car asks for (setting "Streaming quality") and whether it goes lower by itself when
     // the stream runs dry (setting "Lower the quality when the internet is slow"); see adapt()
-    const prefs = { maxBitrate: o.bitrate || 8000000, adaptive: true };
+    // phoneVolume: the volume the phone sends (Emby's own, cast to the car) applied to the sound too. Off by default:
+    // the car's volume is the one there is (the sound left at 100%, only Mute from the phone), else the two add up
+    // and the film plays quiet at the phone's 40%
+    const prefs = { maxBitrate: o.bitrate || 8000000, adaptive: true, phoneVolume: false };
+    const gain = () => (muted ? 0 : prefs.phoneVolume ? volume / 100 : 1);
     const LADDER = [8000000, 4000000, 2000000, 1000000];
     const STALLS = 2, STALL_WINDOW_MS = 60000, LONG_STALL_MS = 8000, SWITCH_COOLDOWN_MS = 30000;
     const UP_AFTER_MS = o.adaptUpMs || 300000;
@@ -243,6 +247,12 @@ function createPlayback(o) {
     function setPrefs(p) {
         const max = LADDER.indexOf(Number(p && p.maxBitrate)) >= 0 ? Number(p.maxBitrate) : prefs.maxBitrate;
         const adaptive = p && p.adaptive !== undefined ? !!p.adaptive : prefs.adaptive;
+        const phoneVolume = p && p.phoneVolume !== undefined ? !!p.phoneVolume : prefs.phoneVolume;
+        if (phoneVolume !== prefs.phoneVolume) {
+            prefs.phoneVolume = phoneVolume;
+            log('volume: ' + (phoneVolume ? 'the phone\'s volume applies too' : 'the car\'s only (the phone\'s mute applies)'));
+            if (cur && cur.streamId) sink.ctl(cur.streamId, 'volume ' + gain());
+        }
         if (max === prefs.maxBitrate && adaptive === prefs.adaptive) return;
         prefs.maxBitrate = max; prefs.adaptive = adaptive;
         log('quality: at most ' + max / 1e6 + ' Mbit/s, ' + (adaptive ? 'lower when the internet is slow' : 'fixed'));
@@ -436,7 +446,7 @@ function createPlayback(o) {
             c.stream = r;
             sink.start(id);
             if (c.paused) sink.ctl(id, 'pause');
-            sink.ctl(id, 'volume ' + (muted ? 0 : volume / 100));
+            sink.ctl(id, 'volume ' + gain());
             let aborted = false;
             r.res.on('aborted', () => { aborted = true; });
             r.res.on('data', (d) => {
@@ -569,7 +579,7 @@ function createPlayback(o) {
     }
     function setVolume(v) {
         volume = Math.max(0, Math.min(100, Math.round(v)));
-        if (cur && cur.streamId) sink.ctl(cur.streamId, 'volume ' + (muted ? 0 : volume / 100));
+        if (cur && cur.streamId) sink.ctl(cur.streamId, 'volume ' + gain());
         report('progress', { EventName: 'volumechange' });
     }
     function command(d) {
