@@ -70,17 +70,17 @@
     {
       "id": "aurelm_emby",
       "kind": "app",
-      "version": "0.3.14",
+      "version": "0.3.15",
       "title": "Emby",
       "description": "The head unit as a cast target for the Emby phone app: sign in once from the phone (QR code), then choose \"BMW iDrive\" in Emby's cast menu. The film plays on the centre screen while parked, its sound on the car's speakers; pause, seek and stop from the phone. Needs the Emby cast service.",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_emby@0.3.14.tgz",
-        "size": 598309,
-        "sha256": "37e12d2394ad250ebf166d4016d18637834d6a73a2555225ba072d67c9da4fa3",
-        "url": "packages/aurelm_emby@0.3.14.tgz"
+        "name": "aurelm_emby@0.3.15.tgz",
+        "size": 598557,
+        "sha256": "15774aa5c325063a3d0d13ee7312e42c42c686f6b051f0f36f94fc3bedac99c8",
+        "url": "packages/aurelm_emby@0.3.15.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_emby.png",
