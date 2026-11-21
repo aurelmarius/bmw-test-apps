@@ -32,6 +32,8 @@ const { RenderClient } = require('./mgu_render_client');
 const { createMirrorView } = require('./mirror_view');
 const { createControls, videoRect } = require('./controls');
 const { createCarAudio } = require('./car_audio');
+const { createCarVolume } = require('./car_volume');
+const { drawPopup: drawVolume } = require('./volume_popup');
 const { createClusterCard } = require('./cluster_card');
 
 const W = 1600, H = 520;
@@ -275,7 +277,23 @@ mgu.run({
         // the driver chose another source in the car (the radio...): the film paused, its card off the cluster, and
         // the speakers taken back only when it plays again (here or from the phone: paused, then playing)
         let lostPaused = false;
-        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Emby',
+        // one proxy per interface for the speakers and the volume (the audio manager's)
+        const proxies = {};
+        const sig = ctx.signals && ctx.signals.proxy ? Object.assign({}, ctx.signals, {
+            proxy: (iface, inst) => {
+                const k = iface + '/' + inst;
+                if (!proxies[k]) proxies[k] = ctx.signals.proxy(iface, inst).catch((e) => { delete proxies[k]; throw e; });
+                return proxies[k];
+            } }) : ctx.signals;
+        // the car's volume (sink 1): a popup over the page and the film when it changes (the HMI shows none on 287),
+        // all the time while muted; on the cluster card too
+        let volEnd = null;
+        const volume = createCarVolume(sig, log, { onChange: () => {
+            const again = () => { try { render(); mirror.tick(); card.update(); } catch (e) { /* not yet */ } };
+            again();
+            clearTimeout(volEnd); volEnd = setTimeout(again, 2100);
+        } });
+        const carAudio = createCarAudio(sig, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Emby',
             onLost: () => {
                 log.info('emby: the car switched to another source: pausing the film');
                 lostPaused = false;
@@ -403,13 +421,15 @@ mgu.run({
             // no picture yet (a new stream starting): a word in the middle of the black
             const pb = st && st.playback;
             const loading = !!(pb && (pb.state === 'loading' || pb.state === 'buffering') && !(pl && pl.running && pl.tick && pl.tick.shown > 0));
+            const vp = volume.popup();
             return {
-                key: [mode, fw, fh, sub, bar, loading].join('#'),
+                key: [mode, fw, fh, sub, bar, loading, vp ? (vp.muted ? 'm' : vp.volume) : ''].join('#'),
                 rect: (p) => videoRect(mode, fw, fh, p),
                 draw: (rec, p, hinting) => {
                     if (loading) rec.text('Loading...', p.w / 2, p.h / 2, Math.round(p.h * 0.05), 0xffffffb0, { align: 'center', font: 'bold', literal: true });
                     if (sub) drawSubs(rec, p, hinting, sub, bar ? controls.height(p) + 10 : 0);
                     if (bar) controls.draw(rec, p, info);
+                    if (vp) drawVolume(rec, p.w, p.h, vp, GREEN, p.h / 520, bar ? controls.height(p) + 10 : 0);
                 },
             };
         }
@@ -425,7 +445,7 @@ mgu.run({
                 const pb = st && st.playback;
                 if (!filmOn(pb) || !pb.item || !pb.item.id || carAudio.state().lost) return null;
                 return { id: pb.item.id, name: pb.item.name || pb.item.title || '', sub: pb.item.sub || null, pos: posNow(), dur: pb.dur,
-                    paused: pb.state === 'paused', loading: pb.state === 'loading' };
+                    paused: pb.state === 'paused', loading: pb.state === 'loading', vol: volume.popup() };
             } });
         setInterval(() => { try { card.update(); } catch (e) { log.warn('cluster: ' + (e && e.stack || e)); } }, 1000);
         if (ctx.app && ctx.app.on) ctx.app.on('shutdown', () => card.close());
@@ -456,6 +476,8 @@ mgu.run({
             const page = st && st.page && st.page.open ? st.page : null;
             G.frame(cv, t, ['Emby'], 0, [busy && { text: busy, color: 'accent' }, page && { text: 'SIGN-IN ' + Math.ceil((page.left || 0) / 60) + ' MIN' }]);
             draw(cv, t, page);
+            const vp = volume.popup();
+            if (vp) drawVolume(cv, W, H, vp, GREEN);
             return ui.image('MAIN_GFX', cv);
         }
 

@@ -18,13 +18,14 @@
  *   card.render(i)    the card's RGBA (CARD.w x CARD.h) for an info i (tests)
  */
 const fs = require('fs');
+const { drawLine: drawVolume } = require('./volume_popup');
 
 const CLIENT = '/var/opt/cluster-render/current/cluster_render_client.js';
 const SOCKET = '/dev/shm/cluster-render/render.sock';
 const CARD = { w: 520, h: 420 };
 const PLACE = { x: 1130, y: 140 };      // panel pixels (1920x720): centred on the right dial's media widget (1390, 345)
 const LOGO = { w: 190, h: 150 };        // the poster, in the cover's place (a film's is 2:3, an episode's 16:9)
-const MIN_MS = 5000;
+const MIN_MS = 5000, VOL_MS = 150;
 
 // as BMW's widget: no frame, the lines centred under the cover, white and a softer white; behind them a dark field
 // that fades out to the dial (an ellipse, opaque inside FADE_IN of its radius: it hides the widget underneath)
@@ -80,7 +81,8 @@ function render(i, Canvas) {
     cv.text(clip(cv, ascii(i.name), 34, w, 'label'), cx, y, 34, TEXT, { align: 'center', literal: true });
     y += 40;
     if (i.sub) { cv.text(clip(cv, ascii(i.sub), 28, w, 'label'), cx, y, 28, SOFT, { align: 'center', literal: true }); y += 38; }
-    if (i.loading) cv.text('Loading...', cx, y, 26, DIM, { align: 'center', literal: true });
+    if (i.vol) drawVolume(cv, cx, y, i.vol, { text: TEXT, dim: DIM, track: TRACK, bar: BLUE });
+    else if (i.loading) cv.text('Loading...', cx, y, 26, DIM, { align: 'center', literal: true });
     else if (i.dur) {
         const left = Math.max(0, Math.round((i.dur - (i.pos || 0)) / 60));
         cv.text((i.paused ? 'Paused  ' : '') + hm(i.pos) + ' / ' + hm(i.dur) + (left ? '  (' + left + ' min)' : ''), cx, y, 26, i.paused ? SOFT : TEXT, { align: 'center', literal: true });
@@ -97,7 +99,7 @@ function createClusterCard(o) {
     const CLIENT_PATH = o.clientPath || CLIENT, SOCKET_PATH = o.socketPath || SOCKET;
     let cr = null, layer = null, loadError = null;
     let st = { state: 'off', detail: 'off in the settings' };
-    let key = null, drawnAt = 0, shownWant = false, place = null;
+    let key = null, drawnAt = 0, shownWant = false, place = null, drawnVol = '', later = null;
     const covers = new Map();   // item id -> { state, img, at }
 
     function client() {
@@ -143,7 +145,7 @@ function createClusterCard(o) {
 
     function hide(why) {
         if (layer && shownWant) { cr.set(layer, { visible: 0 }); shownWant = false; log.info('cluster: card hidden (' + why + ')'); }
-        key = null;
+        key = null; drawnVol = '';
     }
 
     function update() {
@@ -161,12 +163,15 @@ function createClusterCard(o) {
         } else if (place !== x + ',' + y) { c.set(layer, { x, y }); place = x + ',' + y; }
         i.cover = coverOf(i.id);
         // what is drawn changes with the film, the poster, paused or loading and the minute (the progress)
-        const k = [i.id, i.name, i.sub, i.cover ? i.cover.w : 0, Math.floor((i.pos || 0) / 60), i.dur, !!i.paused, !!i.loading].join('|');
-        if (k !== key && Date.now() - drawnAt >= MIN_MS) {
+        // the volume (while its popup shows, and the moment it goes) is drawn at once, at most every VOL_MS
+        const vk = i.vol ? (i.vol.muted ? 'm' : 'v' + i.vol.volume) : '';
+        const k = [i.id, i.name, i.sub, i.cover ? i.cover.w : 0, Math.floor((i.pos || 0) / 60), i.dur, !!i.paused, !!i.loading, vk].join('|');
+        const urgent = vk !== drawnVol, since = Date.now() - drawnAt;
+        if (k !== key && (since >= MIN_MS || (urgent && since >= VOL_MS))) {
             const cv = render(i, o.Canvas);
             c.pixels(layer, null, Buffer.from(cv.d.buffer, cv.d.byteOffset, cv.d.length));
-            key = k; drawnAt = Date.now();
-        }
+            key = k; drawnAt = Date.now(); drawnVol = vk;
+        } else if (urgent && !later) later = setTimeout(() => { later = null; update(); }, VOL_MS - since);
         if (!shownWant) { c.set(layer, { visible: 1 }); shownWant = true; log.info('cluster: card for ' + ascii(i.name) + ' at ' + x + ',' + y); }
     }
 
