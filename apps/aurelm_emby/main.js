@@ -155,7 +155,8 @@ function playRows(s, rows) {
     else if (!a.ok) snd = a.retrying ? { state: 'wait', detail: 'the sound device is busy (another app\'s sound): taking it over... (' + a.error + ')' } : { state: 'bad', detail: a.error };
     else {
         const n = String(a.codec).toUpperCase() + ' ' + a.channels + 'ch' + (tk.aplayed ? ', ' + tk.aplayed + ' played' : '') + (tk.aunread ? ', ' + tk.aunread + ' unread' : '');
-        if (ca.taken) snd = { state: 'bad', detail: n + '; the speakers are in use by AirPlay Test: stop it there' };
+        if (ca.lost) snd = { state: 'wait', detail: n + '; the car switched to another source: play the film to take the speakers back' };
+        else if (ca.taken) snd = { state: 'bad', detail: n + '; the speakers are in use by AirPlay Test: stop it there' };
         else if (ca.error) snd = { state: 'bad', detail: n + '; route: ' + ca.error };
         else snd = { state: ca.connected ? 'ok' : 'wait', detail: n + (ca.connected ? ', on the speakers' : ', connecting the speakers') + (pb.muted ? ', muted' : pb.volume < 100 ? ', volume ' + pb.volume + '%' : '') };
     }
@@ -270,7 +271,15 @@ mgu.run({
                 else if (disp) { disp.lastWords = null; if (disp._repaint) disp._repaint(); }
             } catch (e) { log.warn('emby page touch: ' + e); }
         }
-        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Emby' });
+        // the driver chose another source in the car (the radio...): the film paused, its card off the cluster, and
+        // the speakers taken back only when it plays again (here or from the phone: paused, then playing)
+        let lostPaused = false;
+        const carAudio = createCarAudio(ctx.signals, log, { file: ctx.dataDir ? path.join(ctx.dataDir, 'car-audio.json') : null, app: 'Emby',
+            onLost: () => {
+                log.info('emby: the car switched to another source: pausing the film');
+                lostPaused = false;
+                ask('playstate', { command: 'Pause' }).then((r) => { if (r) st = r; }).catch(() => {});
+            } });
         // setting "Picture only while parked" (on by default): off, the picture stays while driving too (the
         // passengers' choice, e.g. cartoons for the children; the driver sees the centre screen)
         const parkedOnly = () => ctx.settings.get('parkedOnly') !== false;
@@ -368,6 +377,7 @@ mgu.run({
                 }
                 if (a === 'back10') return seekBy(-10);
                 if (a === 'fwd30') return seekBy(30);
+                if (a === 'playpause') { carAudio.resume(); lostPaused = false; }
                 if (a === 'playpause') return ask('playstate', { command: 'PlayPause' }).then((r) => { if (r) st = r; mirror.tick(); });
                 if (a === 'stop') { controls.hide(); return ask('playstate', { command: 'Stop' }).then((r) => { if (r) st = r; }); }
                 if (a === 'aspect') { ctx.settings.set('aspect', ASPECTS[(ASPECTS.indexOf(aspect()) + 1) % ASPECTS.length]); log.info('emby: aspect ' + aspect()); return mirror.tick(); }
@@ -412,7 +422,7 @@ mgu.run({
             offset: () => ({ dx: offsetOf('clusterX'), dy: offsetOf('clusterY') }),
             info: () => {
                 const pb = st && st.playback;
-                if (!filmOn(pb) || !pb.item || !pb.item.id) return null;
+                if (!filmOn(pb) || !pb.item || !pb.item.id || carAudio.state().lost) return null;
                 return { id: pb.item.id, name: pb.item.name || pb.item.title || '', sub: pb.item.sub || null, pos: posNow(), dur: pb.dur,
                     paused: pb.state === 'paused', loading: pb.state === 'loading' };
             } });
@@ -430,6 +440,10 @@ mgu.run({
             // busy (the player tries again each second: Music Assistant lets go once it sees this app's claim): still wanted
             const soundFailed = !!(pl && pl.running && pl.audio && pl.audio.ok === false && !pl.audio.retrying);
             const on = filmOn(pb) && !soundFailed;
+            if (carAudio.state().lost && pb) {
+                if (pb.state === 'paused') lostPaused = true;
+                else if (pb.state === 'playing' && lostPaused) { log.info('emby: the film plays again: taking the speakers back'); carAudio.resume(); lostPaused = false; }
+            }
             if (on) soundUntil = Date.now() + 5000;
             carAudio.want(on || Date.now() < soundUntil);
         }
