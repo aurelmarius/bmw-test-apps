@@ -190,14 +190,16 @@ function createMa(o) {
         throw new Error('Music Assistant has no player for this car yet (Sendspin not connected)');
     }
     /** play an item now: option replace (default) | next | add */
-    async function play(uri, option, startItem) {
+    function play(uri, option, startItem) { return again(() => play1(uri, option, startItem)); }
+    async function play1(uri, option, startItem) {
         const q = await needPlayer();
         const args = { queue_id: q, media: [uri], option: option || 'replace' };
         if (startItem) args.start_item = startItem;
         await api('player_queues/play_media', args, 30000);
         return q;
     }
-    async function control(cmd, arg) {
+    function control(cmd, arg) { return again(() => control1(cmd, arg)); }
+    async function control1(cmd, arg) {
         const q = await needPlayer();
         switch (cmd) {
         case 'play_pause': case 'next': case 'previous': case 'play': case 'pause': case 'stop': case 'resume':
@@ -240,6 +242,12 @@ function createMa(o) {
 
     /* ---------------------------------------------------------------- Sendspin */
     let sock = null, retry = null, timeTimer = null, pumpTimer = null, stateSent = false;
+    // a dead connection: after the head unit slept (the car off a few minutes) the socket stays open here while the
+    // server has long dropped it (and the player with it: its commands answer HTTP 500). Each message from the
+    // server is noted (lastRx; the time sync asks every 5 s), the wall clock is watched for a jump (beat), and the
+    // connection is made again at once when either says so (fastRetry), without the back-off of a server down (fails)
+    let lastRx = 0, lastBeat = 0, beatTimer = null, fails = 0, fastRetry = false;
+    const SILENT_MS = 15000, SLEPT_MS = 5000;
     let offset = null;                 // server µs - our µs, as the time exchanges measure it
     let clockOff = null;               // the one the sound goes by: follows offset by 5 ms a second at most (a
                                        // jump of the measure over a mobile network would be a gap or a cut in the
@@ -327,7 +335,7 @@ function createMa(o) {
         if (type === 'auth_ok') { log('Sendspin: signed in'); hello(); return; }
         if (type === 'server/time') return onTime(p);
         if (type === 'server/hello') {
-            st.connectedAt = Date.now(); setConn('connected');
+            st.connectedAt = Date.now(); fails = 0; setConn('connected');
             log('Sendspin: connected to ' + (p.name || '?') + ', roles ' + (p.active_roles || []).join(', '));
             timeTick(); setTimeout(timeTick, 150); setTimeout(timeTick, 300);
             setTimeout(() => playerId().catch(() => {}), 1500);
@@ -489,26 +497,65 @@ function createMa(o) {
         const u = account.server.replace(/^http/i, 'ws') + '/sendspin';
         setConn('connecting');
         offset = null; clockOff = null; samples.length = 0; stateSent = false; resetQueue(); resetHeader();
+        lastRx = Date.now();
         const s = ws.connect({ url: u, connect: (a) => nx.socket(a), readyEvent: /^wss:/.test(u) ? 'secureConnect' : 'connect' });
         sock = s;
         s.on('open', () => { s.send(JSON.stringify({ type: 'auth', token: account.token })); });
-        s.on('message', (t) => { if (sock === s) onText(t); });
-        s.on('binary', (b) => { if (sock === s) onBinary(b); });
+        s.on('message', (t) => { if (sock === s) { lastRx = Date.now(); onText(t); } });
+        s.on('binary', (b) => { if (sock === s) { lastRx = Date.now(); onBinary(b); } });
         s.on('error', (e) => { if (sock === s) { st.error = e.message; log('Sendspin: ' + e.message); } });
         s.on('close', (code, why) => {
             if (sock !== s) return;
             sock = null;
             clearInterval(timeTimer);
             if (stopped) return;
-            st.reconnects++;
-            const wait = Math.min(30000, 2000 * Math.min(st.reconnects, 10));
+            st.reconnects++; fails++;
+            const wait = fastRetry ? 500 : Math.min(30000, 2000 * Math.min(fails, 10));
+            fastRetry = false;
             log('Sendspin: closed (' + code + (why ? ' ' + why : '') + '), again in ' + wait / 1000 + ' s; ' + Math.round(st.ahead / 1000) + ' s of sound still queued');
             setConn('reconnecting', why || String(code));
             if (code === 4001) { ev.emit('signed-out', 'the server refused the sign-in: ' + (why || '')); return; }
             retry = setTimeout(connect, wait);
         });
         clearInterval(timeTimer);
-        timeTimer = setInterval(() => { if (sock && st.conn === 'connected') timeTick(); }, 5000);
+        timeTimer = setInterval(() => {
+            if (!sock || st.conn !== 'connected') return;
+            if (Date.now() - lastRx > SILENT_MS) return kick('no answer from the server for ' + Math.round((Date.now() - lastRx) / 1000) + ' s');
+            timeTick();
+        }, 5000);
+    }
+    /** the connection again, now: the one there is closed (its close starts the next one, in 0.5 s) */
+    function kick(why) {
+        if (stopped || !account) return;
+        log('Sendspin: ' + why + ': connecting again');
+        if (!sock) { clearTimeout(retry); retry = setTimeout(connect, 200); return; }
+        fastRetry = true;
+        try { sock.close(); } catch (e) { /* gone */ }
+    }
+    /** the wall clock jumped ahead: the head unit slept (its monotonic clock stops meanwhile, this one does not) */
+    function beat() {
+        const n = Date.now();
+        if (lastBeat && n - lastBeat > SLEPT_MS && st.conn !== 'signed-out') kick('the head unit slept ' + Math.round((n - lastBeat) / 1000) + ' s');
+        lastBeat = n;
+    }
+    function waitConnected(ms) {
+        const until = Date.now() + ms;
+        return new Promise((res) => { const t = setInterval(() => { if (st.conn === 'connected' || Date.now() > until) { clearInterval(t); res(st.conn === 'connected'); } }, 250); });
+    }
+    /**
+     * A command the server refused with HTTP 5xx: most likely the player is gone from it (a dead connection not
+     * noticed yet), so the connection is made again and the command sent once more
+     */
+    async function again(fn) {
+        try { return await fn(); } catch (e) {
+            if (!/HTTP 5\d\d|not available|unavailable/i.test(e && e.message || '')) throw e;
+            log('Music Assistant: ' + e.message + ': the player connects again, then the command again');
+            kick('a command failed');
+            await new Promise((r) => setTimeout(r, 300));
+            if (!(await waitConnected(15000))) throw e;
+            await new Promise((r) => setTimeout(r, 2000));   // the server makes the player again
+            return fn();
+        }
     }
 
     function run(acc) {
@@ -517,11 +564,13 @@ function createMa(o) {
         st.reconnects = 0; st.playerId = null; rowsCache = null;
         clearInterval(pumpTimer);
         pumpTimer = setInterval(pump, 20);
+        clearInterval(beatTimer); lastBeat = Date.now(); fails = 0;
+        beatTimer = setInterval(beat, 1000);
         connect();
     }
     function stop() {
         stopped = true;
-        clearTimeout(retry); clearInterval(timeTimer); clearInterval(pumpTimer);
+        clearTimeout(retry); clearInterval(timeTimer); clearInterval(pumpTimer); clearInterval(beatTimer);
         resetQueue();
         if (sock) { const s = sock; sock = null; try { s.close(); } catch (e) { /* gone */ } }
         sink.clear();
