@@ -97,6 +97,8 @@ function fakeMa(opts) {
             case 'players/all': return json(200, S.clientId ? [{ player_id: 'upTEST', provider: 'universal_player', available: true, output_protocols: [{ output_protocol_id: S.clientId }] }] : []);
             case 'player_queues/play_media': setTimeout(stream, 50); return json(200, null);
             case 'player_queues/next': return json(200, null);
+            // the server without the player (a dead connection it dropped): HTTP 500, as Music Assistant answered in the car
+            case 'player_queues/play_pause': if (S.failPP > 0) { S.failPP--; res.writeHead(500); return res.end('Internal server error'); } return json(200, null);
             case 'player_queues/autoplay': if (S.oldServer) return json(500, { error: 'no such command' }); S.autoplay = !!a.autoplay_enabled; return json(200, null);
             case 'player_queues/crossfade': S.crossfade = !!a.crossfade_enabled; return json(200, null);
             case 'player_queues/dont_stop_the_music': S.autoplay = !!a.dont_stop_the_music_enabled; return json(200, null);
@@ -119,6 +121,7 @@ function fakeMa(opts) {
             buf = r.rest;
             r.frames.forEach((f) => {
                 if (f.opcode !== 1) return;
+                if (S.mute) return;   // the server gone silent: the socket stays open, nothing comes back
                 const m = JSON.parse(f.payload.toString('utf8'));
                 if (!authed) {
                     if (m.type === 'auth' && (m.token === 'long-token' || m.token === 'pasted-token')) { authed = true; sendText({ type: 'auth_ok' }); }
@@ -126,7 +129,7 @@ function fakeMa(opts) {
                     return;
                 }
                 if (m.type === 'client/hello') {
-                    S.hello = m.payload; S.clientId = m.payload.client_id;
+                    S.hello = m.payload; S.clientId = m.payload.client_id; S.hellos = (S.hellos || 0) + 1;
                     sendText({ type: 'server/hello', payload: { server_id: 'srv', name: 'Music Assistant (test)', version: 1, active_roles: m.payload.supported_roles } });
                 } else if (m.type === 'client/time') {
                     const r2 = serverUs();
@@ -318,6 +321,47 @@ test('play from a server with the newer 13-byte audio header: found, the tone cl
     const share = toneShare(wav);
     assert.ok(share > 0.9, 'a clean tone: ' + share.toFixed(3));
     try { fs.rmdirSync(shm); } catch (e) { /* the wav */ }
+});
+
+test('a dead connection (the head unit slept): made again when the server goes silent; a command the server refuses with HTTP 500 is sent again after it', async () => {
+    const ma = await fakeMa();
+    const { svc } = setup();
+    svc.start();
+    await signIn(svc, ma, { token: 'pasted-token' });
+    await until(() => svc.status().client.conn === 'connected' && ma.hellos === 1, 5000, 'connected');
+    // the server goes silent (the socket stays open): within 15 s and a time sync, a new connection
+    ma.mute = true;
+    await wait(1000);
+    const old = ma.sock;
+    setTimeout(() => { ma.mute = false; }, 16000);
+    await until(() => ma.hellos === 2, 30000, 'connected again after the silence');
+    assert.ok(ma.sock && ma.sock !== old, 'a new socket');
+    assert.ok((svc.status().log || []).some((l) => /no answer from the server/.test(l)), JSON.stringify(svc.status().log));
+    await until(() => svc.status().client.conn === 'connected', 5000, 'connected');
+    // play / pause refused once (the player gone from the server): connected again, then sent again, and it works
+    ma.failPP = 1; ma.calls.length = 0;
+    const r = await svc.command({ cmd: 'req', what: 'control', args: { cmd: 'play_pause' } });
+    assert.ok(r.ok, r.error);
+    assert.strictEqual(ma.calls.filter((x) => /^player_queues\/play_pause/.test(x)).length, 2, ma.calls.join('\n'));
+    assert.strictEqual(ma.hellos, 3, 'a new connection between the two');
+    svc.stop(); ma.close();
+});
+
+test('the head unit slept (the client paused 8 s, as a suspend): connected again at once when it wakes', async () => {
+    const cp = require('child_process');
+    const ma = await fakeMa();
+    const { svc } = setup();
+    svc.start();
+    await signIn(svc, ma, { token: 'pasted-token' });
+    await until(() => svc.status().client.conn === 'connected' && ma.hellos === 1, 5000, 'connected');
+    await wait(1500);
+    const pid = cp.execSync('pgrep -P ' + process.pid + ' -f client.js | head -1').toString().trim();
+    cp.execSync('kill -STOP ' + pid); await wait(8000); cp.execSync('kill -CONT ' + pid);
+    const t0 = Date.now();
+    await until(() => ma.hellos === 2, 5000, 'connected again after the sleep');
+    assert.ok(Date.now() - t0 < 3000, 'at once: ' + (Date.now() - t0) + ' ms');
+    assert.ok((svc.status().log || []).some((l) => /slept (8|9|10) s/.test(l)), JSON.stringify(svc.status().log));
+    svc.stop(); ma.close();
 });
 
 test('sign out: this car\'s token revoked on the server, the others kept', async () => {
