@@ -113,7 +113,7 @@ function steps(s, x) {
         detail: sm.chunks + ' chunks in ' + Math.round((Date.now() - sm.since) / 1000) + ' s, ' + sm.handed + ' to the player, ' + sm.late + ' late, ' + sm.overlaps + ' over others, ' + sm.gaps + ' gaps' + (c.audioHeader ? ', ' + c.audioHeader + '-byte headers' : '') });
     const ca = x.carAudio || {};
     rows.push({ label: 'Speakers', state: ca.taken ? 'bad' : ca.error ? 'bad' : ca.connected ? 'ok' : 'off',
-        detail: ca.yieldedTo ? 'given to ' + ca.yieldedTo + ' (it started after the music): press play to take them back' : ca.taken ? 'in use by another app (myAirPlay, TVH Player, Emby): stop it there' : ca.error ? ca.error : ca.connected ? 'on the main speakers (source 287)' : 'connected while music plays' });
+        detail: ca.lost ? 'the car switched to another source: press play to take them back' : ca.yieldedTo ? 'given to ' + ca.yieldedTo + ' (it started after the music): press play to take them back' : ca.taken ? 'in use by another app (myAirPlay, TVH Player, Emby): stop it there' : ca.error ? ca.error : ca.connected ? 'on the main speakers (source 287)' : 'connected while music plays' });
     const vo = x.volume;
     if (vo) rows.push({ label: 'Volume', state: vo.error ? 'bad' : vo.changes ? 'ok' : vo.ready ? 'wait' : 'off',
         detail: vo.error ? vo.error : (vo.volume != null ? vo.volume + ' of ' + vo.max + (vo.muted ? ', muted' : '') : 'not known yet') +
@@ -183,6 +183,7 @@ mgu.run({
         /* ---------- playing and controlling ---------- */
         async function play(item, startItem) {
             if (!item || !item.uri) return;
+            carAudio.resume();
             busy = 'Playing ' + ascii(item.name).slice(0, 40) + '...'; render();
             try {
                 await req('play', { uri: item.uri, startItem: startItem ? startItem.uri : undefined }, 45000);
@@ -192,6 +193,7 @@ mgu.run({
             render();
         }
         async function control(cmd, arg, label) {
+            if (['play_pause', 'play', 'resume', 'next', 'previous', 'play_index'].indexOf(cmd) >= 0) carAudio.resume();
             try { await req('control', { cmd, arg }); setTimeout(poll, 400); }
             catch (e) { say((label || cmd) + ': ' + e.message, true); }
         }
@@ -264,6 +266,15 @@ mgu.run({
                 req('control', { cmd: 'pause' }).catch(() => {});
                 ask('player-stop', {}, 5000);
                 say('Paused: ' + by + ' plays on the speakers now');
+            },
+            // the driver chose another source in the car (the radio...): paused, and not taken back until play here
+            onLost: () => {
+                log.info('music: the car switched to another source: pausing');
+                soundUntil = 0;
+                req('control', { cmd: 'pause' }).catch(() => {});
+                ask('player-stop', {}, 5000);
+                try { card.update(); } catch (e) { /* not yet */ }
+                say('Paused: the car switched to another source (press play to come back)');
             } });
         let soundUntil = 0;
         function sync() {
@@ -278,7 +289,9 @@ mgu.run({
             cover: (id) => { const e = covers.artImage(Number(String(id).split('|')[0])); return e ? { w: e.w, h: e.h, data: e.data } : null; },
             info: () => {
                 const c = client(), m = c.meta;
-                if (!musicOn() || !m || !m.title) return null;
+                // only while our sound is on the speakers: not over the car's own source (the radio) when the
+                // music is still reported playing (a stream that stopped, a source chosen in the car)
+                if (!musicOn() || !m || !m.title || !carAudio.state().connected) return null;
                 const pos = position(c);
                 return { id: (st.artVer || 0) + '|' + m.title, name: m.title, sub: m.artist || m.album || '', pos: pos != null ? pos / 1000 : null,
                     dur: m.durationMs ? m.durationMs / 1000 : null, paused: c.playback === 'paused', loading: false, vol: volume.popup() };
