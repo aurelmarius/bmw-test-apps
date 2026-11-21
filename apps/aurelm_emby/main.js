@@ -38,7 +38,7 @@ const W = 1600, H = 520;
 const SOCK = process.env.EMBY_SOCK || '/run/aurelm-emby.sock';
 // the service version this app is built with: an older one still running is asked once to end, and the
 // socket starts the new one at the next request
-const SERVICE_VERSION = '0.3.12';
+const SERVICE_VERSION = '0.3.14';
 // what plays (the service's playback state): the picture and the speakers are wanted
 const ACTIVE = ['loading', 'playing', 'paused', 'buffering'];
 // a film is on: playing, paused, starting; not one parked by Stop on the iDrive (its player closed)
@@ -158,7 +158,7 @@ function playRows(s, rows) {
         if (ca.lost) snd = { state: 'wait', detail: n + '; the car switched to another source: play the film to take the speakers back' };
         else if (ca.taken) snd = { state: 'bad', detail: n + '; the speakers are in use by AirPlay Test: stop it there' };
         else if (ca.error) snd = { state: 'bad', detail: n + '; route: ' + ca.error };
-        else snd = { state: ca.connected ? 'ok' : 'wait', detail: n + (ca.connected ? ', on the speakers' : ', connecting the speakers') + (pb.muted ? ', muted' : pb.volume < 100 ? ', volume ' + pb.volume + '%' : '') };
+        else snd = { state: ca.connected ? 'ok' : 'wait', detail: n + (ca.connected ? ', on the speakers' : ', connecting the speakers') + (pb.muted ? ', muted' : pb.volume < 100 && s.prefs && s.prefs.phoneVolume ? ', volume ' + pb.volume + '% (the phone\'s)' : '') };
     }
     rows.push(Object.assign({ label: 'Sound' }, snd));
     // the film on the instrument cluster (cluster_card.js, through cluster-render)
@@ -182,7 +182,8 @@ mgu.run({
         /** the quality settings to the service (it keeps them for a cast while the app is closed) */
         function prefsNow() {
             const q = Number(ctx.settings.get('quality'));
-            return { maxBitrate: ([8, 4, 2, 1].indexOf(q) >= 0 ? q : 8) * 1000000, adaptive: ctx.settings.get('adaptive') !== false };
+            return { maxBitrate: ([8, 4, 2, 1].indexOf(q) >= 0 ? q : 8) * 1000000, adaptive: ctx.settings.get('adaptive') !== false,
+                phoneVolume: ctx.settings.get('phoneVolume') === true };
         }
         async function poll() {
             if (polling) return;
@@ -190,7 +191,7 @@ mgu.run({
             try {
                 st = await ask('status');
                 const want = prefsNow(), have = st && st.prefs;
-                if (st && st.version && (!have || have.maxBitrate !== want.maxBitrate || have.adaptive !== want.adaptive)) {
+                if (st && st.version && (!have || have.maxBitrate !== want.maxBitrate || have.adaptive !== want.adaptive || !!have.phoneVolume !== want.phoneVolume)) {
                     const r = await ask('prefs', want);
                     if (r) st = r;
                 }

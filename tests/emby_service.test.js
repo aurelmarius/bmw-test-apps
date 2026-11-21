@@ -287,7 +287,7 @@ test('end to end: sign in from the page, cast target, Play, Playstate, sign out'
     const { svc, sock, server } = await makeService(tmp, port);
     try {
         let s = await ask(sock, 'status');
-        assert.strictEqual(s.version, '0.3.13');
+        assert.strictEqual(s.version, '0.3.14');
         assert.strictEqual(s.account, null);
         assert.strictEqual(s.uplink.online, true);
         s = await ask(sock, 'signin-open');
@@ -424,10 +424,19 @@ test('playback: cast, pause, seek, volume, stop; reported to the server', async 
         s = await statusUntil(svc.sock, (x) => x.playback.paused && x.playback.state === 'paused', 3000, 'paused');
         srv.send({ MessageType: 'Playstate', Data: { Command: 'Unpause' } });
         await until(() => reports('/Sessions/Playing/Progress').some((r) => r.body.EventName === 'unpause'), 5000, 'unpause reported');
-        // volume
+        // the phone's volume: reported back, but the sound stays at 100% (the car's volume is the one); the setting
+        // "Volume from the phone too" applies it; mute from the phone always
         srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'SetVolume', Arguments: { Volume: '40' } } });
-        await until(() => /"ctl":"volume 0.4"/.test(fs.readFileSync(plog, 'utf8')), 3000, 'volume to the player');
         await until(() => reports('/Sessions/Playing/Progress').some((r) => r.body.EventName === 'volumechange' && r.body.VolumeLevel === 40), 3000, 'volume reported');
+        await wait(300);
+        assert.ok(!/"ctl":"volume 0.4"/.test(fs.readFileSync(plog, 'utf8')), 'the phone\'s 40% not applied');
+        assert.ok(/"ctl":"volume 1"/.test(fs.readFileSync(plog, 'utf8')), 'the sound at 100%');
+        await ask(svc.sock, 'prefs', { maxBitrate: 8000000, adaptive: true, phoneVolume: true });
+        await until(() => /"ctl":"volume 0.4"/.test(fs.readFileSync(plog, 'utf8')), 3000, 'the phone\'s volume applied with the setting');
+        await ask(svc.sock, 'prefs', { maxBitrate: 8000000, adaptive: true, phoneVolume: false });
+        srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'Mute' } });
+        await until(() => /"ctl":"volume 0"/.test(fs.readFileSync(plog, 'utf8')), 3000, 'mute from the phone');
+        srv.send({ MessageType: 'GeneralCommand', Data: { Name: 'Unmute' } });
         // seek to 30 s: the old transcode stopped, a new stream from 30 s, a new player
         const firstPid = (await ask(svc.sock, 'status')).player.pid;
         srv.send({ MessageType: 'Playstate', Data: { Command: 'Seek', SeekPositionTicks: 300000000 } });
@@ -613,14 +622,14 @@ test('quality: the setting caps what is asked; the stream running dry goes one s
         assert.strictEqual(srv.seen.pbinfo.length, 2);
         // the setting: at most 2 Mbit/s, fixed: the film goes on at 2 now
         s = await ask(svc.sock, 'prefs', { maxBitrate: 2000000, adaptive: false });
-        assert.deepStrictEqual(s.prefs, { maxBitrate: 2000000, adaptive: false });
+        assert.deepStrictEqual(s.prefs, { maxBitrate: 2000000, adaptive: false, phoneVolume: false });
         await until(() => srv.seen.pbinfo.length === 3, 5000, 'the setting applied');
         assert.deepStrictEqual(rate(2), ['2000000', '2000000', '2000000']);
         // fixed: running dry changes nothing
         await wait(2500);
         assert.strictEqual(srv.seen.pbinfo.length, 3);
         // kept for the next film and the next start of the service
-        assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(svc.tmp, 'state', 'prefs.json'), 'utf8')), { maxBitrate: 2000000, adaptive: false });
+        assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(svc.tmp, 'state', 'prefs.json'), 'utf8')), { maxBitrate: 2000000, adaptive: false, phoneVolume: false });
         srv.send({ MessageType: 'Play', Data: { ItemIds: ['film2'], PlayCommand: 'PlayNow' } });
         await until(() => srv.seen.pbinfo.length === 4, 5000, 'the next film');
         assert.deepStrictEqual(rate(3), ['2000000', '2000000', '2000000']);
