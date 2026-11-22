@@ -48,7 +48,7 @@
     {
       "id": "aurelm-music",
       "kind": "tool",
-      "version": "0.1.10",
+      "version": "0.1.11",
       "title": "Music Assistant service",
       "description": "For the app Music Assistant: the car as a Music Assistant player. Signs in once from the phone (a page on the car Wi-Fi, opened from the app's QR code) and keeps only a long-lived token. Browses the library and the recommendations over the server's API, and receives the music over Sendspin (Music Assistant's own protocol, through its authenticated /sendspin): Opus decoded by ma-player (libopus) into SmartXbar's CarLife input. 30 s of music are buffered (a gap in the mobile network goes unheard). Its internet goes through mgu-uplink, as uid 13106 only; the player runs as nobody.",
       "author": "aurelmarius",
@@ -56,10 +56,10 @@
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm-music@0.1.10.tgz",
-        "size": 428672,
-        "sha256": "616aa01c57b20661ca745e0b691d1279b9761c66e6a82c90d9fd4baaf55f54a0",
-        "url": "packages/aurelm-music@0.1.10.tgz"
+        "name": "aurelm-music@0.1.11.tgz",
+        "size": 428728,
+        "sha256": "e3dab0743e06f820167b24777aaa5d3681d37a248f511b1dd87c1e7c60c5ddb9",
+        "url": "packages/aurelm-music@0.1.11.tgz"
       },
       "requires": {
         "mgu-deploy": "0.7.0",
@@ -114,23 +114,23 @@
     {
       "id": "aurelm_music",
       "kind": "app",
-      "version": "0.1.19",
+      "version": "0.1.20",
       "title": "Music Assistant",
       "description": "Your Music Assistant server in the car: the home page's recommendations with their covers, the library (playlists, albums, artists, radio, tracks), search, and what plays with its cover, its progress and what comes next. The music comes over Sendspin and plays on the car's speakers; skip on the steering wheel goes to the next or the previous track; the track shows on the instrument cluster. Sign in once from the phone (QR code). Needs the Music Assistant service.",
       "mguHmi": [
         "ID7"
       ],
       "artifact": {
-        "name": "aurelm_music@0.1.19.tgz",
-        "size": 598109,
-        "sha256": "94d928d197cfa814a29369665238847916367866b2a260be836a7e308bb5320d",
-        "url": "packages/aurelm_music@0.1.19.tgz"
+        "name": "aurelm_music@0.1.20.tgz",
+        "size": 598147,
+        "sha256": "12679964c71286ee0a4c615cb99fbcec752906dc2d66f00201b8a2b1ad642158",
+        "url": "packages/aurelm_music@0.1.20.tgz"
       },
       "uninstallable": true,
       "icon": "aurelm_music.png",
       "iconSha256": "89e420b4540245f1f70a78f46443e755c85af4070e52ee0e5cdd5fab697a1227",
       "requires": {
-        "aurelm-music": "0.1.10"
+        "aurelm-music": "0.1.11"
       }
     }
   ]
