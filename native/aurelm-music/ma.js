@@ -284,9 +284,10 @@ function createMa(o) {
                     { codec: 'pcm', channels: 2, sample_rate: 48000, bit_depth: 16 },
                     { codec: 'pcm', channels: 2, sample_rate: 44100, bit_depth: 16 },
                 ],
-                buffer_capacity: 4 * 1024 * 1024, supported_commands: ['volume', 'mute'],
+                // the commands and the artwork channels are in client/state (the spec moved them there; in the hello
+                // they made the server log this client as non-compliant)
+                buffer_capacity: 4 * 1024 * 1024,
             },
-            'artwork@v1_support': { channels: [{ source: 'album', format: 'png', width: 400, height: 400 }] },
             unpaired_access: { enabled: false },
         });
     }
@@ -299,8 +300,9 @@ function createMa(o) {
      */
     const MIN_BUFFER_MS = 5000, LEAD_TIME_MS = 2000;
     function sendState() {
-        sendJson('client/state', { available: true, player: { state: 'synchronized', volume: st.volume, muted: st.muted, output_delay_ms: 0,
-            required_lead_time_ms: LEAD_TIME_MS, min_buffer_ms: MIN_BUFFER_MS, supported_commands: ['volume', 'mute'] } });
+        sendJson('client/state', { available: true, player: { volume: st.volume, muted: st.muted, output_delay_ms: 0,
+            required_lead_time_ms: LEAD_TIME_MS, min_buffer_ms: MIN_BUFFER_MS, supported_commands: ['volume', 'mute'] },
+            artwork: { channels: [{ source: 'album', format: 'png', width: 400, height: 400 }] } });
     }
     function timeTick() { sendJson('client/time', { client_transmitted: nowUs() }); }
     function onTime(p) {
