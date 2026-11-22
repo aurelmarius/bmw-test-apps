@@ -213,7 +213,12 @@ test('sign in with user and password: a long-lived token kept, a Sendspin player
     assert.strictEqual(ma.state.player.min_buffer_ms, 5000);
     assert.strictEqual(ma.state.player.required_lead_time_ms, 2000);
     assert.deepStrictEqual(ma.state.player.supported_commands, ['volume', 'mute']);
-    assert.strictEqual(ma.state.player.state, 'synchronized');
+    // the protocol as the spec has it now: no legacy player.state; the commands and the artwork channels in
+    // client/state only, not in the hello (else the server logs a non-compliant client)
+    assert.strictEqual(ma.state.player.state, undefined);
+    assert.deepStrictEqual(ma.state.artwork, { channels: [{ source: 'album', format: 'png', width: 400, height: 400 }] });
+    assert.strictEqual(ma.hello['artwork@v1_support'], undefined);
+    assert.strictEqual(ma.hello['player@v1_support'].supported_commands, undefined);
     await until(() => svc.status().client.conn === 'connected', 3000, 'connected in the status');
     assert.strictEqual(svc.status().account.userName, 'Aurel Sandu');
     svc.stop(); ma.close();
