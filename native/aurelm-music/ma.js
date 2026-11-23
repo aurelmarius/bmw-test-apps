@@ -447,12 +447,46 @@ function createMa(o) {
         }
         if (kind >= 8 && kind <= 11) {
             if (kind !== 8) return;   // channel 0: the album's
-            const png = b.slice(9);
-            art = png.length > 8 ? Buffer.from(png) : null;
-            st.artVer++;
-            o.onArt && o.onArt(art, st.artVer);
-            emitStatus();
+            return artwork(b);
         }
+    }
+    /*
+     * The cover, as the server sends it to a client that declares its artwork channels in client/state (0.1.11 on):
+     * an image is a transfer, an announce (type, flags 0x02, int64 BE the server time to show it at, uint32 BE its
+     * size; size 0 clears) and then its parts (type, flags 0, data) until the size is reached; a cancel (type,
+     * flags 0x01) drops the one under way. An image can be announced up to 20 s ahead: shown at its time. A message
+     * in the older framing (type, int64 time, the image: what a client declaring them in the hello gets) still works.
+     */
+    let artXfer = null, artTimer = null;
+    function showArt(png, ts) {
+        clearTimeout(artTimer);
+        const apply = () => { art = png; st.artVer++; o.onArt && o.onArt(art, st.artVer); emitStatus(); };
+        const wait = ts && clockOff !== null ? Math.round((ts - clockOff - nowUs()) / 1000) : 0;
+        if (wait > 20 && wait < 25000) artTimer = setTimeout(apply, wait); else apply();
+    }
+    function artwork(b) {
+        const flags = b[1];
+        if (b.length === 14 && flags === 0x02) {
+            const ts = readTs(b.slice(1)), size = b.readUInt32BE(10);
+            if (size === 0) { artXfer = null; return showArt(null, ts); }
+            if (size > 8 * 1024 * 1024) { artXfer = null; return undefined; }
+            artXfer = { ts, size, parts: [], got: 0 };
+            return undefined;
+        }
+        if (b.length === 2 && flags === 0x01) { artXfer = null; return undefined; }
+        if (flags === 0x00 && artXfer) {
+            const d = b.slice(2);
+            artXfer.parts.push(d); artXfer.got += d.length;
+            if (artXfer.got >= artXfer.size) {
+                const x = artXfer; artXfer = null;
+                const png = Buffer.concat(x.parts).slice(0, x.size);
+                return showArt(png.length > 8 ? png : null, x.ts);
+            }
+            return undefined;
+        }
+        // the older framing: a 9-byte header, then the image
+        const png = b.slice(9);
+        return showArt(png.length > 8 ? Buffer.from(png) : null, 0);
     }
     function audioChunk(b) {
         {
