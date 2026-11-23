@@ -57,7 +57,16 @@ function fakeMa(opts) {
         sendText({ type: 'group/update', payload: { playback_state: 'playing', group_name: 'BMW iDrive' } });
         sendText({ type: 'server/state', payload: { metadata: { title: 'Careless Whisper', artist: 'George Michael', album: 'Make It Big', year: 1984,
             progress: { track_progress: 0, track_duration: 300000, playback_speed: 1000 } }, controller: { supported_commands: ['play', 'pause', 'next', 'previous'], volume: 100, muted: false } } });
-        const a = Buffer.alloc(9); a[0] = 8; sendBin(Buffer.concat([a, COVER]));
+        if (opts && opts.legacyArt) { const a = Buffer.alloc(9); a[0] = 8; sendBin(Buffer.concat([a, COVER])); }
+        else {
+            // as Music Assistant sends it to a client declaring its artwork in client/state: a transfer, the announce
+            // (type, flags 0x02, int64 time, uint32 size) then the parts (type, flags 0, data), here 3 of them
+            const an = Buffer.alloc(14); an[0] = 8; an[1] = 0x02;
+            const ts = serverUs(); an.writeInt32BE(Math.floor(ts / 4294967296), 2); an.writeUInt32BE(ts % 4294967296, 6); an.writeUInt32BE(COVER.length, 10);
+            sendBin(an);
+            const n = Math.ceil(COVER.length / 3);
+            for (let i = 0; i < COVER.length; i += n) sendBin(Buffer.concat([Buffer.from([8, 0]), COVER.slice(i, i + n)]));
+        }
         // all of it at once (as Music Assistant sends 30 s ahead), each packet's time 20 ms after the last
         const t0 = serverUs() + 300000;
         packets.forEach((p, i) => {
@@ -312,7 +321,7 @@ test('play: the sound at the server\'s times into the player, the metadata and t
 
 test('play from a server with the newer 13-byte audio header: found, the tone clean', async () => {
     if (!fs.existsSync(PLAYER)) { console.log('     (skipped: build native/ma-player first)'); return; }
-    const ma = await fakeMa({ hdr: 13 });
+    const ma = await fakeMa({ hdr: 13, legacyArt: true });
     const { svc, wav, shm } = setup();
     svc.start();
     await signIn(svc, ma, { token: 'pasted-token' });
@@ -320,6 +329,9 @@ test('play from a server with the newer 13-byte audio header: found, the tone cl
     assert.ok((await svc.command({ cmd: 'req', what: 'play', args: { uri: 'library://album/230' } })).ok);
     await until(() => svc.status().player.played >= 144000 - 2000, 9000, 'all 3 s played');
     assert.strictEqual(svc.status().client.audioHeader, 13);
+    // the cover in the older framing (one message, a 9-byte header) still read
+    const art = await svc.command({ cmd: 'art' });
+    assert.ok(art.ver >= 1 && Buffer.from(art.png, 'base64').equals(COVER), 'the cover in the older framing');
     svc.stop();
     ma.close();
     await wait(300);
